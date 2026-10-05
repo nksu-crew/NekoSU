@@ -1,10 +1,13 @@
 cmake_minimum_required(VERSION 3.10.0)
 project("jni")
 
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_library(jni SHARED ctl.c jni.c)
+add_library(jni SHARED jni.cc)
+
+target_compile_options(jni PRIVATE -O3)
 
 target_compile_options(jni PRIVATE -flto=thin)
 target_link_options(jni PRIVATE -flto=thin)

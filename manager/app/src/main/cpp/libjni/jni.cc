@@ -1,0 +1,576 @@
+#include <android/log.h>
+#include <ctype.h>
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <jni.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/eventfd.h>
+#include <sys/ioctl.h>
+#include <sys/poll.h>
+#include <sys/prctl.h>
+#include <sys/utsname.h>
+#include <unistd.h>
+
+#include "ioctl.h"
+
+#define LOG_TAG "ncore"
+#define LOG_ERR(...)                                                           \
+  __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define LOG_INFO(...)                                                          \
+  __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOG_DEBUG(...)                                                         \
+  __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
+
+enum Opcode { OP_AUTHENTICATE = 201, OP_GET_ROOT = 202, OP_IOCTL = 203 };
+
+class JniUtfString {
+public:
+  JniUtfString(JNIEnv *env, jstring jstr)
+      : env_(env), jstr_(jstr), cstr_(nullptr) {
+    if (jstr_ != nullptr) {
+      cstr_ = env_->GetStringUTFChars(jstr_, nullptr);
+    }
+  }
+  ~JniUtfString() {
+    if (cstr_ != nullptr) {
+      env_->ReleaseStringUTFChars(jstr_, cstr_);
+    }
+  }
+  JniUtfString(const JniUtfString &) = delete;
+  JniUtfString &operator=(const JniUtfString &) = delete;
+
+  const char *c_str() const { return cstr_; }
+  const char *c_str_or_empty() const { return cstr_ ? cstr_ : ""; }
+  explicit operator bool() const { return cstr_ != nullptr; }
+
+private:
+  JNIEnv *env_;
+  jstring jstr_;
+  const char *cstr_;
+};
+
+namespace jni {
+namespace {
+static void copy_to_char64(char dst[64], const char *s) {
+  if (s) {
+    strncpy(dst, s, 63);
+    dst[63] = '\0';
+  } else {
+    memset(dst, 0, 64);
+  }
+}
+
+#define FMAC_MAX_DATA FMAC_DATA_SELRULE
+
+static int ioc_call(int fd, unsigned int flag, void *data, size_t size) {
+  union {
+    struct fmac_ioc msg;
+    uint8_t raw[sizeof(struct fmac_ioc) + FMAC_MAX_DATA];
+  } u;
+  int ret;
+
+  if (size > FMAC_MAX_DATA) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  u.msg.flag = flag;
+  u.msg.size = (uint32_t)size;
+  if (size)
+    memcpy(u.msg.data, data, size);
+
+  ret = ioctl(fd, IOC_CMD, &u);
+  if (ret == 0 && size)
+    memcpy(data, u.msg.data, size);
+
+  return ret;
+}
+
+static int scan_fd_by_link(const char *target) {
+  DIR *dir;
+  struct dirent *ent;
+  char path[64];
+  char link[256];
+  int fdnum;
+
+  dir = opendir("/proc/self/fd");
+  if (!dir)
+    return -1;
+
+  errno = 0;
+  while ((ent = readdir(dir)) != NULL) {
+    if (ent->d_name[0] == '.')
+      continue;
+
+    fdnum = atoi(ent->d_name);
+    snprintf(path, sizeof(path), "/proc/self/fd/%s", ent->d_name);
+
+    ssize_t len = readlink(path, link, sizeof(link) - 1);
+    if (len < 0)
+      continue;
+    link[len] = '\0';
+
+    if (strstr(link, target)) {
+      closedir(dir);
+      return fdnum;
+    }
+  }
+
+  closedir(dir);
+  return -1;
+}
+
+int Ctl(enum Opcode code) {
+  switch (code) {
+  case OP_AUTHENTICATE:
+  case OP_GET_ROOT:
+  case OP_IOCTL:
+    return prctl((unsigned int)code, 0, 0, 0, 0);
+  default:
+    errno = EINVAL;
+    return -1;
+  }
+}
+
+int SetProfile(int fd, int uid, uint64_t caps, const char *domain, int ns) {
+  uint8_t data[FMAC_DATA_PROFILE];
+  uint32_t u = (uint32_t)uid;
+
+  memcpy(data + FMAC_OFF_UID, &u, sizeof(u));
+  memcpy(data + FMAC_OFF_CAPS, &caps, sizeof(caps));
+  copy_to_char64((char *)data + FMAC_OFF_DOMAIN, domain);
+  memcpy(data + FMAC_OFF_NS, &ns, sizeof(ns));
+
+  return ioc_call(fd, IOC_SET_PROFILE, data, sizeof(data));
+}
+
+int AddUid(int fd, int uid) {
+  if (uid < 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  uint32_t val = (uint32_t)uid;
+  return ioc_call(fd, IOC_ADD_UID, &val, sizeof(val));
+}
+
+int DelUid(int fd, int uid) {
+  if (uid < 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  uint32_t val = (uint32_t)uid;
+  return ioc_call(fd, IOC_DEL_UID, &val, sizeof(val));
+}
+
+int HasUid(int fd, int uid, int *has) {
+  if (uid < 0 || !has) {
+    errno = EINVAL;
+    return -1;
+  }
+  uint32_t val = (uint32_t)uid;
+  if (ioc_call(fd, IOC_HAS_UID, &val, sizeof(val)) < 0)
+    return -1;
+  *has = (val != 0);
+  return 0;
+}
+
+int SetCap(int fd, int uid, uint64_t caps) {
+  uint8_t data[FMAC_DATA_CAP];
+  uint32_t u = (uint32_t)uid;
+
+  memcpy(data + FMAC_OFF_UID, &u, sizeof(u));
+  memcpy(data + FMAC_OFF_CAPS, &caps, sizeof(caps));
+
+  return ioc_call(fd, IOC_SET_CAP, data, sizeof(data));
+}
+
+int GetCap(int fd, int uid, uint64_t *caps) {
+  uint8_t data[FMAC_DATA_CAP];
+  uint32_t u = (uint32_t)uid;
+
+  if (!caps) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  memcpy(data + FMAC_OFF_UID, &u, sizeof(u));
+  if (ioc_call(fd, IOC_GET_CAP, data, sizeof(data)) < 0)
+    return -1;
+  memcpy(caps, data + FMAC_OFF_CAPS, sizeof(*caps));
+  return 0;
+}
+
+int DelCap(int fd, int uid) {
+  uint8_t data[FMAC_DATA_CAP];
+  uint32_t u = (uint32_t)uid;
+
+  memcpy(data + FMAC_OFF_UID, &u, sizeof(u));
+  memset(data + FMAC_OFF_CAPS, 0, sizeof(uint64_t));
+
+  return ioc_call(fd, IOC_DEL_CAP, data, sizeof(data));
+}
+
+int AddSelinuxRule(int fd, const char *src, const char *tgt, const char *cls,
+                   const char *perm, int effect, int invert) {
+  uint8_t data[FMAC_DATA_SELRULE];
+  int inv = invert ? 1 : 0;
+
+  memset(data, 0, sizeof(data));
+  copy_to_char64((char *)data + FMAC_OFF_UID, src);
+  copy_to_char64((char *)data + FMAC_OFF_TGT, tgt);
+  copy_to_char64((char *)data + FMAC_OFF_CLS, cls);
+  copy_to_char64((char *)data + FMAC_OFF_PERM, perm);
+  memcpy(data + FMAC_OFF_EFFECT, &effect, sizeof(effect));
+  memcpy(data + FMAC_OFF_INVERT, &inv, sizeof(inv));
+
+  return ioc_call(fd, IOC_SEL_ADD_RULE, data, sizeof(data));
+}
+
+int ScanDriverFd(void) { return scan_fd_by_link("[fmac_shm]"); }
+
+int ScanCtlFd(void) { return scan_fd_by_link("[fmac_ctl]"); }
+
+static int parse_gki_info(char *out_version, size_t out_size) {
+  struct utsname uts;
+  const char *release, *p, *tag;
+  int major = -1, minor = -1;
+  int is_gki = 0;
+
+  if (out_version && out_size > 0)
+    out_version[0] = '\0';
+
+  if (uname(&uts) != 0) {
+    LOG_ERR("uname failed");
+    return -1;
+  }
+
+  release = uts.release; /* e.g. "5.10.198-android12-9-g1234567" */
+
+  p = release;
+  major = (int)strtol(p, (char **)&p, 10);
+  if (*p == '.') {
+    p++;
+    minor = (int)strtol(p, (char **)&p, 10);
+  }
+
+  if (major < 0 || minor < 0) {
+    LOG_ERR("failed to parse kernel version: %s", release);
+    return -1;
+  }
+
+  tag = strstr(release, "-android");
+  if (tag) {
+    const char *q = tag + strlen("-android");
+    if (isdigit((unsigned char)*q)) {
+      while (isdigit((unsigned char)*q))
+        q++;
+      if (*q == '-') {
+        q++;
+        if (isdigit((unsigned char)*q))
+          is_gki = 1;
+      }
+    }
+  }
+
+  if (out_version && out_size > 0)
+    snprintf(out_version, out_size, "%d.%02d", major, minor);
+
+  LOG_INFO("kernel release=%s parsed_version=%d.%02d is_gki=%d", release, major,
+           minor, is_gki);
+
+  return is_gki;
+}
+} // namespace
+
+static int fd = -1;
+static int ctlfd = -1;
+static JavaVM *g_vm = NULL;
+namespace ncore {
+static jint ctl(JNIEnv *env, jobject thiz, jint value) {
+  (void)env;
+  (void)thiz;
+
+  enum Opcode op;
+  switch (value) {
+  case 1:
+    op = OP_AUTHENTICATE;
+    break;
+  case 2:
+    op = OP_GET_ROOT;
+    break;
+  case 3:
+    op = OP_IOCTL;
+    break;
+  default:
+    return -1;
+  }
+
+  if (Ctl(op) < 0) {
+    LOG_ERR("ctl error: operation failed");
+  }
+
+  if (value == 1) {
+    int f = ScanDriverFd();
+    if (f < 0) {
+      LOG_ERR("fail to scan fd");
+    } else {
+      fd = f;
+    }
+  }
+
+  if (value == 3) {
+    int f = ScanCtlFd();
+    if (f < 0) {
+      LOG_ERR("fail to scan ctlfd");
+    } else {
+      ctlfd = f;
+    }
+    LOG_INFO("ctlfd after scan: %d", ctlfd);
+  }
+
+  LOG_INFO("ctl fd: %d", fd);
+  return (fd < 0) ? -1 : 0;
+}
+
+static jint setProfile(JNIEnv *env, jobject thiz, jint uid, jlong caps,
+                       jstring domainStr, jint ns) {
+  (void)thiz;
+
+  const char *domain = NULL;
+  if (domainStr != NULL) {
+    domain = env->GetStringUTFChars(domainStr, NULL);
+    if (domain == NULL) {
+      return -1;
+    }
+  }
+
+  int ret = SetProfile(ctlfd, (int)uid, (uint64_t)caps, domain ? domain : "",
+                       (int)ns);
+
+  if (domainStr != NULL) {
+    env->ReleaseStringUTFChars(domainStr, domain);
+  }
+
+  if (ret < 0) {
+    LOG_ERR("setProfile failed");
+    return -1;
+  }
+  return 0;
+}
+
+static jint adduid(JNIEnv *env, jobject thiz, jint value) {
+  (void)env;
+  (void)thiz;
+
+  if (AddUid(ctlfd, (int)value) < 0) {
+    LOG_ERR("adduid failed");
+    return -1;
+  }
+  return 0;
+}
+
+static jint deluid(JNIEnv *env, jobject thiz, jint value) {
+  (void)env;
+  (void)thiz;
+
+  if (DelUid(ctlfd, (int)value) < 0) {
+    LOG_ERR("deluid failed");
+    return -1;
+  }
+  return 0;
+}
+
+static jint hasuid(JNIEnv *env, jobject thiz, jint value) {
+  (void)env;
+  (void)thiz;
+
+  int has = 0;
+  if (HasUid(ctlfd, (int)value, &has) < 0) {
+    return -1;
+  }
+  return has ? 1 : 0;
+}
+
+static jint setCap(JNIEnv *env, jobject thiz, jint uid, jlong caps) {
+  (void)env;
+  (void)thiz;
+
+  if (uid < 0) {
+    return -1;
+  }
+  if (SetCap(ctlfd, (int)uid, (uint64_t)caps) < 0) {
+    LOG_ERR("setCap failed");
+    return -1;
+  }
+  return 0;
+}
+
+static jlong getCap(JNIEnv *env, jobject thiz, jint uid) {
+  (void)env;
+  (void)thiz;
+
+  if (uid < 0) {
+    return -1;
+  }
+  uint64_t caps = 0;
+  if (GetCap(ctlfd, (int)uid, &caps) < 0) {
+    LOG_ERR("getCap failed");
+    return -1;
+  }
+  return (jlong)caps;
+}
+
+static jint delCap(JNIEnv *env, jobject thiz, jint uid) {
+  (void)env;
+  (void)thiz;
+
+  if (uid < 0) {
+    return -1;
+  }
+  if (DelCap(ctlfd, (int)uid) < 0) {
+    LOG_ERR("delCap failed");
+    return -1;
+  }
+  return 0;
+}
+
+static jint addSelinuxRule(JNIEnv *env, jobject thiz, jstring src, jstring tgt,
+                           jstring cls, jstring permStr, jint effect,
+                           jboolean invert) {
+  (void)thiz;
+
+  JniUtfString srcStr(env, src);
+  JniUtfString tgtStr(env, tgt);
+  JniUtfString clsStr(env, cls);
+  JniUtfString permStrObj(env, permStr);
+
+  if ((src != nullptr && !srcStr) || (tgt != nullptr && !tgtStr) ||
+      (cls != nullptr && !clsStr) || (permStr != nullptr && !permStrObj)) {
+    return -1;
+  }
+
+  int ret =
+      AddSelinuxRule(ctlfd, srcStr.c_str_or_empty(), tgtStr.c_str_or_empty(),
+                     clsStr.c_str_or_empty(), permStrObj.c_str_or_empty(),
+                     (int)effect, invert ? 1 : 0);
+
+  if (ret < 0) {
+    LOG_ERR("addSelinuxRule failed");
+    return -1;
+  }
+  return 0;
+}
+
+static jint addRule(JNIEnv *env, jobject thiz, jstring pathStr,
+                    jlong statusBits) {
+  (void)env;
+  (void)thiz;
+  (void)pathStr;
+  (void)statusBits;
+  return 0;
+}
+
+static jint delRule(JNIEnv *env, jobject thiz, jstring pathStr) {
+  (void)env;
+  (void)thiz;
+  (void)pathStr;
+  return 0;
+}
+
+static void helloLog(JNIEnv *env, jobject thiz) {
+  (void)env;
+  (void)thiz;
+  LOG_DEBUG("Hello, this is a log from C!");
+  LOG_INFO("ncore build-as lib (C version)");
+}
+
+static jboolean isGki(JNIEnv *env, jobject thiz) {
+  (void)env;
+  (void)thiz;
+  int ret = parse_gki_info(NULL, 0);
+  return (ret == 1) ? JNI_TRUE : JNI_FALSE;
+}
+
+static jstring kernelVersion(JNIEnv *env, jobject thiz) {
+  (void)thiz;
+  char ver[16];
+  int ret = parse_gki_info(ver, sizeof(ver));
+  if (ret < 0) {
+    return NULL;
+  }
+  return env->NewStringUTF(ver);
+}
+} // namespace ncore
+
+const JNINativeMethod gMethods[] = {
+    {"ctl", "(I)I", (void *)ncore::ctl},
+    {"setProfile", "(IJLjava/lang/String;I)I", (void *)ncore::setProfile},
+    {"adduid", "(I)I", (void *)ncore::adduid},
+    {"deluid", "(I)I", (void *)ncore::deluid},
+    {"hasuid", "(I)I", (void *)ncore::hasuid},
+    {"setCap", "(IJ)I", (void *)ncore::setCap},
+    {"getCap", "(I)J", (void *)ncore::getCap},
+    {"delCap", "(I)I", (void *)ncore::delCap},
+    {"addSelinuxRule",
+     "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/"
+     "String;IZ)I",
+     (void *)ncore::addSelinuxRule},
+    {"addRule", "(Ljava/lang/String;J)I", (void *)ncore::addRule},
+    {"delRule", "(Ljava/lang/String;)I", (void *)ncore::delRule},
+    {"helloLog", "()V", (void *)ncore::helloLog},
+    {"isGki", "()Z", (void *)ncore::isGki},
+    {"kernelVersion", "()Ljava/lang/String;", (void *)ncore::kernelVersion},
+};
+
+static int registerNativeMethods(JNIEnv *env) {
+  jclass clazz = env->FindClass("me/nekosu/aqnya/ncore");
+  if (clazz == NULL) {
+    LOG_ERR("FindClass failed");
+    return -1;
+  }
+
+  if (env->RegisterNatives(clazz, gMethods,
+                           sizeof(gMethods) / sizeof(gMethods[0])) < 0) {
+    LOG_ERR("RegisterNatives failed");
+    abort();
+  }
+
+  return 0;
+}
+
+bool authenticate(void) {
+
+  if (Ctl(OP_AUTHENTICATE) < 0) {
+    return false;
+  }
+  return true;
+}
+
+} // namespace jni
+
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
+  (void)reserved;
+
+  jni::g_vm = vm;
+
+  JNIEnv *env = NULL;
+  if (vm->GetEnv((void **)&env, JNI_VERSION_1_6) != JNI_OK) {
+    LOG_ERR("GetEnv failed");
+    return -1;
+  }
+
+  if (jni::authenticate() == false) {
+    LOG_ERR("ctl error: authenticate failed");
+  }
+
+  if (jni::registerNativeMethods(env) < 0) {
+    LOG_ERR("registerNativeMethods failed");
+    return -1;
+  }
+
+  return JNI_VERSION_1_6;
+}
