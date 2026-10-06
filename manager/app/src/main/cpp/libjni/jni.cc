@@ -1,4 +1,6 @@
 #include <android/log.h>
+#include <cstdio>
+#include <cstring>
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -16,14 +18,7 @@
 #include <unistd.h>
 
 #include "ioctl.h"
-
-#define LOG_TAG "ncore"
-#define LOG_ERR(...)                                                           \
-  __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
-#define LOG_INFO(...)                                                          \
-  __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define LOG_DEBUG(...)                                                         \
-  __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
+#include "log.h"
 
 enum Opcode { OP_AUTHENTICATE = 201, OP_GET_ROOT = 202, OP_IOCTL = 203 };
 
@@ -53,18 +48,14 @@ private:
   const char *cstr_;
 };
 
+#define FMAC_MAX_DATA FMAC_DATA_SELRULE
+
 namespace jni {
 namespace {
-static void copy_to_char64(char dst[64], const char *s) {
-  if (s) {
-    strncpy(dst, s, 63);
-    dst[63] = '\0';
-  } else {
-    memset(dst, 0, 64);
-  }
-}
 
-#define FMAC_MAX_DATA FMAC_DATA_SELRULE
+inline void copy_field(void *dst, size_t cap, const char *s) {
+  snprintf(static_cast<char *>(dst), cap, "%s", s ? s : "");
+}
 
 static int ioc_call(int fd, unsigned int flag, void *data, size_t size) {
   union {
@@ -140,9 +131,10 @@ int SetProfile(int fd, int uid, uint64_t caps, const char *domain, int ns) {
   uint8_t data[FMAC_DATA_PROFILE];
   uint32_t u = (uint32_t)uid;
 
+  memset(data, 0, sizeof(data));
   memcpy(data + FMAC_OFF_UID, &u, sizeof(u));
   memcpy(data + FMAC_OFF_CAPS, &caps, sizeof(caps));
-  copy_to_char64((char *)data + FMAC_OFF_DOMAIN, domain);
+  copy_field(data + FMAC_OFF_DOMAIN, FMAC_OFF_NS - FMAC_OFF_DOMAIN, domain);
   memcpy(data + FMAC_OFF_NS, &ns, sizeof(ns));
 
   return ioc_call(fd, IOC_SET_PROFILE, data, sizeof(data));
@@ -182,6 +174,7 @@ int SetCap(int fd, int uid, uint64_t caps) {
   uint8_t data[FMAC_DATA_CAP];
   uint32_t u = (uint32_t)uid;
 
+  memset(data, 0, sizeof(data));
   memcpy(data + FMAC_OFF_UID, &u, sizeof(u));
   memcpy(data + FMAC_OFF_CAPS, &caps, sizeof(caps));
 
@@ -197,6 +190,7 @@ int GetCap(int fd, int uid, uint64_t *caps) {
     return -1;
   }
 
+  memset(data, 0, sizeof(data));
   memcpy(data + FMAC_OFF_UID, &u, sizeof(u));
   if (ioc_call(fd, IOC_GET_CAP, data, sizeof(data)) < 0)
     return -1;
@@ -208,8 +202,8 @@ int DelCap(int fd, int uid) {
   uint8_t data[FMAC_DATA_CAP];
   uint32_t u = (uint32_t)uid;
 
+  memset(data, 0, sizeof(data));
   memcpy(data + FMAC_OFF_UID, &u, sizeof(u));
-  memset(data + FMAC_OFF_CAPS, 0, sizeof(uint64_t));
 
   return ioc_call(fd, IOC_DEL_CAP, data, sizeof(data));
 }
@@ -220,10 +214,10 @@ int AddSelinuxRule(int fd, const char *src, const char *tgt, const char *cls,
   int inv = invert ? 1 : 0;
 
   memset(data, 0, sizeof(data));
-  copy_to_char64((char *)data + FMAC_OFF_UID, src);
-  copy_to_char64((char *)data + FMAC_OFF_TGT, tgt);
-  copy_to_char64((char *)data + FMAC_OFF_CLS, cls);
-  copy_to_char64((char *)data + FMAC_OFF_PERM, perm);
+  copy_field(data + FMAC_OFF_UID, 64, src);
+  copy_field(data + FMAC_OFF_TGT, 64, tgt);
+  copy_field(data + FMAC_OFF_CLS, 64, cls);
+  copy_field(data + FMAC_OFF_PERM, 64, perm);
   memcpy(data + FMAC_OFF_EFFECT, &effect, sizeof(effect));
   memcpy(data + FMAC_OFF_INVERT, &inv, sizeof(inv));
 
@@ -236,7 +230,10 @@ int ScanCtlFd(void) { return scan_fd_by_link("[fmac_ctl]"); }
 
 static int parse_gki_info(char *out_version, size_t out_size) {
   struct utsname uts;
-  const char *release, *p, *tag;
+  const char *release;
+  char *endp;
+  const char *p;
+  const char *tag;
   int major = -1, minor = -1;
   int is_gki = 0;
 
@@ -251,10 +248,12 @@ static int parse_gki_info(char *out_version, size_t out_size) {
   release = uts.release; /* e.g. "5.10.198-android12-9-g1234567" */
 
   p = release;
-  major = (int)strtol(p, (char **)&p, 10);
+  major = (int)strtol(p, &endp, 10);
+  p = endp;
   if (*p == '.') {
     p++;
-    minor = (int)strtol(p, (char **)&p, 10);
+    minor = (int)strtol(p, &endp, 10);
+    p = endp;
   }
 
   if (major < 0 || minor < 0) {
@@ -289,6 +288,7 @@ static int parse_gki_info(char *out_version, size_t out_size) {
 static int fd = -1;
 static int ctlfd = -1;
 static JavaVM *g_vm = NULL;
+
 namespace ncore {
 static jint ctl(JNIEnv *env, jobject thiz, jint value) {
   (void)env;
@@ -340,21 +340,13 @@ static jint setProfile(JNIEnv *env, jobject thiz, jint uid, jlong caps,
                        jstring domainStr, jint ns) {
   (void)thiz;
 
-  const char *domain = NULL;
-  if (domainStr != NULL) {
-    domain = env->GetStringUTFChars(domainStr, NULL);
-    if (domain == NULL) {
-      return -1;
-    }
+  JniUtfString domain(env, domainStr);
+  if (domainStr != nullptr && !domain) {
+    return -1;
   }
 
-  int ret = SetProfile(ctlfd, (int)uid, (uint64_t)caps, domain ? domain : "",
+  int ret = SetProfile(ctlfd, (int)uid, (uint64_t)caps, domain.c_str_or_empty(),
                        (int)ns);
-
-  if (domainStr != NULL) {
-    env->ReleaseStringUTFChars(domainStr, domain);
-  }
-
   if (ret < 0) {
     LOG_ERR("setProfile failed");
     return -1;
@@ -536,18 +528,26 @@ static int registerNativeMethods(JNIEnv *env) {
   if (env->RegisterNatives(clazz, gMethods,
                            sizeof(gMethods) / sizeof(gMethods[0])) < 0) {
     LOG_ERR("RegisterNatives failed");
-    abort();
+    return -1;
   }
 
   return 0;
 }
 
 bool authenticate(void) {
-
   if (Ctl(OP_AUTHENTICATE) < 0) {
     return false;
   }
   return true;
+}
+
+inline JNIEnv *GetJNIEnv(JavaVM *vm) {
+  JNIEnv *env = nullptr;
+  if (vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) != JNI_OK) {
+    LOG_ERR("GetEnv failed");
+    return nullptr;
+  }
+  return env;
 }
 
 } // namespace jni
@@ -557,13 +557,11 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
 
   jni::g_vm = vm;
 
-  JNIEnv *env = NULL;
-  if (vm->GetEnv((void **)&env, JNI_VERSION_1_6) != JNI_OK) {
-    LOG_ERR("GetEnv failed");
+  JNIEnv *env = jni::GetJNIEnv(vm);
+  if (!env)
     return -1;
-  }
 
-  if (jni::authenticate() == false) {
+  if (!jni::authenticate()) {
     LOG_ERR("ctl error: authenticate failed");
   }
 
