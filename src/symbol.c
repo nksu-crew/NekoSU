@@ -888,15 +888,37 @@ static unsigned long read_vmcoreinfo_symbol(const char *sym)
  */
 static void scan_kernel_memory_locked(void)
 {
-    unsigned long stext, img_size;
+    unsigned long stext, img_size, anchor;
     int found;
 
+    /*
+     * Anchor the scan to the runtime address of an exported vmlinux symbol
+     * that this module already links against. The kernel resolves it after
+     * KASLR, so it points inside the real kernel image without us having to
+     * know the KASLR base. The kallsyms tables live in the image's rodata,
+     * well within +/-64MB of the text.
+     */
+    anchor = (unsigned long)&copy_from_kernel_nofault;
+    if (anchor) {
+        unsigned long lo = anchor > SZ_64M ? anchor - SZ_64M : 0;
+        unsigned long hi = anchor + SZ_64M;
+
+        pr_info("[ksym] anchor copy_from_kernel_nofault=0x%lx, scan 0x%lx..0x%lx\n",
+                anchor, lo, hi);
+        found = scan_region(lo, hi);
+        pr_info("[ksym] anchor scan found %d table(s), cached %lu\n",
+                found, nksu_ksym_count());
+        if (found)
+            return;
+    }
+
+    /* Fallback 1: vmcoreinfo gives the image base directly when readable. */
     stext = read_vmcoreinfo_symbol("_stext");
     if (!stext)
         stext = read_vmcoreinfo_symbol("_text");
     img_size = read_vmcoreinfo_symbol("KERNEL_IMAGE_SIZE");
 
-    pr_info("[ksym] scan begin: _stext=0x%lx img_size=0x%lx\n",
+    pr_info("[ksym] vmcoreinfo: _stext=0x%lx img_size=0x%lx\n",
             stext, img_size);
 
     if (stext) {
@@ -911,14 +933,10 @@ static void scan_kernel_memory_locked(void)
             return;
     }
 
-    /*
-     * Default arm64 layout: KASLR places the image after the architecture's
-     * KIMAGE_VADDR. The base differs by VA size, so try the common ones;
-     * unmapped windows fail fast, so trying several is cheap.
-     */
+    /* Fallback 2: common arm64 KIMAGE bases. */
     {
         static const unsigned long bases[] = {
-            0xffffff8000000000UL,  /* 39-bit VA (typical Android arm64) */
+            0xffffff8000000000UL,  /* 39-bit VA */
             0xffff800000000000UL,  /* 48-bit VA */
         };
         int i;
