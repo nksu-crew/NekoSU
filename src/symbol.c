@@ -252,6 +252,29 @@ struct kallsyms_view {
 };
 
 /*
+ * 256 non-empty NUL-terminated tokens within 4096 bytes, without any
+ * token_index check. Used only to spot near-miss candidates while scanning.
+ */
+static u32 token_table_shape_len(const u8 *p, const u8 *end)
+{
+    const u8 *q = p;
+    int i;
+
+    for (i = 0; i < 256; i++) {
+        const u8 *start = q;
+
+        while (q < end && *q)
+            q++;
+        if (q >= end || *q != '\0' || q == start)
+            return 0;
+        if ((size_t)(q - p) > 4096)
+            return 0;
+        q++;
+    }
+    return (u32)(q - p);
+}
+
+/*
  * Return the token_table size if p is a valid token_table, else 0.
  *
  * A token_table is exactly 256 non-empty NUL-terminated tokens immediately
@@ -259,6 +282,9 @@ struct kallsyms_view {
  * the byte offset of the i-th token. Requiring that exact match makes false
  * positives in unrelated rodata essentially impossible, and does not assume
  * anything about individual token length.
+ *
+ * A cheap prefilter (a NUL within the first 64 bytes) keeps the scan fast in
+ * code/rodata regions with long NUL-free runs.
  */
 static u32 token_table_len(const u8 *p, const u8 *end)
 {
@@ -267,6 +293,9 @@ static u32 token_table_len(const u8 *p, const u8 *end)
     u32 tlen;
     const u16 *ti;
     int i;
+
+    if (end - p < 16 || !memchr(p, 0, min_t(size_t, 64, end - p)))
+        return 0;
 
     for (i = 0; i < 256; i++) {
         const u8 *start = q;
@@ -785,6 +814,7 @@ static int scan_region(unsigned long start, unsigned long end)
     const size_t chunk = SZ_64K;
     /* overlap so a token_table spanning a chunk boundary is still seen */
     const size_t step = SZ_64K - 4096;
+    static int near_miss;
     u8 *probe;
     unsigned long pos;
     int found = 0;
@@ -807,8 +837,16 @@ static int scan_region(unsigned long start, unsigned long end)
                 unsigned long buf_len, buf_kaddr;
                 int rc;
 
-                if (!token_table_len(tt, probe + len))
+                if (!token_table_len(tt, probe + len)) {
+                    /* did we at least see the 256-token shape? */
+                    if (near_miss < 8 &&
+                        token_table_shape_len(tt, probe + len)) {
+                        pr_info("[ksym] shape-only candidate 0x%lx\n",
+                                tt_kaddr);
+                        near_miss++;
+                    }
                     continue;
+                }
 
                 pr_info("[ksym] token_table candidate at 0x%lx\n",
                         tt_kaddr);
@@ -932,8 +970,8 @@ static void scan_kernel_memory_locked(void)
      */
     anchor = (unsigned long)&copy_from_kernel_nofault;
     if (anchor) {
-        unsigned long lo = anchor > SZ_64M ? anchor - SZ_64M : 0;
-        unsigned long hi = anchor + SZ_64M;
+        unsigned long lo = anchor > SZ_256M ? anchor - SZ_256M : 0;
+        unsigned long hi = anchor + SZ_256M;
 
         pr_info("[ksym] anchor copy_from_kernel_nofault=0x%lx, scan 0x%lx..0x%lx\n",
                 anchor, lo, hi);
