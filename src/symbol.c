@@ -542,73 +542,43 @@ static int view_from_token_table(const u8 *buf_start, const u8 *token_table,
 
 /*
  * Full name decoding.
+ *
+ * Decoding is streamed: the first pass only counts the symbols and records
+ * the indices of the two self-referential symbols, so no per-name allocation
+ * is needed (a big char** array of ~180k names could fail to allocate).
  */
 
-struct ksym_names {
-    char **names;
-    u32    count;
+struct ksym_scan {
+    u32 count;       /* total symbols */
+    u32 idx_names;   /* index of "kallsyms_names", or U32_MAX */
+    u32 idx_token;   /* index of "kallsyms_token_table", or U32_MAX */
 };
 
-static void free_ksym_names(struct ksym_names *kn)
+static int scan_names(const struct kallsyms_view *v, struct ksym_scan *s)
 {
-    u32 i;
+    u32 offset = 0, n = 0;
+    char name[KSYM_NAME_MAX];
 
-    if (!kn->names)
-        return;
-    for (i = 0; i < kn->count; i++)
-        kfree(kn->names[i]);
-    kfree(kn->names);
-    kn->names = NULL;
-    kn->count = 0;
-}
-
-static int decode_all_names(const struct kallsyms_view *v, struct ksym_names *kn)
-{
-    u32 offset = 0, cap = 1u << 16, n = 0;
-    char **arr;
-    char *name;
-
-    arr = kcalloc(cap, sizeof(*arr), GFP_KERNEL);
-    if (!arr)
-        return -ENOMEM;
-
-    name = kmalloc(KSYM_NAME_MAX, GFP_KERNEL);
-    if (!name) {
-        kfree(arr);
-        return -ENOMEM;
-    }
+    s->count = 0;
+    s->idx_names = U32_MAX;
+    s->idx_token = U32_MAX;
 
     while (n < KSYM_MAX_SYMS) {
         if (decode_symbol(v->names, v->names_end, v->token_index,
                           v->token_table, &offset, name,
-                          KSYM_NAME_MAX) < 0)
+                          sizeof(name)) < 0)
             break;
 
-        if (name[0]) {
-            char *copy;
-
-            if (n == cap) {
-                char **na;
-                u32 ncap = cap * 2;
-
-                na = krealloc(arr, ncap * sizeof(*na), GFP_KERNEL);
-                if (!na)
-                    break;
-                memset(na + cap, 0, (ncap - cap) * sizeof(*na));
-                arr = na;
-                cap = ncap;
-            }
-
-            copy = kstrdup(name, GFP_KERNEL);
-            if (!copy)
-                break;
-            arr[n++] = copy;
-        }
+        if (s->idx_names == U32_MAX &&
+            strcmp(name, "kallsyms_names") == 0)
+            s->idx_names = n;
+        else if (s->idx_token == U32_MAX &&
+                 strcmp(name, "kallsyms_token_table") == 0)
+            s->idx_token = n;
+        n++;
     }
 
-    kfree(name);
-    kn->names = arr;
-    kn->count = n;
+    s->count = n;
     return n ? 0 : -EINVAL;
 }
 
@@ -659,35 +629,27 @@ static unsigned long ksym_rel_addr(unsigned long base, s32 off)
  *   base        = (unsigned long)names - offsets[idx_names]
  *   token_table == ksym_rel_addr(base, offsets[idx_token])
  * A match identifies the real array. The array must also be large enough
- * for kn->count entries to stay inside the buffer.
+ * for scan->count entries to stay inside the buffer.
  */
 static int resolve_addresses(const struct kallsyms_view *v,
-                             const struct ksym_names *kn,
+                             const struct ksym_scan *scan,
                              const u8 *buf_start, const u8 *buf_end,
                              struct addr_info *ai)
 {
-    u32 i, idx_names = U32_MAX, idx_token = U32_MAX;
+    u32 idx_names = scan->idx_names, idx_token = scan->idx_token;
     unsigned long names_addr = (unsigned long)v->names;
     unsigned long low_addr, o;
 
     memset(ai, 0, sizeof(*ai));
 
-    for (i = 0; i < kn->count; i++) {
-        if (idx_names == U32_MAX && strcmp(kn->names[i], "kallsyms_names") == 0)
-            idx_names = i;
-        if (idx_token == U32_MAX &&
-            strcmp(kn->names[i], "kallsyms_token_table") == 0)
-            idx_token = i;
-    }
     if (idx_names == U32_MAX || idx_token == U32_MAX) {
-        pr_info("[ksym] resolve: sym not found idx_names=%u idx_token=%u total=%u first='%s'\n",
-                idx_names, idx_token, kn->count,
-                kn->count ? kn->names[0] : "");
+        pr_info("[ksym] resolve: sym not found idx_names=%u idx_token=%u total=%u\n",
+                idx_names, idx_token, scan->count);
         return -ENOENT;
     }
 
     pr_info("[ksym] resolve: idx_names=%u idx_token=%u total=%u\n",
-            idx_names, idx_token, kn->count);
+            idx_names, idx_token, scan->count);
 
     low_addr = names_addr > KSYM_ADDR_MAX ? names_addr - KSYM_ADDR_MAX : 0;
     if (low_addr < (unsigned long)buf_start)
@@ -702,7 +664,7 @@ static int resolve_addresses(const struct kallsyms_view *v,
         unsigned long base;
 
         /* the whole array must fit before names */
-        if ((unsigned long)arr + (size_t)kn->count * sizeof(*arr) > (unsigned long)buf_end)
+        if ((unsigned long)arr + (size_t)scan->count * sizeof(*arr) > (unsigned long)buf_end)
             continue;
         if (off_names < 0)
             continue;
@@ -728,7 +690,7 @@ static int resolve_addresses(const struct kallsyms_view *v,
         const unsigned long *arr = (const unsigned long *)p;
         unsigned long a_names, a_token;
 
-        if ((unsigned long)arr + (size_t)kn->count * sizeof(*arr) > (unsigned long)buf_end)
+        if ((unsigned long)arr + (size_t)scan->count * sizeof(*arr) > (unsigned long)buf_end)
             continue;
 
         memcpy(&a_names, &arr[idx_names], sizeof(a_names));
@@ -756,7 +718,7 @@ struct try_ctx {
     const u8 *buf;
     const u8 *buf_end;
     /* results */
-    struct ksym_names kn;
+    struct ksym_scan scan;
     struct addr_info ai;
     bool ok;
 };
@@ -776,15 +738,12 @@ static bool try_names_candidate(const u8 *names, const u8 *names_end,
     v.names = names;
     v.names_end = names_end;
 
-    free_ksym_names(&ctx->kn);
-    if (decode_all_names(&v, &ctx->kn) != 0)
+    if (scan_names(&v, &ctx->scan) != 0)
         return false;
 
-    if (resolve_addresses(&v, &ctx->kn, ctx->buf, ctx->buf_end,
-                          &ctx->ai) != 0) {
-        free_ksym_names(&ctx->kn);
+    if (resolve_addresses(&v, &ctx->scan, ctx->buf, ctx->buf_end,
+                          &ctx->ai) != 0)
         return false;
-    }
 
     ctx->ok = true;
     return true;
@@ -797,7 +756,7 @@ static int consume_buffer(const u8 *buf, unsigned long len,
     struct try_ctx ctx;
     const u8 *names;
     int rc;
-    u32 i;
+    u32 i, offset;
 
     rc = view_from_token_table(buf, token_table, buf + len, &v);
     if (rc) {
@@ -818,24 +777,30 @@ static int consume_buffer(const u8 *buf, unsigned long len,
     if (!names || !ctx.ok) {
         pr_info("[ksym] names/addr resolve failed: names=%p ok=%d\n",
                 names, ctx.ok);
-        free_ksym_names(&ctx.kn);
         return -ENOENT;
     }
 
     pr_info("[ksym] resolved names at 0x%lx, %u symbols\n",
-            (unsigned long)names, ctx.kn.count);
+            (unsigned long)names, ctx.scan.count);
 
-    for (i = 0; i < ctx.kn.count; i++) {
-        unsigned long a = symbol_addr(&ctx.ai, i);
+    /* second pass: decode each name again and cache name -> address */
+    offset = 0;
+    for (i = 0; i < ctx.scan.count; i++) {
+        char nm[KSYM_NAME_MAX];
+        unsigned long a;
 
+        if (decode_symbol(v.names, v.names_end, v.token_index,
+                          v.token_table, &offset, nm, sizeof(nm)) < 0)
+            break;
+
+        a = symbol_addr(&ctx.ai, i);
         if (!a)
             continue;
-        strip_symbol_suffix(ctx.kn.names[i]);
-        if (ctx.kn.names[i][0])
-            ksym_cache_add(ctx.kn.names[i], a);
+        strip_symbol_suffix(nm);
+        if (nm[0])
+            ksym_cache_add(nm, a);
     }
 
-    free_ksym_names(&ctx.kn);
     return 0;
 }
 
