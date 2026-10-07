@@ -9,9 +9,11 @@
 #
 # 说明:
 #   - 以应用自身身份运行, 不使用 su / 不需要 root。
+#   - ncore 由 app 以 native lib (nativeLibraryDir/libncore.so) 形式提供,
+#     路径通过环境变量 NKSU_NCORE 传入; 脚本不再把 ncore 释放到 filesDir,
+#     因为 Android 10+ 不允许执行 /data 下的二进制 (noexec)。
 #   - 所有中间文件与输出都位于脚本所在目录 (filesDir/nksu-install)。
-#   - ncore / toybox 默认从脚本同目录 / /system/bin 查找,
-#     可用 NKSU_NCORE / NKSU_TOYBOX 覆盖。
+#   - toybox 默认从 /system/bin 查找, 可用 NKSU_TOYBOX 覆盖。
 #   - 输出默认 <脚本目录>/vendor_boot_nksu.img, 可用 NKSU_OUT 覆盖;
 #     工作目录默认 <脚本目录>/work.<pid>, 可用 NKSU_WORK 覆盖。
 
@@ -26,16 +28,8 @@ KO_NAME="nksu.ko"
 SCRIPT_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 [ -n "$SCRIPT_DIR" ] || SCRIPT_DIR="$(pwd)"
 
+# --- ncore 由 app 提供 (nativeLibraryDir 下的 libncore.so) -------------------
 NCORE="${NKSU_NCORE:-}"
-if [ -z "$NCORE" ]; then
-  if [ -x "$SCRIPT_DIR/ncore" ]; then
-    NCORE="$SCRIPT_DIR/ncore"
-  elif [ -x /system/bin/ncore ]; then
-    NCORE=/system/bin/ncore
-  else
-    NCORE="$SCRIPT_DIR/ncore"
-  fi
-fi
 
 TOYBOX="${NKSU_TOYBOX:-}"
 if [ -z "$TOYBOX" ]; then
@@ -82,10 +76,27 @@ fi
 [ -f "$KO_SRC" ] || die "找不到 ko: $KO_SRC"
 KO_SRC="$(abs "$KO_SRC")"
 
-[ -x "$NCORE" ]  || die "ncore 不可执行: ${NCORE:-<empty>}"
+[ -n "$NCORE" ] && [ -x "$NCORE" ] || \
+  die "ncore 不可执行: ${NCORE:-<empty>} (由 app 通过 NKSU_NCORE 传入)"
+
 [ -n "$TOYBOX" ] && [ -x "$TOYBOX" ] || die "toybox 不可用 (设置 NKSU_TOYBOX)"
 
 OUT="${NKSU_OUT:-$SCRIPT_DIR/$OUT_NAME}"
+
+# ---------------------------------------------------------------------------
+# 特殊函数: 脚本内所有 ncore 调用都走这里。
+#
+# app 端把 ncore 打包成 native lib 放在 nativeLibraryDir 下 (那是允许执行
+# 的挂载点), 而不是释放到 filesDir。Android 10+ 起 /data 分区为 noexec,
+# 从 filesDir 执行任何二进制都会失败 (EACCES)。
+#
+# 之所以封装成函数, 是为了:
+#   - 脚本里不直接出现 "$NCORE" 调用, 便于后续替换实现;
+#   - 后续如果换用其它执行通道 (比如 app 端 pipe 协议), 只需改这个函数。
+# ---------------------------------------------------------------------------
+run_ncore() {
+  "$NCORE" "$@"
+}
 
 log "vendor_boot : $SRC_IMG"
 log "nksu.ko     : $KO_SRC"
@@ -99,7 +110,7 @@ cd "$WORK" || die "无法进入 $WORK"
 # --- 1. ncore 解包 ---------------------------------------------------------
 
 log "ncore -u 解包中..."
-"$NCORE" -u "$SRC_IMG" >"$WORK/unpack.log" 2>&1 || {
+run_ncore -u "$SRC_IMG" >"$WORK/unpack.log" 2>&1 || {
   cat "$WORK/unpack.log" >&2
   die "ncore 解包失败"
 }
@@ -213,7 +224,7 @@ TARGET_IMG="$WORK/vendor_boot.img"
 cp "$SRC_IMG" "$TARGET_IMG" || die "拷贝 vendor_boot 失败"
 
 log "ncore -r 回填 vendor_ramdisk..."
-"$NCORE" -r "$TARGET_IMG" "$NEW_RAMDISK" >"$WORK/replace.log" 2>&1 || {
+run_ncore -r "$TARGET_IMG" "$NEW_RAMDISK" >"$WORK/replace.log" 2>&1 || {
   cat "$WORK/replace.log" >&2
   die "ncore 回填失败"
 }
