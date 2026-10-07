@@ -593,23 +593,36 @@ static unsigned long symbol_addr(const struct addr_info *ai, u32 i)
 }
 
 /*
+ * kallsyms relative-address decoding, matching kallsyms_sym_address():
+ * non-negative offsets are added, negative ones are absolute addresses.
+ */
+static unsigned long ksym_rel_addr(unsigned long base, s32 off)
+{
+    if (off >= 0)
+        return base + (u32)off;
+    return base - 1 - (u32)off;
+}
+
+/*
  * Recover the address array and relative_base from the self-referential
  * symbols.
  *
  * The table always contains "kallsyms_names" and "kallsyms_token_table",
  * whose addresses are names and token_table themselves. For a candidate
  * address array:
- *   base        = (unsigned long)names - (s32)offsets[idx_names]
- *   token_table == base + (s32)offsets[idx_token]
- * A match identifies the real array.
+ *   base        = (unsigned long)names - offsets[idx_names]
+ *   token_table == ksym_rel_addr(base, offsets[idx_token])
+ * A match identifies the real array. The array must also be large enough
+ * for kn->count entries to stay inside the buffer.
  */
 static int resolve_addresses(const struct kallsyms_view *v,
                              const struct ksym_names *kn,
-                             const u8 *buf_start, struct addr_info *ai)
+                             const u8 *buf_start, const u8 *buf_end,
+                             struct addr_info *ai)
 {
     u32 i, idx_names = U32_MAX, idx_token = U32_MAX;
-    const u8 *names = v->names;
-    const u8 *p, *low;
+    unsigned long names_addr = (unsigned long)v->names;
+    unsigned long low_addr, o;
 
     memset(ai, 0, sizeof(*ai));
 
@@ -623,22 +636,26 @@ static int resolve_addresses(const struct kallsyms_view *v,
     if (idx_names == U32_MAX || idx_token == U32_MAX)
         return -ENOENT;
 
-    low = names - KSYM_ADDR_MAX;
-    if (low < buf_start)
-        low = buf_start;
+    low_addr = names_addr > KSYM_ADDR_MAX ? names_addr - KSYM_ADDR_MAX : 0;
+    if (low_addr < (unsigned long)buf_start)
+        low_addr = (unsigned long)buf_start;
 
     /* 1) BASE_RELATIVE: u32 offsets array plus relative_base */
-    for (p = names - 4; p >= low; p -= 4) {
+    for (o = 4; names_addr >= o && names_addr - o >= low_addr; o += 4) {
+        const u8 *p = (const u8 *)(names_addr - o);
         const u32 *arr = (const u32 *)p;
         s32 off_names = (s32)arr[idx_names];
         s32 off_token = (s32)arr[idx_token];
         unsigned long base;
 
+        /* the whole array must fit before names */
+        if ((unsigned long)arr + (size_t)kn->count * sizeof(*arr) > (unsigned long)buf_end)
+            continue;
         if (off_names < 0)
             continue;
 
-        base = (unsigned long)names - (u32)off_names;
-        if ((unsigned long)v->token_table == base + (u32)off_token) {
+        base = names_addr - (u32)off_names;
+        if ((unsigned long)v->token_table == ksym_rel_addr(base, off_token)) {
             ai->base_relative = true;
             ai->offsets = arr;
             ai->relative_base = base;
@@ -651,13 +668,18 @@ static int resolve_addresses(const struct kallsyms_view *v,
      *    the self-referential entries equal the names / token_table
      *    memory addresses directly.
      */
-    for (p = names - sizeof(unsigned long); p >= low;
-         p -= sizeof(unsigned long)) {
+    for (o = sizeof(unsigned long);
+         names_addr >= o && names_addr - o >= low_addr;
+         o += sizeof(unsigned long)) {
+        const u8 *p = (const u8 *)(names_addr - o);
         const unsigned long *arr = (const unsigned long *)p;
         unsigned long a_names, a_token;
 
+        if ((unsigned long)arr + (size_t)kn->count * sizeof(*arr) > (unsigned long)buf_end)
+            continue;
+
         memcpy(&a_names, &arr[idx_names], sizeof(a_names));
-        if (a_names != (unsigned long)names)
+        if (a_names != names_addr)
             continue;
         memcpy(&a_token, &arr[idx_token], sizeof(a_token));
         if (a_token == (unsigned long)v->token_table) {
@@ -677,6 +699,7 @@ static int resolve_addresses(const struct kallsyms_view *v,
 struct try_ctx {
     const struct kallsyms_view *v;
     const u8 *buf;
+    const u8 *buf_end;
     /* results */
     struct ksym_names kn;
     struct addr_info ai;
@@ -702,7 +725,8 @@ static bool try_names_candidate(const u8 *names, const u8 *names_end,
     if (decode_all_names(&v, &ctx->kn) != 0)
         return false;
 
-    if (resolve_addresses(&v, &ctx->kn, ctx->buf, &ctx->ai) != 0) {
+    if (resolve_addresses(&v, &ctx->kn, ctx->buf, ctx->buf_end,
+                          &ctx->ai) != 0) {
         free_ksym_names(&ctx->kn);
         return false;
     }
@@ -727,6 +751,7 @@ static int consume_buffer(const u8 *buf, unsigned long len,
     memset(&ctx, 0, sizeof(ctx));
     ctx.v = &v;
     ctx.buf = buf;
+    ctx.buf_end = buf + len;
 
     names = find_names_start(buf, &v, try_names_candidate, &ctx);
     if (!names || !ctx.ok) {
@@ -768,46 +793,53 @@ static int scan_region(unsigned long start, unsigned long end)
     if (!probe)
         return -ENOMEM;
 
-    for (pos = ALIGN(start, 8); pos + chunk <= end; pos += step) {
+    /* include the final partial chunk rather than requiring pos+chunk<=end */
+    for (pos = ALIGN(start, 8); pos < end; pos += step) {
+        size_t len = min_t(unsigned long, chunk, end - pos);
         size_t off;
+        bool hit = false;
 
-        if (kread((const void *)pos, probe, chunk) < 0)
-            continue;
+        if (kread((const void *)pos, probe, len) == 0) {
+            for (off = 0; off + 8 < len; off += 4) {
+                const u8 *tt = probe + off;
+                unsigned long tt_kaddr = pos + off;
+                u8 *buf;
+                unsigned long buf_len, buf_kaddr;
+                int rc;
 
-        for (off = 0; off + 8 < chunk; off += 4) {
-            const u8 *tt = probe + off;
-            unsigned long tt_kaddr = pos + off;
-            u8 *buf;
-            unsigned long buf_len, buf_kaddr;
-            int rc;
+                if (!token_table_len(tt, probe + len))
+                    continue;
 
-            if (!token_table_len(tt, probe + chunk))
-                continue;
+                pr_info("[ksym] token_table candidate at 0x%lx\n",
+                        tt_kaddr);
 
-            /* candidate hit: copy a large window ending past token_table */
-            buf_len = KSYM_BOUNCE_BACK + KSYM_BOUNCE_FWD;
-            buf = kvmalloc(buf_len, GFP_KERNEL);
-            if (!buf)
-                break;
+                /* candidate hit: copy a window ending past token_table */
+                buf_len = KSYM_BOUNCE_BACK + KSYM_BOUNCE_FWD;
+                buf = kvmalloc(buf_len, GFP_KERNEL);
+                if (!buf)
+                    break;
 
-            buf_kaddr = tt_kaddr;
-            if (buf_kaddr < KSYM_BOUNCE_BACK)
-                buf_kaddr = KSYM_BOUNCE_BACK;
-            buf_kaddr -= KSYM_BOUNCE_BACK;
+                buf_kaddr = tt_kaddr > KSYM_BOUNCE_BACK ?
+                            tt_kaddr - KSYM_BOUNCE_BACK : 0;
 
-            kread_best_effort(buf, buf_kaddr, buf_len);
+                kread_best_effort(buf, buf_kaddr, buf_len);
 
-            rc = consume_buffer(buf, buf_len,
-                                buf + (tt_kaddr - buf_kaddr));
-            kvfree(buf);
+                rc = consume_buffer(buf, buf_len,
+                                    buf + (tt_kaddr - buf_kaddr));
+                kvfree(buf);
 
-            if (rc == 0) {
-                found++;
-                break;
+                if (rc == 0) {
+                    found++;
+                    hit = true;
+                    break;
+                }
+                pr_info("[ksym] candidate 0x%lx rejected (rc=%d)\n",
+                        tt_kaddr, rc);
             }
         }
 
-        if (found)
+        /* stop after the last (short) chunk or once something was found */
+        if (hit || len < chunk)
             break;
     }
 
@@ -988,8 +1020,14 @@ static unsigned long match_kallsyms_line(char *line, const char *name,
     }
 
     if (sym[0] && strlen(sym) == namelen &&
-        memcmp(sym, name, namelen) == 0)
-        return simple_strtoul(line, NULL, 16);
+        memcmp(sym, name, namelen) == 0) {
+        char *endp;
+        unsigned long a = simple_strtoul(line, &endp, 16);
+
+        /* reject lines whose address did not parse cleanly */
+        if (endp != line)
+            return a;
+    }
 
     return 0;
 }
