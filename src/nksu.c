@@ -173,7 +173,7 @@ static int __init nekosu_init(void)
     }
 
 #ifdef CONFIG_NKSU_DEBUG
-    nksu_ksym_dump();
+    pr_err("nekosu: symbol cache holds %lu entries\n", nksu_ksym_count());
 #endif
 
     ret = nekosu_init_all_components();

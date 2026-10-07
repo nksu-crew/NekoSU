@@ -51,7 +51,7 @@ int nksu_symbol_compat_init(void)
 {
 	int missing = 0;
 
-	pr_info("[ksym] compat init begin, cache=%lu\n", nksu_ksym_count());
+	pr_err("[ksym] compat init begin, cache=%lu\n", nksu_ksym_count());
 
 	NKSU_RESOLVE(nksu_alloc_uid, "alloc_uid");
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0)
@@ -87,7 +87,7 @@ int nksu_symbol_compat_init(void)
 		return -ENOENT;
 	}
 
-	pr_info("[ksym] all unexported symbols resolved, cache=%lu\n",
+	pr_err("[ksym] all unexported symbols resolved, cache=%lu\n",
 		nksu_ksym_count());
 	return 0;
 }
