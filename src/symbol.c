@@ -879,6 +879,9 @@ static void scan_kernel_memory_locked(void)
     stext = read_vmcoreinfo_symbol("_stext");
     img_size = read_vmcoreinfo_symbol("KERNEL_IMAGE_SIZE");
 
+    pr_info("[ksym] scan begin: _stext=0x%lx img_size=0x%lx\n",
+            stext, img_size);
+
     if (stext) {
         if (!img_size || img_size > SZ_1G)
             img_size = SZ_512M;
@@ -891,7 +894,7 @@ static void scan_kernel_memory_locked(void)
             return;
     }
 
-#ifdef CONFIG_ARM64
+#if defined(CONFIG_ARM64) || defined(__aarch64__)
     {
         /*
          * arm64 KASLR places the image within KIMAGE_VADDR plus up to
@@ -1067,6 +1070,7 @@ unsigned long nksu_ksym_lookup(const char *name)
      *    expensive, so it must never run twice even if it finds nothing.
      */
     if (!ksym_scanned) {
+        pr_info("[ksym] first lookup '%s', starting memory scan\n", name);
         ksym_scanned = true;
         scan_kernel_memory_locked();
 
