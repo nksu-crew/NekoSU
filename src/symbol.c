@@ -169,7 +169,8 @@ static void kread_best_effort(void *dst, unsigned long src, size_t len)
  * advances *offset.
  *
  * Matches this kernel's kallsyms_expand_symbol(): the compressed length is a
- * single byte followed by that many token indices.
+ * single byte followed by that many token indices, and the first character of
+ * the expanded string (the symbol type) is dropped.
  */
 static int decode_symbol(const u8 *names, const u8 *names_end,
                          const u16 *token_index, const u8 *token_table,
@@ -180,6 +181,7 @@ static int decode_symbol(const u8 *names, const u8 *names_end,
     u32 len;
     char *dst = out;
     char *limit = out + outsz - 1;
+    bool first = true;
 
     if (pos >= names_len)
         return -1;
@@ -193,9 +195,13 @@ static int decode_symbol(const u8 *names, const u8 *names_end,
         const char *tok = (const char *)token_table + idx;
 
         while (*tok) {
-            if (dst >= limit)
+            if (first)
+                first = false;   /* drop the symbol-type character */
+            else if (dst < limit)
+                *dst++ = *tok;
+            else
                 return -1;
-            *dst++ = *tok++;
+            tok++;
         }
     }
 
