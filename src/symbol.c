@@ -835,29 +835,43 @@ static unsigned long read_vmcoreinfo_symbol(const char *sym)
     char *buf;
     loff_t pos = 0;
     ssize_t rd;
+    size_t total = 0;
     unsigned long addr = 0;
     char key[64];
     char *p;
+    static bool logged;
 
     snprintf(key, sizeof(key), "SYMBOL(%s)=", sym);
 
     f = filp_open(VMCOREINFO_PATH, O_RDONLY, 0);
-    if (IS_ERR(f))
+    if (IS_ERR(f)) {
+        if (!logged) {
+            logged = true;
+            pr_info("[ksym] vmcoreinfo: open failed (%ld)\n", PTR_ERR(f));
+        }
         return 0;
+    }
 
-    buf = kmalloc(4096, GFP_KERNEL);
+    buf = kvmalloc(SZ_64K, GFP_KERNEL);
     if (!buf) {
         filp_close(f, NULL);
         return 0;
     }
 
-    rd = kernel_read(f, buf, 4095, &pos);
-    filp_close(f, NULL);
-    if (rd <= 0) {
-        kfree(buf);
-        return 0;
+    /* the file can be much larger than a page; read it all */
+    while (total < SZ_64K - 1) {
+        rd = kernel_read(f, buf + total, SZ_64K - 1 - total, &pos);
+        if (rd <= 0)
+            break;
+        total += (size_t)rd;
     }
-    buf[rd] = '\0';
+    filp_close(f, NULL);
+    buf[total] = '\0';
+
+    if (!logged) {
+        logged = true;
+        pr_info("[ksym] vmcoreinfo: read %zu bytes\n", total);
+    }
 
     p = strstr(buf, key);
     if (p) {
@@ -865,7 +879,7 @@ static unsigned long read_vmcoreinfo_symbol(const char *sym)
         addr = simple_strtoul(p, NULL, 16);
     }
 
-    kfree(buf);
+    kvfree(buf);
     return addr;
 }
 
@@ -878,6 +892,8 @@ static void scan_kernel_memory_locked(void)
     int found;
 
     stext = read_vmcoreinfo_symbol("_stext");
+    if (!stext)
+        stext = read_vmcoreinfo_symbol("_text");
     img_size = read_vmcoreinfo_symbol("KERNEL_IMAGE_SIZE");
 
     pr_info("[ksym] scan begin: _stext=0x%lx img_size=0x%lx\n",
@@ -896,18 +912,27 @@ static void scan_kernel_memory_locked(void)
     }
 
     /*
-     * Default arm64 layout: KASLR places the image within KIMAGE_VADDR plus
-     * up to KERNEL_IMAGE_SIZE. Scan the whole window so a randomised base is
-     * still covered; unmapped chunks fail fast and the candidate search is
-     * bounded, so the cost stays low.
+     * Default arm64 layout: KASLR places the image after the architecture's
+     * KIMAGE_VADDR. The base differs by VA size, so try the common ones;
+     * unmapped windows fail fast, so trying several is cheap.
      */
     {
-        unsigned long base = 0xffff800000000000UL;
+        static const unsigned long bases[] = {
+            0xffffff8000000000UL,  /* 39-bit VA (typical Android arm64) */
+            0xffff800000000000UL,  /* 48-bit VA */
+        };
+        int i;
 
-        pr_info("[ksym] scanning candidate window 0x%lx\n", base);
-        found = scan_region(base, base + SZ_1G);
-        pr_info("[ksym] window 0x%lx found %d table(s), cached %lu\n",
-                base, found, nksu_ksym_count());
+        for (i = 0; i < ARRAY_SIZE(bases); i++) {
+            unsigned long base = bases[i];
+
+            pr_info("[ksym] scanning candidate window 0x%lx\n", base);
+            found = scan_region(base, base + SZ_1G);
+            pr_info("[ksym] window 0x%lx found %d table(s), cached %lu\n",
+                    base, found, nksu_ksym_count());
+            if (found)
+                break;
+        }
     }
 }
 
