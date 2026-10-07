@@ -894,14 +894,13 @@ static void scan_kernel_memory_locked(void)
             return;
     }
 
-#if defined(CONFIG_ARM64) || defined(__aarch64__)
+    /*
+     * Default arm64 layout: KASLR places the image within KIMAGE_VADDR plus
+     * up to KERNEL_IMAGE_SIZE. Scan the whole window so a randomised base is
+     * still covered; unmapped chunks fail fast and the candidate search is
+     * bounded, so the cost stays low.
+     */
     {
-        /*
-         * arm64 KASLR places the image within KIMAGE_VADDR plus up to
-         * KERNEL_IMAGE_SIZE. Scan the whole window so a randomised base is
-         * still covered; unmapped chunks fail fast and the candidate search
-         * is bounded, so the cost stays low.
-         */
         unsigned long base = 0xffff800000000000UL;
 
         pr_info("[ksym] scanning candidate window 0x%lx\n", base);
@@ -909,7 +908,6 @@ static void scan_kernel_memory_locked(void)
         pr_info("[ksym] window 0x%lx found %d table(s), cached %lu\n",
                 base, found, nksu_ksym_count());
     }
-#endif
 }
 
 /*
