@@ -37,7 +37,4 @@ void nksu_ksym_cache_clear(void);
 /* Dump all cached symbols to the kernel log (CONFIG_NKSU_DEBUG only). */
 void nksu_ksym_dump(void);
 
-/* Build identifier of symbol.c; used to detect a stale object file. */
-const char *nksu_ksym_build_id(void);
-
 #endif /* NKSU_SYMBOL_H */

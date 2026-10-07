@@ -246,29 +246,6 @@ struct kallsyms_view {
 };
 
 /*
- * 256 non-empty NUL-terminated tokens within 4096 bytes, without any
- * token_index check. Used only to spot near-miss candidates while scanning.
- */
-static u32 token_table_shape_len(const u8 *p, const u8 *end)
-{
-    const u8 *q = p;
-    int i;
-
-    for (i = 0; i < 256; i++) {
-        const u8 *start = q;
-
-        while (q < end && *q)
-            q++;
-        if (q >= end || *q != '\0' || q == start)
-            return 0;
-        if ((size_t)(q - p) > 4096)
-            return 0;
-        q++;
-    }
-    return (u32)(q - p);
-}
-
-/*
  * Return the token_table size if p is a valid token_table, else 0.
  *
  * A token_table is exactly 256 non-empty NUL-terminated tokens immediately
@@ -469,22 +446,14 @@ static const u8 *find_names_start(const u8 *buf_start,
 
     cand = names_end - last_marker;
 
-    {
-        int valid = 0, tried = 0;
-
-        for (; cand >= buf_start &&
-               (size_t)(names_end - cand) <= max_names_size; cand--) {
-            if (!names_start_valid(cand, v))
-                continue;
-            valid++;
-            if (try(cand, names_end, arg))
-                return cand;
-            tried++;
-            if (cand == buf_start)
-                break;
-        }
-        pr_err("[ksym] find_names_start: last_marker=%u valid=%d tried=%d\n",
-                last_marker, valid, tried);
+    for (; cand >= buf_start &&
+           (size_t)(names_end - cand) <= max_names_size; cand--) {
+        if (!names_start_valid(cand, v))
+            continue;
+        if (try(cand, names_end, arg))
+            return cand;
+        if (cand == buf_start)
+            break;
     }
     return NULL;
 }
@@ -502,38 +471,27 @@ static int view_from_token_table(const u8 *buf_start, const u8 *token_table,
     memset(v, 0, sizeof(*v));
 
     tlen = token_table_len(token_table, buf_end);
-    if (!tlen) {
-        pr_err("[ksym] vt: token_table_len failed\n");
+    if (!tlen)
         return -ENOENT;
-    }
     /* token_index is 8-byte aligned by output_label's ALGN */
-    if (token_table + tlen + 7 + 512 > buf_end) {
-        pr_err("[ksym] vt: index out of buffer (tlen=%u)\n", tlen);
+    if (token_table + tlen + 7 + 512 > buf_end)
         return -ENOENT;
-    }
 
     v->token_table = token_table;
     v->tlen = tlen;
     v->token_index = (const u16 *)PTR_ALIGN(token_table + tlen, 8);
 
-    if (v->token_index[0] != 0) {
-        pr_err("[ksym] vt: index[0]=%u\n", v->token_index[0]);
+    if (v->token_index[0] != 0)
         return -ENOENT;
-    }
     for (i = 1; i < 256; i++) {
         if (v->token_index[i] <= v->token_index[i - 1] ||
-            v->token_index[i] >= tlen) {
-            pr_err("[ksym] vt: index[%d]=%u bad (tlen=%u)\n",
-                    i, v->token_index[i], tlen);
+            v->token_index[i] >= tlen)
             return -ENOENT;
-        }
     }
 
     if (!locate_markers(buf_start, token_table, &v->markers,
-                        &v->marker_count)) {
-        pr_err("[ksym] vt: locate_markers failed\n");
+                        &v->marker_count))
         return -ENOENT;
-    }
 
     v->names_end = (const u8 *)v->markers;
     return 0;
@@ -605,11 +563,8 @@ static int resolve_addresses(const struct kallsyms_view *v,
     memcpy(&num_syms, names - 8, sizeof(num_syms));
     if (num_syms == 0 ||
         num_syms <= (v->marker_count - 1) * 256u ||
-        num_syms > v->marker_count * 256u) {
-        pr_err("[ksym] resolve: num_syms %u implausible for %u markers\n",
-                num_syms, v->marker_count);
+        num_syms > v->marker_count * 256u)
         return -ENOENT;
-    }
 
     /* the offsets array plus the two scalars must be inside the buffer */
     if (names_addr < (unsigned long)buf_start + 16 +
@@ -619,19 +574,14 @@ static int resolve_addresses(const struct kallsyms_view *v,
         return -ENOENT;
 
     memcpy(&rel_base, names - 16, sizeof(rel_base));
-    if (rel_base < 0xffff000000000000UL) {
-        pr_err("[ksym] resolve: rel_base 0x%lx implausible\n", rel_base);
+    if (rel_base < 0xffff000000000000UL)
         return -ENOENT;
-    }
 
     ai->base_relative = true;
     ai->offsets = (const u32 *)(names_addr - 16 -
                                 (size_t)num_syms * sizeof(u32));
     ai->relative_base = rel_base;
     *num_out = num_syms;
-
-    pr_err("[ksym] resolve: num_syms=%u rel_base=0x%lx offsets=0x%lx\n",
-            num_syms, rel_base, (unsigned long)ai->offsets);
     return 0;
 }
 
@@ -680,14 +630,8 @@ static int consume_buffer(const u8 *buf, unsigned long len,
     u32 i, offset;
 
     rc = view_from_token_table(buf, token_table, buf + len, &v);
-    if (rc) {
-        pr_err("[ksym] view_from_token_table failed (%d)\n", rc);
+    if (rc)
         return rc;
-    }
-
-    pr_err("[ksym] view ok: names_end=0x%lx markers=0x%lx count=%u\n",
-            (unsigned long)v.names_end, (unsigned long)v.markers,
-            v.marker_count);
 
     memset(&ctx, 0, sizeof(ctx));
     ctx.v = &v;
@@ -695,15 +639,9 @@ static int consume_buffer(const u8 *buf, unsigned long len,
     ctx.buf_end = buf + len;
 
     names = find_names_start(buf, &v, try_names_candidate, &ctx);
-    if (!names || !ctx.ok) {
-        pr_err("[ksym] names/addr resolve failed: names=%p ok=%d\n",
-                names, ctx.ok);
+    if (!names || !ctx.ok)
         return -ENOENT;
-    }
     v.names = names;
-
-    pr_err("[ksym] resolved names at 0x%lx, %u symbols\n",
-            (unsigned long)names, ctx.num_syms);
 
     /* decode each name and cache name -> address */
     offset = 0;
@@ -738,7 +676,6 @@ static int scan_region(unsigned long start, unsigned long end)
     const size_t chunk = SZ_64K;
     /* overlap so a token_table spanning a chunk boundary is still seen */
     const size_t step = SZ_64K - 4096;
-    static int near_miss;
     u8 *probe;
     unsigned long pos;
     int found = 0;
@@ -759,21 +696,9 @@ static int scan_region(unsigned long start, unsigned long end)
                 unsigned long tt_kaddr = pos + off;
                 u8 *buf;
                 unsigned long buf_len, buf_kaddr;
-                int rc;
 
-                if (!token_table_len(tt, probe + len)) {
-                    /* did we at least see the 256-token shape? */
-                    if (near_miss < 8 &&
-                        token_table_shape_len(tt, probe + len)) {
-                        pr_err("[ksym] shape-only candidate 0x%lx\n",
-                                tt_kaddr);
-                        near_miss++;
-                    }
+                if (!token_table_len(tt, probe + len))
                     continue;
-                }
-
-                pr_err("[ksym] token_table candidate at 0x%lx\n",
-                        tt_kaddr);
 
                 /* candidate hit: copy a window ending past token_table */
                 buf_len = KSYM_BOUNCE_BACK + KSYM_BOUNCE_FWD;
@@ -786,17 +711,15 @@ static int scan_region(unsigned long start, unsigned long end)
 
                 kread_best_effort(buf, buf_kaddr, buf_len);
 
-                rc = consume_buffer(buf, buf_len,
-                                    buf + (tt_kaddr - buf_kaddr));
-                kvfree(buf);
-
-                if (rc == 0) {
+                if (consume_buffer(buf, buf_len,
+                                   buf + (tt_kaddr - buf_kaddr)) == 0) {
                     found++;
                     hit = true;
-                    break;
                 }
-                pr_err("[ksym] candidate 0x%lx rejected (rc=%d)\n",
-                        tt_kaddr, rc);
+                kvfree(buf);
+
+                if (hit)
+                    break;
             }
         }
 
@@ -833,18 +756,12 @@ static unsigned long read_vmcoreinfo_symbol(const char *sym)
     unsigned long addr = 0;
     char key[64];
     char *p;
-    static bool logged;
 
     snprintf(key, sizeof(key), "SYMBOL(%s)=", sym);
 
     f = filp_open(VMCOREINFO_PATH, O_RDONLY, 0);
-    if (IS_ERR(f)) {
-        if (!logged) {
-            logged = true;
-            pr_err("[ksym] vmcoreinfo: open failed (%ld)\n", PTR_ERR(f));
-        }
+    if (IS_ERR(f))
         return 0;
-    }
 
     buf = kvmalloc(SZ_64K, GFP_KERNEL);
     if (!buf) {
@@ -861,11 +778,6 @@ static unsigned long read_vmcoreinfo_symbol(const char *sym)
     }
     filp_close(f, NULL);
     buf[total] = '\0';
-
-    if (!logged) {
-        logged = true;
-        pr_err("[ksym] vmcoreinfo: read %zu bytes\n", total);
-    }
 
     p = strstr(buf, key);
     if (p) {
@@ -897,11 +809,7 @@ static void scan_kernel_memory_locked(void)
         unsigned long lo = anchor > SZ_256M ? anchor - SZ_256M : 0;
         unsigned long hi = anchor + SZ_256M;
 
-        pr_err("[ksym] anchor copy_from_kernel_nofault=0x%lx, scan 0x%lx..0x%lx\n",
-                anchor, lo, hi);
         found = scan_region(lo, hi);
-        pr_err("[ksym] anchor scan found %d table(s), cached %lu\n",
-                found, nksu_ksym_count());
         if (found)
             return;
     }
@@ -912,17 +820,10 @@ static void scan_kernel_memory_locked(void)
         stext = read_vmcoreinfo_symbol("_text");
     img_size = read_vmcoreinfo_symbol("KERNEL_IMAGE_SIZE");
 
-    pr_err("[ksym] vmcoreinfo: _stext=0x%lx img_size=0x%lx\n",
-            stext, img_size);
-
     if (stext) {
         if (!img_size || img_size > SZ_1G)
             img_size = SZ_512M;
-        pr_err("[ksym] scanning kernel image 0x%lx+0x%lx\n",
-                stext, img_size);
         found = scan_region(stext, stext + img_size);
-        pr_err("[ksym] kernel image scan found %d table(s), cached %lu\n",
-                found, nksu_ksym_count());
         if (found)
             return;
     }
@@ -936,12 +837,7 @@ static void scan_kernel_memory_locked(void)
         int i;
 
         for (i = 0; i < ARRAY_SIZE(bases); i++) {
-            unsigned long base = bases[i];
-
-            pr_err("[ksym] scanning candidate window 0x%lx\n", base);
-            found = scan_region(base, base + SZ_1G);
-            pr_err("[ksym] window 0x%lx found %d table(s), cached %lu\n",
-                    base, found, nksu_ksym_count());
+            found = scan_region(bases[i], bases[i] + SZ_1G);
             if (found)
                 break;
         }
@@ -1082,11 +978,6 @@ out:
  * Public interface
  */
 
-const char *nksu_ksym_build_id(void)
-{
-    return "symbol-v4";
-}
-
 unsigned long nksu_ksym_lookup(const char *name)
 {
     unsigned long addr;
@@ -1094,8 +985,6 @@ unsigned long nksu_ksym_lookup(const char *name)
 
     if (!name || !name[0])
         return 0;
-
-    pr_err("[ksym] symbol.c v3 lookup '%s'\n", name);
 
     mutex_lock(&ksym_lock);
 
@@ -1119,7 +1008,6 @@ unsigned long nksu_ksym_lookup(const char *name)
      *    expensive, so it must never run twice even if it finds nothing.
      */
     if (!ksym_scanned) {
-        pr_err("[ksym] first lookup '%s', starting memory scan\n", name);
         ksym_scanned = true;
         scan_kernel_memory_locked();
 

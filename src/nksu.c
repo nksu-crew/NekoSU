@@ -157,7 +157,6 @@ static int __init nekosu_init(void)
 #ifdef CONFIG_NKSU_DEBUG
     pr_alert("The current build is in debug mode, and security may be compromised.\n");
     pr_info("nekosu build commit: %s\n", NKSU_GIT_COMMIT);
-    pr_info("symbol.c build id: %s\n", nksu_ksym_build_id());
 #endif
 
     /*
@@ -171,10 +170,6 @@ static int __init nekosu_init(void)
         pr_err("Failed to resolve unexported symbols: %d\n", ret);
         return ret;
     }
-
-#ifdef CONFIG_NKSU_DEBUG
-    pr_err("nekosu: symbol cache holds %lu entries\n", nksu_ksym_count());
-#endif
 
     ret = nekosu_init_all_components();
     if (ret) {
