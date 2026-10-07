@@ -59,6 +59,16 @@ ccflags-y += -I$(IDIR)
 ccflags-y += -I$(objtree)/security/selinux
 ccflags-y += -include $(srctree)/include/uapi/asm-generic/errno.h
 
+# Embed the source commit so debug builds can report exactly what is running.
+NKSU_SRCDIR := $(if $(src),$(src),$(M))
+ifneq ($(NKSU_SRCDIR),)
+NKSU_GIT_COMMIT := $(shell git -C $(NKSU_SRCDIR) rev-parse --short=12 HEAD 2>/dev/null)
+endif
+ifeq ($(NKSU_GIT_COMMIT),)
+NKSU_GIT_COMMIT := unknown
+endif
+ccflags-y += -DNKSU_GIT_COMMIT=\"$(NKSU_GIT_COMMIT)\"
+
 ccflags-y += -std=gnu99
 ccflags-y += -Wno-unused-variable
 ccflags-y += -Wno-declaration-after-statement

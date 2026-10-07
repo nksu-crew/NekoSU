@@ -12,6 +12,10 @@
 #include <fmac.h>
 #include "symbol_compat.h"
 
+#ifndef NKSU_GIT_COMMIT
+#define NKSU_GIT_COMMIT "unknown"
+#endif
+
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Aqnya");
 MODULE_DESCRIPTION("nekosu");
@@ -152,6 +156,7 @@ static int __init nekosu_init(void)
 
 #ifdef CONFIG_NKSU_DEBUG
     pr_alert("The current build is in debug mode, and security may be compromised.\n");
+    pr_info("nekosu build commit: %s\n", NKSU_GIT_COMMIT);
 #endif
 
     /*
