@@ -7,7 +7,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 object VendorBootInstaller {
-    const val ASSET_DIR = "nksu"
+    const val ASSET_DIR = ""
 
     private const val SCRIPT_NAME = "install-vendor-boot.sh"
 

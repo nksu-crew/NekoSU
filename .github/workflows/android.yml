@@ -71,9 +71,9 @@ jobs:
 
     - name: Prepare KOs (assets)
       run: |
-        mkdir -p manager/app/src/main/assets/nksu
-        find lkm-artifacts -name '*_nksu.ko' -exec cp {} manager/app/src/main/assets/nksu/ \;
-        ls -la manager/app/src/main/assets/nksu/
+        mkdir -p manager/app/src/main/assets
+        find lkm-artifacts -name '*_nksu.ko' -exec cp {} manager/app/src/main/assets/ \;
+        ls -la manager/app/src/main/assets/
 
     - name: Install bazelisk
       env:
@@ -103,18 +103,11 @@ jobs:
         cp bazel-bin/ncore ../../manager/app/src/main/jniLibs/arm64-v8a/libncore.so
         file ../../manager/app/src/main/jniLibs/arm64-v8a/libncore.so
 
-        # 同时作为可执行文件放入 assets, 供安装脚本调用
-        mkdir -p ../../manager/app/src/main/assets/nksu
-        cp bazel-bin/ncore ../../manager/app/src/main/assets/nksu/ncore
-        chmod 0755 ../../manager/app/src/main/assets/nksu/ncore
-        file ../../manager/app/src/main/assets/nksu/ncore
-
     - name: Copy install script to assets
       run: |
-        mkdir -p manager/app/src/main/assets/nksu
-        cp scripts/install-vendor-boot.sh manager/app/src/main/assets/nksu/install-vendor-boot.sh
-        chmod 0755 manager/app/src/main/assets/nksu/install-vendor-boot.sh
-        ls -la manager/app/src/main/assets/nksu/
+        cp scripts/install-vendor-boot.sh manager/app/src/main/assets/install-vendor-boot.sh
+        chmod 0755 manager/app/src/main/assets/install-vendor-boot.sh
+        ls -la manager/app/src/main/assets/
 
     - name: Build init (arm64-v8a)
       env:
@@ -130,8 +123,8 @@ jobs:
         file manager/app/src/main/jniLibs/arm64-v8a/libinit.so
 
         # init 保留备用 (默认安装流程不使用), 放入 assets 供脚本可选调用
-        cp build/init-arm64-v8a/init manager/app/src/main/assets/nksu/init
-        chmod 0755 manager/app/src/main/assets/nksu/init
+        cp build/init-arm64-v8a/init manager/app/src/main/assets/init
+        chmod 0755 manager/app/src/main/assets/init
 
     - name: Decode Release Keystore
       run: |
