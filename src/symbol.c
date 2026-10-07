@@ -540,33 +540,9 @@ static int view_from_token_table(const u8 *buf_start, const u8 *token_table,
 }
 
 /*
- * Full name decoding.
- *
- * Decoding is streamed: the first pass only counts the symbols and records
- * the indices of the two self-referential symbols, so no per-name allocation
- * is needed (a big char** array of ~180k names could fail to allocate).
+ * Full name decoding is streamed on demand (see consume_buffer): names are
+ * never stored, only decoded into a small stack buffer.
  */
-
-struct ksym_scan {
-    u32 count;       /* total symbols */
-};
-
-static int scan_names(const struct kallsyms_view *v, struct ksym_scan *s)
-{
-    u32 offset = 0, n = 0;
-    char name[KSYM_NAME_MAX];
-
-    while (n < KSYM_MAX_SYMS) {
-        if (decode_symbol(v->names, v->names_end, v->token_index,
-                          v->token_table, &offset, name,
-                          sizeof(name)) < 0)
-            break;
-        n++;
-    }
-
-    s->count = n;
-    return n ? 0 : -EINVAL;
-}
 
 /*
  * Address array location.
@@ -604,13 +580,12 @@ static unsigned long symbol_addr(const struct addr_info *ai, u32 i)
  *     kallsyms_names            (8-byte aligned)
  *
  * So relative_base is the u64 at names-16, num_syms the u32 at names-8, and
- * the offsets array starts at names-16-count*4. num_syms must equal the
- * number of names we decoded, which validates the whole layout.
+ * the offsets array starts at names-16-num_syms*4. num_syms must be
+ * consistent with the number of markers, which validates the layout.
  */
 static int resolve_addresses(const struct kallsyms_view *v,
-                             const struct ksym_scan *scan,
                              const u8 *buf_start, const u8 *buf_end,
-                             struct addr_info *ai)
+                             struct addr_info *ai, u32 *num_out)
 {
     const u8 *names = v->names;
     unsigned long names_addr = (unsigned long)names;
@@ -619,22 +594,29 @@ static int resolve_addresses(const struct kallsyms_view *v,
 
     memset(ai, 0, sizeof(*ai));
 
-    if (scan->count < 2)
+    /* marker_count = ceil(num_syms / 256) */
+    if (v->marker_count < 2)
         return -ENOENT;
 
-    /* the offsets array plus the two scalars must be inside the buffer */
-    if (names_addr < (unsigned long)buf_start + 16 +
-                     (size_t)scan->count * sizeof(u32))
-        return -ENOENT;
-    if (names_addr + 16 > (unsigned long)buf_end)
+    /* the two scalars sit just before names */
+    if (names_addr < (unsigned long)buf_start + 24)
         return -ENOENT;
 
     memcpy(&num_syms, names - 8, sizeof(num_syms));
-    if (num_syms != scan->count) {
-        pr_info("[ksym] resolve: num_syms %u != decoded %u\n",
-                num_syms, scan->count);
+    if (num_syms == 0 ||
+        num_syms <= (v->marker_count - 1) * 256u ||
+        num_syms > v->marker_count * 256u) {
+        pr_info("[ksym] resolve: num_syms %u implausible for %u markers\n",
+                num_syms, v->marker_count);
         return -ENOENT;
     }
+
+    /* the offsets array plus the two scalars must be inside the buffer */
+    if (names_addr < (unsigned long)buf_start + 16 +
+                     (size_t)num_syms * sizeof(u32))
+        return -ENOENT;
+    if (names_addr + 16 > (unsigned long)buf_end)
+        return -ENOENT;
 
     memcpy(&rel_base, names - 16, sizeof(rel_base));
     if (rel_base < 0xffff000000000000UL) {
@@ -646,6 +628,7 @@ static int resolve_addresses(const struct kallsyms_view *v,
     ai->offsets = (const u32 *)(names_addr - 16 -
                                 (size_t)num_syms * sizeof(u32));
     ai->relative_base = rel_base;
+    *num_out = num_syms;
 
     pr_info("[ksym] resolve: num_syms=%u rel_base=0x%lx offsets=0x%lx\n",
             num_syms, rel_base, (unsigned long)ai->offsets);
@@ -661,16 +644,14 @@ struct try_ctx {
     const u8 *buf;
     const u8 *buf_end;
     /* results */
-    struct ksym_scan scan;
+    u32 num_syms;
     struct addr_info ai;
     bool ok;
 };
 
 /*
- * Candidate names callback: decode all symbols and try to locate the
- * address array. The self-reference check is the strongest disambiguator:
- * only the real names start makes the kallsyms_names / kallsyms_token_table
- * addresses line up and yields a consistent relative_base.
+ * Candidate names callback: locate the address array from the fixed layout
+ * that follows the names stream.
  */
 static bool try_names_candidate(const u8 *names, const u8 *names_end,
                                 void *arg)
@@ -681,11 +662,8 @@ static bool try_names_candidate(const u8 *names, const u8 *names_end,
     v.names = names;
     v.names_end = names_end;
 
-    if (scan_names(&v, &ctx->scan) != 0)
-        return false;
-
-    if (resolve_addresses(&v, &ctx->scan, ctx->buf, ctx->buf_end,
-                          &ctx->ai) != 0)
+    if (resolve_addresses(&v, ctx->buf, ctx->buf_end,
+                          &ctx->ai, &ctx->num_syms) != 0)
         return false;
 
     ctx->ok = true;
@@ -724,11 +702,11 @@ static int consume_buffer(const u8 *buf, unsigned long len,
     }
 
     pr_info("[ksym] resolved names at 0x%lx, %u symbols\n",
-            (unsigned long)names, ctx.scan.count);
+            (unsigned long)names, ctx.num_syms);
 
-    /* second pass: decode each name again and cache name -> address */
+    /* decode each name and cache name -> address */
     offset = 0;
-    for (i = 0; i < ctx.scan.count; i++) {
+    for (i = 0; i < ctx.num_syms; i++) {
         char nm[KSYM_NAME_MAX];
         unsigned long a;
 
