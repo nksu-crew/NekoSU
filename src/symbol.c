@@ -167,6 +167,9 @@ static void kread_best_effort(void *dst, unsigned long src, size_t len)
 /*
  * Decode one symbol from names[..names_end). Returns 0 on success and
  * advances *offset.
+ *
+ * Matches this kernel's kallsyms_expand_symbol(): the compressed length is a
+ * single byte followed by that many token indices.
  */
 static int decode_symbol(const u8 *names, const u8 *names_end,
                          const u16 *token_index, const u8 *token_table,
@@ -174,28 +177,14 @@ static int decode_symbol(const u8 *names, const u8 *names_end,
 {
     u32 pos = *offset;
     u32 names_len = (u32)(names_end - names);
-    u32 len = 0;
-    int shift = 0;
+    u32 len;
     char *dst = out;
     char *limit = out + outsz - 1;
 
     if (pos >= names_len)
         return -1;
 
-    for (;;) {
-        u8 b;
-
-        if (pos >= names_len)
-            return -1;
-        b = names[pos++];
-        len |= (u32)(b & 0x7f) << shift;
-        if (!(b & 0x80))
-            break;
-        shift += 7;
-        if (shift > 21)
-            return -1;
-    }
-
+    len = names[pos++];
     if (len >= KSYM_NAME_MAX || pos + len > names_len)
         return -1;
 
@@ -311,7 +300,8 @@ static u32 token_table_len(const u8 *p, const u8 *end)
     }
 
     tlen = (u32)(q - p);
-    ti = (const u16 *)PTR_ALIGN(q, 2);
+    /* kallsyms_token_index is emitted with the label's 8-byte alignment */
+    ti = (const u16 *)PTR_ALIGN(q, 8);
     if ((const u8 *)ti + 512 > end)
         return 0;
 
@@ -326,12 +316,11 @@ static u32 token_table_len(const u8 *p, const u8 *end)
 /*
  * Locate markers.
  *
- * The markers array sits immediately before token_table, so its *end* is
- * exactly token_table; it is strictly increasing and starts at 0. Walk
- * backwards from token_table while the sequence keeps increasing; the
- * first non-increasing u32 ends the walk. The resulting start is almost
- * certainly the real markers[0] (name bytes cannot stay strictly increasing
- * for long).
+ * kallsyms_markers sits just before kallsyms_token_table, but both labels are
+ * 8-byte aligned, so there can be up to 4 bytes of zero padding between the
+ * last marker and token_table. The array is strictly increasing and starts at
+ * 0. Walk backwards from the last marker while the sequence keeps increasing;
+ * the result is markers[0].
  */
 static bool locate_markers(const u8 *buf_start, const u8 *token_table,
                            const u32 **markers_out, u32 *count_out)
@@ -350,6 +339,10 @@ static bool locate_markers(const u8 *buf_start, const u8 *token_table,
     p = token_table - 4;
     if (p < limit)
         return false;
+
+    /* skip the 0..4 bytes of alignment padding before token_table */
+    if (*(const u32 *)p == 0 && p - 4 >= limit)
+        p -= 4;
 
     start = p;
     count = 1;
@@ -498,14 +491,13 @@ static int view_from_token_table(const u8 *buf_start, const u8 *token_table,
     tlen = token_table_len(token_table, buf_end);
     if (!tlen)
         return -ENOENT;
-    /* token_index may take one extra byte due to 2-byte alignment */
-    if (token_table + tlen + 513 > buf_end)
+    /* token_index is 8-byte aligned by output_label's ALGN */
+    if (token_table + tlen + 7 + 512 > buf_end)
         return -ENOENT;
 
     v->token_table = token_table;
     v->tlen = tlen;
-    /* token_index is a u16 array right after token_table, possibly padded */
-    v->token_index = (const u16 *)PTR_ALIGN(token_table + tlen, 2);
+    v->token_index = (const u16 *)PTR_ALIGN(token_table + tlen, 8);
 
     if (v->token_index[0] != 0)
         return -ENOENT;
