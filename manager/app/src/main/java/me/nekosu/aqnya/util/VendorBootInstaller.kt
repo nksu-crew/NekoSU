@@ -6,12 +6,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 
-/**
- * vendor_boot 安装 (LKM) 的运行时支持:
- * - 把 assets 里的 nksu.ko / init / ncore / install-vendor-boot.sh 释放到 filesDir
- * - 复制用户选中的 vendor_boot.img
- * - 通过 su 执行安装脚本, 并流式回传输出
- */
 object VendorBootInstaller {
     const val ASSET_DIR = "nksu"
 
@@ -19,15 +13,11 @@ object VendorBootInstaller {
     private const val NCORE_NAME = "ncore"
     private const val INIT_NAME = "init"
 
-    /** 需要释放到设备可执行目录的 asset 列表 */
     private val EXECUTABLES = setOf(SCRIPT_NAME, NCORE_NAME, INIT_NAME)
 
-    fun installDir(context: Context): File = File(context.filesDir, "nksu-install").apply { mkdirs() }
+    fun installDir(context: Context): File =
+        File(context.filesDir, "nksu-install").apply { mkdirs() }
 
-    /**
-     * 释放安装所需文件到 [installDir]。
-     * @return 脚本文件的绝对路径
-     */
     fun prepare(context: Context): File {
         val dir = installDir(context)
         val assets = context.assets.list(ASSET_DIR) ?: emptyArray()
@@ -49,13 +39,11 @@ object VendorBootInstaller {
         return File(dir, SCRIPT_NAME)
     }
 
-    /** assets 中打包的所有 KMI ko 文件名 (androidNN-x.y_nksu.ko), 已排序。 */
     fun koCandidates(context: Context): List<String> =
         (context.assets.list(ASSET_DIR) ?: emptyArray())
             .filter { it.endsWith("_nksu.ko") }
             .sorted()
 
-    /** 把用户选中的 uri 复制到安装目录, 返回目标文件。 */
     fun stageVendorBoot(
         context: Context,
         uri: Uri,
@@ -68,13 +56,6 @@ object VendorBootInstaller {
         return out
     }
 
-    /**
-     * 通过 su 执行安装脚本。
-     *
-     * @param koName assets 中的 ko 文件名; 会先释放到安装目录后传给脚本。
-     * @param onOutput 逐行回调脚本输出。
-     * @return 脚本退出码。
-     */
     suspend fun install(
         context: Context,
         vendorBoot: File,
@@ -83,10 +64,11 @@ object VendorBootInstaller {
     ): Int =
         withContext(Dispatchers.IO) {
             val script = prepare(context)
+            val dir = installDir(context)
 
             val koFile =
                 koName?.let { name ->
-                    File(installDir(context), name).also { out ->
+                    File(dir, name).also { out ->
                         context.assets.open("$ASSET_DIR/$name").use { input ->
                             out.outputStream().use { input.copyTo(it) }
                         }
@@ -95,13 +77,15 @@ object VendorBootInstaller {
                 }
 
             val cmd = buildList {
+                add("sh")
                 add(script.absolutePath)
                 add(vendorBoot.absolutePath)
                 if (koFile != null) add(koFile.absolutePath)
             }
 
             val process =
-                ProcessBuilder(listOf("su", "-c", cmd.joinToString(" ")))
+                ProcessBuilder(cmd)
+                    .directory(dir)
                     .redirectErrorStream(true)
                     .start()
 
