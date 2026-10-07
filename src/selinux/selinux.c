@@ -15,6 +15,7 @@
 #include "objsec.h"
 
 #include <fmac.h>
+#include "symbol_compat.h"
 
 static struct task_struct *nksu_init_thread;
 

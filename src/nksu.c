@@ -10,6 +10,7 @@
 #include <linux/uaccess.h>
 #include <linux/string.h>
 #include <fmac.h>
+#include "symbol_compat.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Aqnya");
@@ -137,6 +138,9 @@ static void nekosu_cleanup_all_components(void)
 {
     nekosu_cleanup_components(core_components, CORE_COMPONENTS_COUNT);
 
+    nksu_symbol_compat_exit();
+    nksu_ksym_cache_clear();
+
     pr_info("All components cleaned up\n");
 }
 
@@ -149,9 +153,27 @@ static int __init nekosu_init(void)
 #ifdef CONFIG_NKSU_DEBUG
     pr_alert("The current build is in debug mode, and security may be compromised.\n");
 #endif
+
+    /*
+     * Resolve the GKI/KMI-unexported kernel symbols into function/data
+     * pointers first. Components then reach them through this indirection
+     * layer, so the module no longer carries relocations for those symbols
+     * and will not fail to load with "Unknown symbol".
+     */
+    ret = nksu_symbol_compat_init();
+    if (ret) {
+        pr_err("Failed to resolve unexported symbols: %d\n", ret);
+        return ret;
+    }
+
+#ifdef CONFIG_NKSU_DEBUG
+    nksu_ksym_dump();
+#endif
+
     ret = nekosu_init_all_components();
     if (ret) {
         pr_err("Failed to initialize nekosu: %d\n", ret);
+        nksu_symbol_compat_exit();
         return ret;
     }
 

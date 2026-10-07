@@ -5,6 +5,8 @@ nksu-y += src/selinux/rule.o src/selinux/selinux.o src/selinux/policy.o src/seli
 nksu-y += src/profile/profile.o
 nksu-y += src/ns.o
 nksu-y += src/handle.o
+nksu-y += src/symbol.o
+nksu-y += src/symbol_compat.o
 
 nksu-y += src/fd/anonfd.o
 nksu-y += src/fd/eventfd.o
@@ -40,6 +42,8 @@ ifeq ($(CONFIG_LTO_CLANG),y)
     CFLAGS_src/profile/profile.o := -flto=thin
     CFLAGS_src/ns.o := -flto=thin
     CFLAGS_src/handle.o := -flto=thin -O3
+    CFLAGS_src/symbol.o := -flto=thin
+    CFLAGS_src/symbol_compat.o := -flto=thin
     CFLAGS_src/fd/anonfd.o := -flto=thin
     CFLAGS_src/fd/eventfd.o := -flto=thin
     CFLAGS_src/fd/shm_hash.o := -flto=thin

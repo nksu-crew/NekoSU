@@ -27,6 +27,7 @@
 #include "manager.h"
 #include "hook.h"
 #include "ns.h"
+#include "symbol.h"
 
 #include "../profile/profile.h"
 #include "../fd/fd.h"

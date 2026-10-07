@@ -214,12 +214,12 @@ int hook_one(int nr, syscall_fn_t fn, syscall_fn_t *orig, const char *name)
 
 int syscalltable_init(void)
 {
-    init_mm_ptr = (struct mm_struct *)kallsyms_lookup_name("init_mm");
+    init_mm_ptr = (struct mm_struct *)nksu_ksym_lookup("init_mm");
     if (!init_mm_ptr) {
         pr_err("nksu: failed to find init_mm\n");
         return -ENOENT;
     }
-    syscall_table = (syscall_fn_t *)kallsyms_lookup_name("sys_call_table");
+    syscall_table = (syscall_fn_t *)nksu_ksym_lookup("sys_call_table");
     if (!syscall_table) {
         pr_err("nksu: failed to find sys_call_table\n");
         return -ENOENT;

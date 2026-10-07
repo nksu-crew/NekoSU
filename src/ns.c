@@ -7,6 +7,8 @@
 #include <linux/dcache.h>
 #include <fmac.h>
 
+#include "symbol_compat.h"
+
 static int sync_fs_root(struct task_struct *target)
 {
     struct path new_root;

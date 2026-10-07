@@ -40,6 +40,8 @@
 #include "avc_ss.h"
 #include "xfrm.h"
 
+#include "symbol_compat.h"
+
 /* saved pointers, alive for the lifetime of the hook */
 static struct selinux_policy *nksu_orig_policy __read_mostly;
 static struct selinux_policy *nksu_work_policy __read_mostly;

@@ -32,6 +32,8 @@
 #include "xfrm.h"
 #include "security.h"
 
+#include "symbol_compat.h"
+
 /* some older kernels don't have this helper */
 #ifndef hashtab_for_each
 #define hashtab_for_each(h, node)                                            \

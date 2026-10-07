@@ -16,6 +16,8 @@
 
 #include <fmac.h>
 
+#include "symbol_compat.h"
+
 int privilege_validate(const struct privilege_desc *desc)
 {
 	if (!desc)

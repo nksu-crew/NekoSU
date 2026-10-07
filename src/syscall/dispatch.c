@@ -95,7 +95,7 @@ static unsigned long resolve_ni_syscall(void)
     int i;
 
     for (i = 0; names[i]; i++) {
-        unsigned long addr = kallsyms_lookup_name(names[i]);
+        unsigned long addr = nksu_ksym_lookup(names[i]);
         if (addr)
             return addr;
     }

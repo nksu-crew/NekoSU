@@ -22,6 +22,8 @@
 #include "ss/symtab.h"
 #include "security.h"
 
+#include "symbol_compat.h"
+
 /* flip the bit in type_attr_map_array so the type is a member of the attr */
 static int add_type_to_attr(struct policydb *p,
 			    const char *type_name,
