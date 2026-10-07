@@ -464,14 +464,22 @@ static const u8 *find_names_start(const u8 *buf_start,
 
     cand = names_end - last_marker;
 
-    for (; cand >= buf_start && (size_t)(names_end - cand) <= max_names_size;
-         cand--) {
-        if (!names_start_valid(cand, v))
-            continue;
-        if (try(cand, names_end, arg))
-            return cand;
-        if (cand == buf_start)
-            break;
+    {
+        int valid = 0, tried = 0;
+
+        for (; cand >= buf_start &&
+               (size_t)(names_end - cand) <= max_names_size; cand--) {
+            if (!names_start_valid(cand, v))
+                continue;
+            valid++;
+            if (try(cand, names_end, arg))
+                return cand;
+            tried++;
+            if (cand == buf_start)
+                break;
+        }
+        pr_info("[ksym] find_names_start: last_marker=%u valid=%d tried=%d\n",
+                last_marker, valid, tried);
     }
     return NULL;
 }
@@ -489,27 +497,38 @@ static int view_from_token_table(const u8 *buf_start, const u8 *token_table,
     memset(v, 0, sizeof(*v));
 
     tlen = token_table_len(token_table, buf_end);
-    if (!tlen)
+    if (!tlen) {
+        pr_info("[ksym] vt: token_table_len failed\n");
         return -ENOENT;
+    }
     /* token_index is 8-byte aligned by output_label's ALGN */
-    if (token_table + tlen + 7 + 512 > buf_end)
+    if (token_table + tlen + 7 + 512 > buf_end) {
+        pr_info("[ksym] vt: index out of buffer (tlen=%u)\n", tlen);
         return -ENOENT;
+    }
 
     v->token_table = token_table;
     v->tlen = tlen;
     v->token_index = (const u16 *)PTR_ALIGN(token_table + tlen, 8);
 
-    if (v->token_index[0] != 0)
+    if (v->token_index[0] != 0) {
+        pr_info("[ksym] vt: index[0]=%u\n", v->token_index[0]);
         return -ENOENT;
+    }
     for (i = 1; i < 256; i++) {
         if (v->token_index[i] <= v->token_index[i - 1] ||
-            v->token_index[i] >= tlen)
+            v->token_index[i] >= tlen) {
+            pr_info("[ksym] vt: index[%d]=%u bad (tlen=%u)\n",
+                    i, v->token_index[i], tlen);
             return -ENOENT;
+        }
     }
 
     if (!locate_markers(buf_start, token_table, &v->markers,
-                        &v->marker_count))
+                        &v->marker_count)) {
+        pr_info("[ksym] vt: locate_markers failed\n");
         return -ENOENT;
+    }
 
     v->names_end = (const u8 *)v->markers;
     return 0;
@@ -766,8 +785,14 @@ static int consume_buffer(const u8 *buf, unsigned long len,
     u32 i;
 
     rc = view_from_token_table(buf, token_table, buf + len, &v);
-    if (rc)
+    if (rc) {
+        pr_info("[ksym] view_from_token_table failed (%d)\n", rc);
         return rc;
+    }
+
+    pr_info("[ksym] view ok: names_end=0x%lx markers=0x%lx count=%u\n",
+            (unsigned long)v.names_end, (unsigned long)v.markers,
+            v.marker_count);
 
     memset(&ctx, 0, sizeof(ctx));
     ctx.v = &v;
@@ -776,9 +801,14 @@ static int consume_buffer(const u8 *buf, unsigned long len,
 
     names = find_names_start(buf, &v, try_names_candidate, &ctx);
     if (!names || !ctx.ok) {
+        pr_info("[ksym] names/addr resolve failed: names=%p ok=%d\n",
+                names, ctx.ok);
         free_ksym_names(&ctx.kn);
         return -ENOENT;
     }
+
+    pr_info("[ksym] resolved names at 0x%lx, %u symbols\n",
+            (unsigned long)names, ctx.kn.count);
 
     for (i = 0; i < ctx.kn.count; i++) {
         unsigned long a = symbol_addr(&ctx.ai, i);
