@@ -1048,6 +1048,8 @@ unsigned long nksu_ksym_lookup(const char *name)
     if (!name || !name[0])
         return 0;
 
+    pr_err("[ksym] symbol.c v3 lookup '%s'\n", name);
+
     mutex_lock(&ksym_lock);
 
     e = ksym_find_locked(name);
