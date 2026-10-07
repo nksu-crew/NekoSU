@@ -1038,6 +1038,11 @@ out:
  * Public interface
  */
 
+const char *nksu_ksym_build_id(void)
+{
+    return "symbol-v4";
+}
+
 unsigned long nksu_ksym_lookup(const char *name)
 {
     unsigned long addr;
