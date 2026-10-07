@@ -73,7 +73,6 @@
 #define KSYM_MAX_SYMS     (1u << 21)  /* ~2M, far above real needs */
 #define KSYM_NAME_MAX     512         /* matches kernel KSYM_NAME_LEN cap */
 #define KSYM_MARKERS_MAX  8192        /* at most 8192 markers */
-#define KSYM_ADDR_MAX     (8u << 20)  /* address array max 8MB */
 
 /* bounce buffer: copy this much before and after the table */
 #define KSYM_BOUNCE_BACK  (16u << 20)
@@ -550,8 +549,6 @@ static int view_from_token_table(const u8 *buf_start, const u8 *token_table,
 
 struct ksym_scan {
     u32 count;       /* total symbols */
-    u32 idx_names;   /* index of "kallsyms_names", or U32_MAX */
-    u32 idx_token;   /* index of "kallsyms_token_table", or U32_MAX */
 };
 
 static int scan_names(const struct kallsyms_view *v, struct ksym_scan *s)
@@ -559,22 +556,11 @@ static int scan_names(const struct kallsyms_view *v, struct ksym_scan *s)
     u32 offset = 0, n = 0;
     char name[KSYM_NAME_MAX];
 
-    s->count = 0;
-    s->idx_names = U32_MAX;
-    s->idx_token = U32_MAX;
-
     while (n < KSYM_MAX_SYMS) {
         if (decode_symbol(v->names, v->names_end, v->token_index,
                           v->token_table, &offset, name,
                           sizeof(name)) < 0)
             break;
-
-        if (s->idx_names == U32_MAX &&
-            strcmp(name, "kallsyms_names") == 0)
-            s->idx_names = n;
-        else if (s->idx_token == U32_MAX &&
-                 strcmp(name, "kallsyms_token_table") == 0)
-            s->idx_token = n;
         n++;
     }
 
@@ -609,104 +595,61 @@ static unsigned long symbol_addr(const struct addr_info *ai, u32 i)
 }
 
 /*
- * kallsyms relative-address decoding, matching kallsyms_sym_address():
- * non-negative offsets are added, negative ones are absolute addresses.
- */
-static unsigned long ksym_rel_addr(unsigned long base, s32 off)
-{
-    if (off >= 0)
-        return base + (u32)off;
-    return base - 1 - (u32)off;
-}
-
-/*
- * Recover the address array and relative_base from the self-referential
- * symbols.
+ * Recover the address array and relative_base from the fixed on-disk layout.
  *
- * The table always contains "kallsyms_names" and "kallsyms_token_table",
- * whose addresses are names and token_table themselves. For a candidate
- * address array:
- *   base        = (unsigned long)names - offsets[idx_names]
- *   token_table == ksym_rel_addr(base, offsets[idx_token])
- * A match identifies the real array. The array must also be large enough
- * for scan->count entries to stay inside the buffer.
+ * scripts/kallsyms.c emits, in this order:
+ *     kallsyms_offsets[]        (u32 / .long per symbol)
+ *     kallsyms_relative_base    (.quad, 8-byte aligned)
+ *     kallsyms_num_syms         (.long, 8-byte aligned)
+ *     kallsyms_names            (8-byte aligned)
+ *
+ * So relative_base is the u64 at names-16, num_syms the u32 at names-8, and
+ * the offsets array starts at names-16-count*4. num_syms must equal the
+ * number of names we decoded, which validates the whole layout.
  */
 static int resolve_addresses(const struct kallsyms_view *v,
                              const struct ksym_scan *scan,
                              const u8 *buf_start, const u8 *buf_end,
                              struct addr_info *ai)
 {
-    u32 idx_names = scan->idx_names, idx_token = scan->idx_token;
-    unsigned long names_addr = (unsigned long)v->names;
-    unsigned long low_addr, o;
+    const u8 *names = v->names;
+    unsigned long names_addr = (unsigned long)names;
+    unsigned long rel_base;
+    u32 num_syms;
 
     memset(ai, 0, sizeof(*ai));
 
-    if (idx_names == U32_MAX || idx_token == U32_MAX) {
-        pr_info("[ksym] resolve: sym not found idx_names=%u idx_token=%u total=%u\n",
-                idx_names, idx_token, scan->count);
+    if (scan->count < 2)
+        return -ENOENT;
+
+    /* the offsets array plus the two scalars must be inside the buffer */
+    if (names_addr < (unsigned long)buf_start + 16 +
+                     (size_t)scan->count * sizeof(u32))
+        return -ENOENT;
+    if (names_addr + 16 > (unsigned long)buf_end)
+        return -ENOENT;
+
+    memcpy(&num_syms, names - 8, sizeof(num_syms));
+    if (num_syms != scan->count) {
+        pr_info("[ksym] resolve: num_syms %u != decoded %u\n",
+                num_syms, scan->count);
         return -ENOENT;
     }
 
-    pr_info("[ksym] resolve: idx_names=%u idx_token=%u total=%u\n",
-            idx_names, idx_token, scan->count);
-
-    low_addr = names_addr > KSYM_ADDR_MAX ? names_addr - KSYM_ADDR_MAX : 0;
-    if (low_addr < (unsigned long)buf_start)
-        low_addr = (unsigned long)buf_start;
-
-    /* 1) BASE_RELATIVE: u32 offsets array plus relative_base */
-    for (o = 4; names_addr >= o && names_addr - o >= low_addr; o += 4) {
-        const u8 *p = (const u8 *)(names_addr - o);
-        const u32 *arr = (const u32 *)p;
-        s32 off_names = (s32)arr[idx_names];
-        s32 off_token = (s32)arr[idx_token];
-        unsigned long base;
-
-        /* the whole array must fit before names */
-        if ((unsigned long)arr + (size_t)scan->count * sizeof(*arr) > (unsigned long)buf_end)
-            continue;
-        if (off_names < 0)
-            continue;
-
-        base = names_addr - (u32)off_names;
-        if ((unsigned long)v->token_table == ksym_rel_addr(base, off_token)) {
-            ai->base_relative = true;
-            ai->offsets = arr;
-            ai->relative_base = base;
-            return 0;
-        }
+    memcpy(&rel_base, names - 16, sizeof(rel_base));
+    if (rel_base < 0xffff000000000000UL) {
+        pr_info("[ksym] resolve: rel_base 0x%lx implausible\n", rel_base);
+        return -ENOENT;
     }
 
-    /*
-     * 2) Absolute mode: kallsyms_addresses is an unsigned long array and
-     *    the self-referential entries equal the names / token_table
-     *    memory addresses directly.
-     */
-    for (o = sizeof(unsigned long);
-         names_addr >= o && names_addr - o >= low_addr;
-         o += sizeof(unsigned long)) {
-        const u8 *p = (const u8 *)(names_addr - o);
-        const unsigned long *arr = (const unsigned long *)p;
-        unsigned long a_names, a_token;
+    ai->base_relative = true;
+    ai->offsets = (const u32 *)(names_addr - 16 -
+                                (size_t)num_syms * sizeof(u32));
+    ai->relative_base = rel_base;
 
-        if ((unsigned long)arr + (size_t)scan->count * sizeof(*arr) > (unsigned long)buf_end)
-            continue;
-
-        memcpy(&a_names, &arr[idx_names], sizeof(a_names));
-        if (a_names != names_addr)
-            continue;
-        memcpy(&a_token, &arr[idx_token], sizeof(a_token));
-        if (a_token == (unsigned long)v->token_table) {
-            ai->base_relative = false;
-            ai->addresses = arr;
-            return 0;
-        }
-    }
-
-    pr_info("[ksym] resolve: no matching offsets array (names=0x%lx)\n",
-            names_addr);
-    return -ENOENT;
+    pr_info("[ksym] resolve: num_syms=%u rel_base=0x%lx offsets=0x%lx\n",
+            num_syms, rel_base, (unsigned long)ai->offsets);
+    return 0;
 }
 
 /*
