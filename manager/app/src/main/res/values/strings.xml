@@ -228,4 +228,20 @@
     <string name="about_card_description">Learn more about nekosu feature and how to use</string>
 <string name="about_card_title">Learn nekosu</string>
 <string name="finger_print">Fingerprint</string>
+
+    <!-- Install (vendor_boot / LKM) -->
+    <string name="install_title">Install nksu</string>
+    <string name="install_desc">Patch the vendor_boot image with nksu.ko and flash it.</string>
+    <string name="install_pick_vendor_boot">Select vendor_boot.img</string>
+    <string name="install_pick_vendor_boot_desc">Choose the vendor_boot image dumped from your device</string>
+    <string name="install_select_ko">Kernel module (KMI)</string>
+    <string name="install_start">Start install</string>
+    <string name="install_working">Installing…</string>
+    <string name="install_progress">Progress</string>
+    <string name="install_success">Patched image written to Download/vendor_boot_nksu.img</string>
+    <string name="install_failed">Install failed</string>
+    <string name="install_no_su">Root (su) is required to install</string>
+    <string name="install_pick_first">Please select a vendor_boot image first</string>
+    <string name="install_ko_missing">No kernel module (nksu.ko) packaged in assets</string>
+    <string name="install_done">Done</string>
 </resources>

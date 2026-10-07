@@ -249,7 +249,7 @@ out:
     return rc;
 }
 
-int kmod_load_many(const struct ko_image *images, size_t count, size_t preferred)
+int kmod_load(const void *image, size_t size)
 {
     HashTable *ksyms = ht_create(262144);
     if (!ksyms) {
@@ -264,30 +264,10 @@ int kmod_load_many(const struct ko_image *images, size_t count, size_t preferred
         return rc;
     }
 
-    int last_rc = 0;
-    /* preferred 优先，失败后按序遍历其余 */
-    for (size_t i = 0; i < count; i++) {
-        size_t idx;
-        if (i == 0 && preferred < count)
-            idx = preferred;
-        else if (i == 0)
-            idx = 0;
-        else if (preferred < count && i <= preferred)
-            idx = i - 1;
-        else
-            idx = i;
-
-        fprintf(stderr, "loading %s\n", images[idx].kmi);
-        rc = patch_and_load(images[idx].start,
-                            (size_t)(images[idx].end - images[idx].start), ksyms);
-        if (rc == 0) {
-            fprintf(stderr, "loaded %s\n", images[idx].kmi);
-            break;
-        }
-        fprintf(stderr, "failed to load %s: %s\n", images[idx].kmi, strerror(-rc));
-        last_rc = rc;
-    }
+    rc = patch_and_load(image, size, ksyms);
+    if (rc != 0)
+        fprintf(stderr, "failed to load module: %s\n", strerror(-rc));
 
     ht_free(ksyms);
-    return rc == 0 ? 0 : last_rc;
+    return rc;
 }

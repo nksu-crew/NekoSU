@@ -7,39 +7,50 @@
 
 #include "kmod.h"
 
-/* 各 KMI 版本嵌入的 nksu.ko（由 CMake 通过 llvm-objcopy 生成符号） */
-extern const unsigned char _binary_android12_5_10_nksu_ko_start[];
-extern const unsigned char _binary_android12_5_10_nksu_ko_end[];
-extern const unsigned char _binary_android13_5_10_nksu_ko_start[];
-extern const unsigned char _binary_android13_5_10_nksu_ko_end[];
-extern const unsigned char _binary_android13_5_15_nksu_ko_start[];
-extern const unsigned char _binary_android13_5_15_nksu_ko_end[];
-extern const unsigned char _binary_android14_5_15_nksu_ko_start[];
-extern const unsigned char _binary_android14_5_15_nksu_ko_end[];
-extern const unsigned char _binary_android14_6_1_nksu_ko_start[];
-extern const unsigned char _binary_android14_6_1_nksu_ko_end[];
-extern const unsigned char _binary_android15_6_6_nksu_ko_start[];
-extern const unsigned char _binary_android15_6_6_nksu_ko_end[];
-extern const unsigned char _binary_android16_6_12_nksu_ko_start[];
-extern const unsigned char _binary_android16_6_12_nksu_ko_end[];
-
-#define KO_ENTRY(sym, kmi, android, major, minor)                          \
-    {                                                                      \
-        (kmi), (android), (major), (minor), _binary_##sym##_nksu_ko_start, \
-            _binary_##sym##_nksu_ko_end                                    \
-    }
-
-static const struct ko_image ko_table[] = {
-    KO_ENTRY(android12_5_10, "android12-5.10", 12, 5, 10),
-    KO_ENTRY(android13_5_10, "android13-5.10", 13, 5, 10),
-    KO_ENTRY(android13_5_15, "android13-5.15", 13, 5, 15),
-    KO_ENTRY(android14_5_15, "android14-5.15", 14, 5, 15),
-    KO_ENTRY(android14_6_1, "android14-6.1", 14, 6, 1),
-    KO_ENTRY(android15_6_6, "android15-6.6", 15, 6, 6),
-    KO_ENTRY(android16_6_12, "android16-6.12", 16, 6, 12),
+/*
+ * nksu.ko 不再编译进 init, 而是随 ramdisk 放在文件系统中。
+ * 依次尝试常见位置, 找到第一个可用者加载。
+ */
+static const char *ko_paths[] = {
+    "/nksu.ko",
+    "/data/adb/nksu/nksu.ko",
+    "/data/local/tmp/nksu.ko",
+    "/vendor/lib/modules/nksu.ko",
 };
 
-#define KO_COUNT (sizeof(ko_table) / sizeof(ko_table[0]))
+static unsigned char *read_file(const char *path, size_t *out_size)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return NULL;
+
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return NULL;
+    }
+    long size = ftell(f);
+    if (size <= 0) {
+        fclose(f);
+        return NULL;
+    }
+    rewind(f);
+
+    unsigned char *buf = malloc((size_t)size);
+    if (!buf) {
+        fclose(f);
+        return NULL;
+    }
+
+    if (fread(buf, 1, (size_t)size, f) != (size_t)size) {
+        free(buf);
+        fclose(f);
+        return NULL;
+    }
+
+    fclose(f);
+    *out_size = (size_t)size;
+    return buf;
+}
 
 /* 解析 uname release，如 "5.10.198-android12-9-g1234567" */
 static void parse_kernel_version(const char *release, int *major, int *minor, int *android)
@@ -58,17 +69,6 @@ static void parse_kernel_version(const char *release, int *major, int *minor, in
         tag += strlen("-android");
         *android = (int)strtol(tag, NULL, 10);
     }
-}
-
-/* 精确匹配失败返回 KO_COUNT，由 kmod_load_many 遍历兜底 */
-static size_t find_preferred(int major, int minor, int android)
-{
-    for (size_t i = 0; i < KO_COUNT; i++) {
-        if (ko_table[i].major == major && ko_table[i].minor == minor &&
-            ko_table[i].android == android)
-            return i;
-    }
-    return KO_COUNT;
 }
 
 int main(int argc, char *argv[], char *envp[]) {
@@ -90,22 +90,35 @@ int main(int argc, char *argv[], char *envp[]) {
 
   struct utsname uts;
   int major = 0, minor = 0, android = 0;
-  size_t preferred = KO_COUNT;
   if (uname(&uts) == 0) {
     parse_kernel_version(uts.release, &major, &minor, &android);
-    preferred = find_preferred(major, minor, android);
     fprintf(stderr, "nksu: kernel release=%s parsed=%d.%d android=%d\n",
             uts.release, major, minor, android);
   } else {
     perror("uname");
   }
 
-  if (preferred < KO_COUNT)
-    fprintf(stderr, "nksu: matched KMI %s\n", ko_table[preferred].kmi);
-  else
-    fprintf(stderr, "nksu: no exact KMI match, trying all variants\n");
+  int loaded = 0;
+  for (size_t i = 0; i < sizeof(ko_paths) / sizeof(ko_paths[0]); i++) {
+    size_t size = 0;
+    unsigned char *image = read_file(ko_paths[i], &size);
+    if (!image)
+      continue;
 
-  kmod_load_many(ko_table, KO_COUNT, preferred);
+    fprintf(stderr, "nksu: loading %s (%zu bytes)\n", ko_paths[i], size);
+    if (kmod_load(image, size) == 0) {
+      fprintf(stderr, "nksu: loaded %s\n", ko_paths[i]);
+      free(image);
+      loaded = 1;
+      break;
+    }
+    fprintf(stderr, "nksu: failed to load %s\n", ko_paths[i]);
+    free(image);
+  }
+
+  if (!loaded)
+    fprintf(stderr, "nksu: no module could be loaded\n");
+
   umount2("/proc", MNT_DETACH);
   execve("/init", argv, envp);
   return 0;

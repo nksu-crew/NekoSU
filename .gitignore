@@ -11,5 +11,5 @@ release.keystore
 ktlint
 app/src/main/jniLibs/
 .kotlin/
-userspace/init/ko/
 userspace/ncore/
+manager/app/src/main/assets/nksu/

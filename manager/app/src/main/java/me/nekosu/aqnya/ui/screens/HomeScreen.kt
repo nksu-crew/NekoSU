@@ -1,5 +1,6 @@
 package me.nekosu.aqnya.ui.screens
 
+import android.net.Uri
 import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -40,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -53,10 +55,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import me.nekosu.aqnya.R
-import me.nekosu.aqnya.ncore
 import me.nekosu.aqnya.ui.component.StatusCard
-import me.nekosu.aqnya.util.DebugPreferences
+import me.nekosu.aqnya.util.VendorBootInstaller
 import me.nekosu.aqnya.util.getAppVersion
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class InstallStatus {
     INSTALLED,
@@ -141,11 +145,14 @@ fun HomeScreen(
     onAboutClick: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var showInstallSheet by remember { mutableStateOf(false) }
 
     val installStatus by viewModel.installStatus.collectAsState()
     val suCount by viewModel.suCount.collectAsState()
     val managerVersion by viewModel.managerVersion.collectAsState()
+
+    var installState by remember { mutableStateOf(InstallState()) }
 
     LaunchedEffect(Unit) {
         viewModel.installStatus.collect { status ->
@@ -164,9 +171,17 @@ fun HomeScreen(
         onNavigateToApps = onNavigateToApps,
         onInstallClick = {
             if (installStatus != InstallStatus.INSTALLED) {
-                Toast.makeText(context, "即将上线... From Aqnya", Toast.LENGTH_SHORT).show()
+                val candidates =
+                    runCatching { VendorBootInstaller.koCandidates(context) }.getOrDefault(emptyList())
+                installState =
+                    installState.copy(
+                        koCandidates = candidates,
+                        selectedKo = installState.selectedKo ?: candidates.firstOrNull(),
+                        done = false,
+                        success = null,
+                        message = "",
+                    )
                 showInstallSheet = true
-                ncore.ctl(1)
             } else {
                 Toast.makeText(context, context.getString(R.string.running), Toast.LENGTH_SHORT).show()
             }
@@ -174,11 +189,81 @@ fun HomeScreen(
         onAboutClick = onAboutClick,
     )
 
-    LaunchedEffect(showInstallSheet) {
-        if (showInstallSheet) {
-            ncore.helloLog()
-        }
-    }
+    InstallDialog(
+        show = showInstallSheet,
+        state = installState,
+        onDismiss = { showInstallSheet = false },
+        onPickVendorBoot = { uri ->
+            val name = uri.lastPathSegment?.substringAfterLast('/') ?: uri.toString()
+            installState =
+                installState.copy(
+                    vendorBootUri = uri,
+                    vendorBootName = name,
+                    done = false,
+                    success = null,
+                    message = "",
+                )
+        },
+        onSelectKo = { ko -> installState = installState.copy(selectedKo = ko) },
+        onStart = {
+            val uri = installState.vendorBootUri
+            if (uri == null) {
+                installState = installState.copy(message = context.getString(R.string.install_pick_first))
+                return@InstallDialog
+            }
+            val ko = installState.selectedKo
+            if (ko == null) {
+                installState = installState.copy(message = context.getString(R.string.install_ko_missing))
+                return@InstallDialog
+            }
+
+            installState =
+                installState.copy(
+                    running = true,
+                    done = false,
+                    success = null,
+                    message = "",
+                )
+
+            scope.launch {
+                val log = StringBuilder()
+                val exit =
+                    runCatching {
+                        val staged =
+                            withContext(Dispatchers.IO) {
+                                VendorBootInstaller.stageVendorBoot(context, uri)
+                            }
+                        VendorBootInstaller.install(context, staged, ko) { line ->
+                            log.append(line).append('\n')
+                            installState = installState.copy(message = log.toString())
+                        }
+                    }.getOrElse { e ->
+                        log.append("ERROR: ").append(e.message).append('\n')
+                        installState = installState.copy(message = log.toString())
+                        -1
+                    }
+
+                val ok = exit == 0
+                installState =
+                    installState.copy(
+                        running = false,
+                        done = true,
+                        success = ok,
+                        message =
+                            if (ok) {
+                                context.getString(R.string.install_success) + "\n\n" + log
+                            } else {
+                                context.getString(R.string.install_failed) + "\n\n" + log
+                            },
+                    )
+                Toast.makeText(
+                    context,
+                    if (ok) context.getString(R.string.install_success) else context.getString(R.string.install_failed),
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        },
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
