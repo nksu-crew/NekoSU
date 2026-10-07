@@ -67,6 +67,7 @@
 #include <linux/file.h>
 #include <linux/uaccess.h>
 
+#include "klog.h"
 #include "symbol.h"
 
 #define KSYM_MAX_SYMS     (1u << 21)  /* ~2M, far above real needs */

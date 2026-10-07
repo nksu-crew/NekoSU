@@ -51,6 +51,8 @@ int nksu_symbol_compat_init(void)
 {
 	int missing = 0;
 
+	pr_info("[ksym] compat init begin, cache=%lu\n", nksu_ksym_count());
+
 	NKSU_RESOLVE(nksu_alloc_uid, "alloc_uid");
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0)
 	NKSU_RESOLVE(nksu_set_cred_ucounts, "set_cred_ucounts");
@@ -80,11 +82,13 @@ int nksu_symbol_compat_init(void)
 	NKSU_RESOLVE(nksu_hashtab_map, "hashtab_map");
 
 	if (missing) {
-		pr_err("[ksym] %d unexported symbol(s) unresolved\n", missing);
+		pr_err("[ksym] %d unexported symbol(s) unresolved, cache=%lu\n",
+		       missing, nksu_ksym_count());
 		return -ENOENT;
 	}
 
-	pr_info("[ksym] all unexported symbols resolved\n");
+	pr_info("[ksym] all unexported symbols resolved, cache=%lu\n",
+		nksu_ksym_count());
 	return 0;
 }
 
