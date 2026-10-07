@@ -700,6 +700,7 @@ static int consume_buffer(const u8 *buf, unsigned long len,
                 names, ctx.ok);
         return -ENOENT;
     }
+    v.names = names;
 
     pr_info("[ksym] resolved names at 0x%lx, %u symbols\n",
             (unsigned long)names, ctx.num_syms);
@@ -710,7 +711,7 @@ static int consume_buffer(const u8 *buf, unsigned long len,
         char nm[KSYM_NAME_MAX];
         unsigned long a;
 
-        if (decode_symbol(v.names, v.names_end, v.token_index,
+        if (decode_symbol(names, v.names_end, v.token_index,
                           v.token_table, &offset, nm, sizeof(nm)) < 0)
             break;
 
