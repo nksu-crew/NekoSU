@@ -1,4 +1,0 @@
-[target.aarch64-linux-android]
-rustflags = [
-    "-Ctarget-feature=+bti,+paca,+pacg",
-]

@@ -1,0 +1,3 @@
+[submodule "userspace/ncore"]
+	path = userspace/ncore
+	url = https://github.com/aqnya/ncore.git
