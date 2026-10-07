@@ -72,7 +72,6 @@
 #define KSYM_MAX_SYMS     (1u << 21)  /* ~2M, far above real needs */
 #define KSYM_NAME_MAX     512         /* matches kernel KSYM_NAME_LEN cap */
 #define KSYM_MARKERS_MAX  8192        /* at most 8192 markers */
-#define KSYM_NAMES_MAX    (8u << 20)  /* names section max 8MB */
 #define KSYM_ADDR_MAX     (8u << 20)  /* address array max 8MB */
 
 /* bounce buffer: copy this much before and after the table */
@@ -83,6 +82,9 @@
 static DEFINE_HASHTABLE(ksym_htable, 18);
 static DEFINE_MUTEX(ksym_lock);
 static atomic_t ksym_count = ATOMIC_INIT(0);
+
+/* the heavy in-memory kallsyms scan runs at most once */
+static bool ksym_scanned;
 
 struct ksym_entry {
     struct hlist_node node;
@@ -248,24 +250,47 @@ struct kallsyms_view {
     const u8  *names_end;     /* == markers */
 };
 
-/* Return the token_table size if p is a token_table, else 0. */
+/*
+ * Return the token_table size if p is a valid token_table, else 0.
+ *
+ * A token_table is exactly 256 non-empty NUL-terminated tokens immediately
+ * followed (after 2-byte alignment) by a u16 index array whose i-th entry is
+ * the byte offset of the i-th token. Requiring that exact match makes false
+ * positives in unrelated rodata essentially impossible, and does not assume
+ * anything about individual token length.
+ */
 static u32 token_table_len(const u8 *p, const u8 *end)
 {
     const u8 *q = p;
+    u32 offsets[256];
+    u32 tlen;
+    const u16 *ti;
     int i;
 
     for (i = 0; i < 256; i++) {
-        u32 len = 0;
+        const u8 *start = q;
 
-        while (q < end && *q && len < 3) {
+        offsets[i] = (u32)(start - p);
+        while (q < end && *q)
             q++;
-            len++;
-        }
-        if (q >= end || *q != '\0' || len == 0 || len > 2)
+        if (q >= end || *q != '\0' || q == start)
+            return 0;
+        if ((size_t)(q - p) > 4096)
             return 0;
         q++;
     }
-    return (u32)(q - p);
+
+    tlen = (u32)(q - p);
+    ti = (const u16 *)PTR_ALIGN(q, 2);
+    if ((const u8 *)ti + 512 > end)
+        return 0;
+
+    for (i = 0; i < 256; i++) {
+        if (ti[i] != offsets[i])
+            return 0;
+    }
+
+    return tlen;
 }
 
 /*
@@ -396,6 +421,7 @@ static const u8 *find_names_start(const u8 *buf_start,
     const u8 *names_end = v->names_end;
     const u8 *cand;
     u32 last_marker;
+    u32 max_names_size;
 
     if (v->marker_count < 2)
         return NULL;
@@ -404,9 +430,18 @@ static const u8 *find_names_start(const u8 *buf_start,
         (size_t)last_marker >= (size_t)(names_end - buf_start))
         return NULL;
 
+    /*
+     * names_size lies in [last_marker, last_marker + 256*KSYM_NAME_MAX]:
+     * the last marker points at the start of the final group, which has at
+     * most 256 symbols of at most KSYM_NAME_MAX bytes each.
+     */
+    max_names_size = last_marker + 256u * KSYM_NAME_MAX;
+    if (max_names_size < last_marker) /* overflow guard */
+        return NULL;
+
     cand = names_end - last_marker;
 
-    for (; cand >= buf_start && (size_t)(names_end - cand) < KSYM_NAMES_MAX;
+    for (; cand >= buf_start && (size_t)(names_end - cand) <= max_names_size;
          cand--) {
         if (!names_start_valid(cand, v))
             continue;
@@ -738,7 +773,7 @@ static int scan_region(unsigned long start, unsigned long end)
         if (kread((const void *)pos, probe, chunk) < 0)
             continue;
 
-        for (off = 0; off + 8 < chunk; off += 8) {
+        for (off = 0; off + 8 < chunk; off += 4) {
             const u8 *tt = probe + off;
             unsigned long tt_kaddr = pos + off;
             u8 *buf;
@@ -839,32 +874,37 @@ static unsigned long read_vmcoreinfo_symbol(const char *sym)
 static void scan_kernel_memory_locked(void)
 {
     unsigned long stext, img_size;
+    int found;
 
     stext = read_vmcoreinfo_symbol("_stext");
     img_size = read_vmcoreinfo_symbol("KERNEL_IMAGE_SIZE");
 
-    if (stext && img_size && img_size <= SZ_1G) {
+    if (stext) {
+        if (!img_size || img_size > SZ_1G)
+            img_size = SZ_512M;
         pr_info("[ksym] scanning kernel image 0x%lx+0x%lx\n",
                 stext, img_size);
-        scan_region(stext, stext + img_size);
-        return;
+        found = scan_region(stext, stext + img_size);
+        pr_info("[ksym] kernel image scan found %d table(s), cached %lu\n",
+                found, nksu_ksym_count());
+        if (found)
+            return;
     }
 
 #ifdef CONFIG_ARM64
     {
-        static const unsigned long bases[] = {
-            0xffff800000000000UL,
-            0xffffff8000000000UL,
-        };
-        int i;
+        /*
+         * arm64 KASLR places the image within KIMAGE_VADDR plus up to
+         * KERNEL_IMAGE_SIZE. Scan the whole window so a randomised base is
+         * still covered; unmapped chunks fail fast and the candidate search
+         * is bounded, so the cost stays low.
+         */
+        unsigned long base = 0xffff800000000000UL;
 
-        for (i = 0; i < ARRAY_SIZE(bases); i++) {
-            unsigned long base = bases[i];
-
-            pr_info("[ksym] scanning candidate window 0x%lx\n", base);
-            if (scan_region(base, base + SZ_64M) > 0)
-                break;
-        }
+        pr_info("[ksym] scanning candidate window 0x%lx\n", base);
+        found = scan_region(base, base + SZ_1G);
+        pr_info("[ksym] window 0x%lx found %d table(s), cached %lu\n",
+                base, found, nksu_ksym_count());
     }
 #endif
 }
@@ -874,11 +914,47 @@ static void scan_kernel_memory_locked(void)
  */
 
 /*
+ * Parse one "addr type name" kallsyms line in place. Returns the address if
+ * the name matches, otherwise 0. `line` is modified (delimiters -> NUL).
+ */
+static unsigned long match_kallsyms_line(char *line, const char *name,
+                                         size_t namelen)
+{
+    char *sp1, *sp2, *sym;
+
+    if (!*line)
+        return 0;
+
+    sp1 = strchr(line, ' ');
+    if (!sp1)
+        return 0;
+    *sp1 = '\0';
+
+    sym = sp1 + 1;
+    sp2 = strchr(sym, ' ');
+    if (!sp2)
+        return 0;
+    sym = sp2 + 1;
+
+    {
+        char *e = sym + strcspn(sym, " \t");
+
+        *e = '\0';
+    }
+
+    if (sym[0] && strlen(sym) == namelen &&
+        memcmp(sym, name, namelen) == 0)
+        return simple_strtoul(line, NULL, 16);
+
+    return 0;
+}
+
+/*
  * Look up an address by name in /proc/kallsyms. When kptr_restrict hides
  * addresses the values are 0 and this returns 0.
  *
- * Uses carry-over: if a read ends without a newline, keep the trailing
- * partial line for the next read so a symbol name is never split.
+ * Uses carry-over: if a read ends mid-line, keep the trailing partial line
+ * for the next read so a symbol name is never split.
  */
 static unsigned long lookup_proc_kallsyms(const char *name)
 {
@@ -901,56 +977,53 @@ static unsigned long lookup_proc_kallsyms(const char *name)
     }
 
     for (;;) {
-        char *p = buf, *line;
+        char *p, *line;
+
+        if (used >= SZ_64K - 1) {
+            /* defensive: never let the buffer overrun */
+            used = 0;
+        }
 
         rd = kernel_read(f, buf + used, SZ_64K - 1 - used, &pos);
-        if (rd <= 0)
+        if (rd < 0)
             break;
+        if (rd == 0) {
+            /* EOF: the remaining bytes (if any) are the final line */
+            if (used) {
+                buf[used] = '\0';
+                addr = match_kallsyms_line(buf, name, namelen);
+            }
+            break;
+        }
 
         buf[used + rd] = '\0';
         used += (size_t)rd;
 
+        p = buf;
         while ((line = strsep(&p, "\n")) != NULL) {
-            char *sp1, *sp2, *sym, *endp;
-            unsigned long a;
-
-            /* the last piece may be a truncated partial line */
             if (!p) {
+                /*
+                 * Last piece. If the buffer ended on a newline this is an
+                 * empty tail: reset the buffer. Otherwise keep the partial
+                 * line for the next read.
+                 */
                 size_t linelen = strlen(line);
 
-                if (linelen == 0)
+                if (linelen == 0) {
+                    used = 0;
                     break;
-                /* move the partial line to the front for the next round */
+                }
+                if (linelen != (size_t)(line - buf)) {
+                    /* move partial line to the front for the next round */
+                    memmove(buf, line, linelen + 1);
+                }
                 used = linelen;
-                memmove(buf, line, linelen + 1);
                 break;
             }
 
-            if (!*line)
-                continue;
-
-            sp1 = strchr(line, ' ');
-            if (!sp1)
-                continue;
-            *sp1 = '\0';
-            a = simple_strtoul(line, &endp, 16);
-
-            sym = sp1 + 1;
-            sp2 = strchr(sym, ' ');
-            if (!sp2)
-                continue;
-            sym = sp2 + 1;
-
-            {
-                char *e = sym + strcspn(sym, " \t");
-                *e = '\0';
-            }
-
-            if (sym[0] && strlen(sym) == namelen &&
-                memcmp(sym, name, namelen) == 0) {
-                addr = a;
+            addr = match_kallsyms_line(line, name, namelen);
+            if (addr)
                 goto out;
-            }
         }
     }
 
@@ -989,11 +1062,20 @@ unsigned long nksu_ksym_lookup(const char *name)
         return addr;
     }
 
-    /* 2) scan kernel memory once, then re-check the cache */
-    scan_kernel_memory_locked();
+    /*
+     * 2) Scan kernel memory once, then re-check the cache. The scan is
+     *    expensive, so it must never run twice even if it finds nothing.
+     */
+    if (!ksym_scanned) {
+        ksym_scanned = true;
+        scan_kernel_memory_locked();
 
-    e = ksym_find_locked(name);
-    addr = e ? e->addr : 0;
+        e = ksym_find_locked(name);
+        addr = e ? e->addr : 0;
+    } else {
+        addr = 0;
+    }
+
     mutex_unlock(&ksym_lock);
     return addr;
 }
@@ -1015,6 +1097,7 @@ void nksu_ksym_cache_clear(void)
         kfree(e);
     }
     atomic_set(&ksym_count, 0);
+    ksym_scanned = false;
     mutex_unlock(&ksym_lock);
 }
 
