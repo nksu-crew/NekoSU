@@ -68,6 +68,7 @@ extern typeof(security_context_to_sid) *nksu_security_context_to_sid;
 
 /* data symbol (pointer, dereferenced by the macro) */
 extern typeof(selinux_state) *nksu_selinux_state;
+extern typeof(init_nsproxy) *nksu_init_nsproxy;
 
 /*
  * Macro redirection. symbol_compat.c needs the real types to define the
@@ -96,6 +97,7 @@ extern typeof(selinux_state) *nksu_selinux_state;
 #define hashtab_map                      nksu_hashtab_map
 #define security_context_to_sid          nksu_security_context_to_sid
 #define selinux_state                    (*nksu_selinux_state)
+#define init_nsproxy                     (*nksu_init_nsproxy)
 #endif /* NKSU_SYMBOL_COMPAT_NO_MACROS */
 
 /* Resolve all symbols into the pointers; returns negative errno if any fail. */

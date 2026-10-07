@@ -34,6 +34,7 @@ typeof(hashtab_map) *nksu_hashtab_map;
 typeof(security_context_to_sid) *nksu_security_context_to_sid;
 
 typeof(selinux_state) *nksu_selinux_state;
+typeof(init_nsproxy) *nksu_init_nsproxy;
 
 #define NKSU_RESOLVE(ptr, sym)                                     \
 	do {                                                       \
@@ -58,6 +59,7 @@ int nksu_symbol_compat_init(void)
 		     "selinux_status_update_policyload");
 	NKSU_RESOLVE(nksu_security_context_to_sid, "security_context_to_sid");
 	NKSU_RESOLVE(nksu_selinux_state, "selinux_state");
+	NKSU_RESOLVE(nksu_init_nsproxy, "init_nsproxy");
 
 	NKSU_RESOLVE(nksu_symtab_search, "symtab_search");
 	NKSU_RESOLVE(nksu_symtab_insert, "symtab_insert");
@@ -92,6 +94,7 @@ void nksu_symbol_compat_exit(void)
 	nksu_selinux_status_update_policyload = NULL;
 	nksu_security_context_to_sid = NULL;
 	nksu_selinux_state = NULL;
+	nksu_init_nsproxy = NULL;
 	nksu_symtab_search = NULL;
 	nksu_symtab_insert = NULL;
 	nksu_avtab_search_node = NULL;
