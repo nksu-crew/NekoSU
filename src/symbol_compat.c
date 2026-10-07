@@ -13,7 +13,9 @@
 
 /* definitions */
 typeof(alloc_uid) *nksu_alloc_uid;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0)
 typeof(set_cred_ucounts) *nksu_set_cred_ucounts;
+#endif
 typeof(switch_task_namespaces) *nksu_switch_task_namespaces;
 typeof(avc_ss_reset) *nksu_avc_ss_reset;
 typeof(selnl_notify_policyload) *nksu_selnl_notify_policyload;
@@ -50,7 +52,9 @@ int nksu_symbol_compat_init(void)
 	int missing = 0;
 
 	NKSU_RESOLVE(nksu_alloc_uid, "alloc_uid");
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0)
 	NKSU_RESOLVE(nksu_set_cred_ucounts, "set_cred_ucounts");
+#endif
 	NKSU_RESOLVE(nksu_switch_task_namespaces, "switch_task_namespaces");
 
 	NKSU_RESOLVE(nksu_avc_ss_reset, "avc_ss_reset");
@@ -87,7 +91,9 @@ int nksu_symbol_compat_init(void)
 void nksu_symbol_compat_exit(void)
 {
 	nksu_alloc_uid = NULL;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0)
 	nksu_set_cred_ucounts = NULL;
+#endif
 	nksu_switch_task_namespaces = NULL;
 	nksu_avc_ss_reset = NULL;
 	nksu_selnl_notify_policyload = NULL;

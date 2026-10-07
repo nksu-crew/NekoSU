@@ -25,6 +25,7 @@
  */
 
 #include <linux/types.h>
+#include <linux/version.h>
 #include <linux/sched.h>
 #include <linux/cred.h>
 #include <linux/nsproxy.h>
@@ -46,7 +47,9 @@
 
 /* function symbols (pointers) */
 extern typeof(alloc_uid) *nksu_alloc_uid;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0)
 extern typeof(set_cred_ucounts) *nksu_set_cred_ucounts;
+#endif
 extern typeof(switch_task_namespaces) *nksu_switch_task_namespaces;
 extern typeof(avc_ss_reset) *nksu_avc_ss_reset;
 extern typeof(selnl_notify_policyload) *nksu_selnl_notify_policyload;
@@ -77,7 +80,9 @@ extern typeof(init_nsproxy) *nksu_init_nsproxy;
  */
 #ifndef NKSU_SYMBOL_COMPAT_NO_MACROS
 #define alloc_uid                        nksu_alloc_uid
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0)
 #define set_cred_ucounts                 nksu_set_cred_ucounts
+#endif
 #define switch_task_namespaces           nksu_switch_task_namespaces
 #define avc_ss_reset                     nksu_avc_ss_reset
 #define selnl_notify_policyload          nksu_selnl_notify_policyload
