@@ -86,6 +86,10 @@ static atomic_t ksym_count = ATOMIC_INIT(0);
 /* the heavy in-memory kallsyms scan runs at most once */
 static bool ksym_scanned;
 
+/* set once we know /proc/kallsyms hides addresses (kptr_restrict) */
+static bool ksym_proc_hidden;
+static bool ksym_proc_checked;
+
 struct ksym_entry {
     struct hlist_node node;
     unsigned long addr;
@@ -265,8 +269,27 @@ static u32 token_table_len(const u8 *p, const u8 *end)
     const u16 *ti;
     int i;
 
-    if (end - p < 16 || !memchr(p, 0, min_t(size_t, 64, end - p)))
+    if (end - p < 16)
         return 0;
+
+    /*
+     * Quick reject: kallsyms_token_table is a dense run of very short
+     * NUL-terminated tokens, so the leading bytes contain many NULs.
+     * Ordinary code/rodata rarely has 4 NULs within 16 bytes.
+     */
+    {
+        const u8 *s = p;
+        const u8 *s_end = p + 16;
+        int nuls = 0;
+
+        while (s < s_end) {
+            if (!*s && ++nuls >= 4)
+                break;
+            s++;
+        }
+        if (nuls < 4)
+            return 0;
+    }
 
     for (i = 0; i < 256; i++) {
         const u8 *start = q;
@@ -691,7 +714,8 @@ static int scan_region(unsigned long start, unsigned long end)
         bool hit = false;
 
         if (kread((const void *)pos, probe, len) == 0) {
-            for (off = 0; off + 8 < len; off += 4) {
+            /* token_table is 8-byte aligned via ALGN; step 8 */
+            for (off = 0; off + 16 <= len; off += 8) {
                 const u8 *tt = probe + off;
                 unsigned long tt_kaddr = pos + off;
                 u8 *buf;
@@ -891,6 +915,36 @@ static unsigned long match_kallsyms_line(char *line, const char *name,
 }
 
 /*
+ * Returns true if the leading lines of a /proc/kallsyms dump all carry an
+ * all-zero address field (kptr_restrict=2 style output). Used to skip the
+ * file entirely once we know lookups can never succeed there.
+ */
+static bool kallsyms_addrs_hidden(const char *buf, size_t len)
+{
+    const char *p = buf, *end = buf + len;
+    int lines = 0;
+
+    while (p < end && lines < 32) {
+        const char *nl = memchr(p, '\n', end - p);
+        size_t ll = nl ? (size_t)(nl - p) : (size_t)(end - p);
+        const char *sp = memchr(p, ' ', ll);
+
+        if (sp && sp > p) {
+            const char *q;
+
+            for (q = p; q < sp; q++)
+                if (*q != '0')
+                    return false;
+        }
+        lines++;
+        if (!nl)
+            break;
+        p = nl + 1;
+    }
+    return lines > 0;
+}
+
+/*
  * Look up an address by name in /proc/kallsyms. When kptr_restrict hides
  * addresses the values are 0 and this returns 0.
  *
@@ -906,6 +960,9 @@ static unsigned long lookup_proc_kallsyms(const char *name)
     unsigned long addr = 0;
     size_t namelen = strlen(name);
     size_t used = 0;
+
+    if (ksym_proc_hidden)
+        return 0;
 
     f = filp_open("/proc/kallsyms", O_RDONLY, 0);
     if (IS_ERR(f))
@@ -939,6 +996,19 @@ static unsigned long lookup_proc_kallsyms(const char *name)
 
         buf[used + rd] = '\0';
         used += (size_t)rd;
+
+        /*
+         * One-time probe: if the kernel hides addresses, bail out
+         * immediately and remember it, so we don't re-read the whole
+         * file for every symbol we resolve.
+         */
+        if (!ksym_proc_checked) {
+            ksym_proc_checked = true;
+            if (kallsyms_addrs_hidden(buf, used)) {
+                ksym_proc_hidden = true;
+                goto out;
+            }
+        }
 
         p = buf;
         while ((line = strsep(&p, "\n")) != NULL) {
@@ -1039,6 +1109,8 @@ void nksu_ksym_cache_clear(void)
     }
     atomic_set(&ksym_count, 0);
     ksym_scanned = false;
+    ksym_proc_hidden = false;
+    ksym_proc_checked = false;
     mutex_unlock(&ksym_lock);
 }
 
