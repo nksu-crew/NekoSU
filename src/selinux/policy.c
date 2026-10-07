@@ -41,6 +41,15 @@
 #include "xfrm.h"
 
 #include "symbol_compat.h"
+/*
+ * This file calls resolved unexported kernel functions through pointers.
+ * Disable CFI for its functions so those indirect calls are not type-hash
+ * checked (the module's build headers may hash differently than the running
+ * kernel). Functions the kernel calls back live in other files.
+ */
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((no_sanitize("cfi"))), apply_to=function)
+#endif
 
 /* saved pointers, alive for the lifetime of the hook */
 static struct selinux_policy *nksu_orig_policy __read_mostly;
@@ -711,3 +720,7 @@ void sepolicy_exit(void)
 {
 	pr_info("[selinux]: sepolicy exit\n");
 }
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#endif

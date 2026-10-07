@@ -23,6 +23,15 @@
 #include "security.h"
 
 #include "symbol_compat.h"
+/*
+ * This file calls resolved unexported kernel functions through pointers.
+ * Disable CFI for its functions so those indirect calls are not type-hash
+ * checked (the module's build headers may hash differently than the running
+ * kernel). Functions the kernel calls back live in other files.
+ */
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((no_sanitize("cfi"))), apply_to=function)
+#endif
 
 /* flip the bit in type_attr_map_array so the type is a member of the attr */
 static int add_type_to_attr(struct policydb *p,
@@ -194,3 +203,7 @@ out:
 	mutex_unlock(&selinux_state.policy_mutex);
 	return rc;
 }
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#endif

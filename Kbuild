@@ -69,19 +69,6 @@ NKSU_GIT_COMMIT := unknown
 endif
 ccflags-y += -DNKSU_GIT_COMMIT=\"$(NKSU_GIT_COMMIT)\"
 
-# Objects that call resolved (unexported) kernel functions through pointers.
-# With CONFIG_CFI_CLANG every indirect call is type-hash checked, and a hash
-# mismatch with the running kernel panics in __cfi_check. Disable CFI only for
-# these objects; files whose callbacks the kernel invokes (tracepoints, file
-# operations) keep CFI so kernel -> module calls still pass.
-NKSU_NOCFI := -fno-sanitize=cfi
-CFLAGS_src/privilege.o += $(NKSU_NOCFI)
-CFLAGS_src/ns.o += $(NKSU_NOCFI)
-CFLAGS_src/selinux/selinux.o += $(NKSU_NOCFI)
-CFLAGS_src/selinux/policy.o += $(NKSU_NOCFI)
-CFLAGS_src/selinux/rule.o += $(NKSU_NOCFI)
-CFLAGS_src/selinux/domain.o += $(NKSU_NOCFI)
-
 ccflags-y += -std=gnu99
 ccflags-y += -Wno-unused-variable
 ccflags-y += -Wno-declaration-after-statement
