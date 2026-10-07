@@ -679,8 +679,15 @@ static int resolve_addresses(const struct kallsyms_view *v,
             strcmp(kn->names[i], "kallsyms_token_table") == 0)
             idx_token = i;
     }
-    if (idx_names == U32_MAX || idx_token == U32_MAX)
+    if (idx_names == U32_MAX || idx_token == U32_MAX) {
+        pr_info("[ksym] resolve: sym not found idx_names=%u idx_token=%u total=%u first='%s'\n",
+                idx_names, idx_token, kn->count,
+                kn->count ? kn->names[0] : "");
         return -ENOENT;
+    }
+
+    pr_info("[ksym] resolve: idx_names=%u idx_token=%u total=%u\n",
+            idx_names, idx_token, kn->count);
 
     low_addr = names_addr > KSYM_ADDR_MAX ? names_addr - KSYM_ADDR_MAX : 0;
     if (low_addr < (unsigned long)buf_start)
@@ -735,6 +742,8 @@ static int resolve_addresses(const struct kallsyms_view *v,
         }
     }
 
+    pr_info("[ksym] resolve: no matching offsets array (names=0x%lx)\n",
+            names_addr);
     return -ENOENT;
 }
 
