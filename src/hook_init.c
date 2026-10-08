@@ -2,6 +2,7 @@
 #include <linux/completion.h>
 #include <linux/delay.h>
 #include "syscall.h"
+#include "dispatch.h"
 #include "tools.h"
 #include "selinux/selinux.h"
 
