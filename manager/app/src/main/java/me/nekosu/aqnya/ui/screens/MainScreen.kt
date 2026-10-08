@@ -41,6 +41,7 @@ import kotlinx.coroutines.delay
 import me.nekosu.aqnya.ui.animation.AnimatedBottomNavBar
 import me.nekosu.aqnya.ui.animation.PageTransitions
 import me.nekosu.aqnya.ui.animation.ScrollAnimations
+import me.nekosu.aqnya.ui.screens.install.InstallScreen
 import me.nekosu.aqnya.util.AppPermission
 import me.nekosu.aqnya.util.BottomNavItem
 import me.nekosu.aqnya.util.DebugPreferences
@@ -211,6 +212,7 @@ fun MainScreen() {
                         onNavigateToApps = {
                             onTabClick(navItems.indexOfFirst { it is BottomNavItem.History })
                         },
+                        onInstallClick = { navController.navigate("install") },
                     )
                 }
 
@@ -247,6 +249,14 @@ fun MainScreen() {
                     exitTransition = { PageTransitions.defaultExit },
                 ) {
                     OpenSourceScreen(navController)
+                }
+
+                composable(
+                    route = "install",
+                    enterTransition = { PageTransitions.defaultEnter },
+                    exitTransition = { PageTransitions.defaultExit },
+                ) {
+                    InstallScreen(navController)
                 }
 
                 composable("app_detail/{packageName}") { backStackEntry ->

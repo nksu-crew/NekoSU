@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.nekosu.aqnya.ncore
+import me.nekosu.aqnya.util.KernelInfo
 import me.nekosu.aqnya.util.RootDbHelper
 import me.nekosu.aqnya.util.getAppVersion
 
@@ -26,6 +27,9 @@ class HomeViewModel(
     private val _managerVersion = MutableStateFlow("")
     val managerVersion: StateFlow<String> = _managerVersion
 
+    private val _isGki = MutableStateFlow(false)
+    val isGki: StateFlow<Boolean> = _isGki
+
     private val appContext = app.applicationContext
     private val rootDbHelper = RootDbHelper(appContext)
 
@@ -35,6 +39,7 @@ class HomeViewModel(
                 _installStatus.value =
                     if (ncore.ctl(1) == 0) InstallStatus.INSTALLED else InstallStatus.NOT_INSTALLED
                 _managerVersion.value = getAppVersion(appContext)
+                _isGki.value = KernelInfo.isGki()
             }
             refresh()
         }
