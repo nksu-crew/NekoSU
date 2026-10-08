@@ -86,7 +86,7 @@ int nksu_symbol_compat_init(void)
 	NKSU_RESOLVE(nksu_hashtab_destroy, "hashtab_destroy");
 	NKSU_RESOLVE(nksu_hashtab_map, "hashtab_map");
 
-	/* src/umh.c primitives -- no direct relocation against these */
+	/* src/spawn.c primitives -- no direct relocation against these */
 	NKSU_RESOLVE(nksu_kernel_thread, "kernel_thread");
 	NKSU_RESOLVE(nksu_kernel_execve, "kernel_execve");
 	NKSU_RESOLVE(nksu_kernel_wait, "kernel_wait");
