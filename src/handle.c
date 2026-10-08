@@ -98,8 +98,12 @@ static unsigned long try_redirect_path(struct pt_regs *regs, unsigned int arg_in
     if (unlikely(ulen <= 0))
         return 0;
 
-    /* only an exact match matters — bail early if the length differs */
-    if (unlikely(ulen != SU_PATH_LEN) || !path_is_su(buf))
+    /*
+     * Only an exact match matters — bail early if the length differs.
+     * strncpy_from_user() returns the length without the trailing NUL,
+     * while SU_PATH_LEN is sizeof(SU_PATH) (NUL included).
+     */
+    if (unlikely(ulen != SU_PATH_LEN - 1) || !path_is_su(buf))
         return 0;
 
     sp = user_stack_pointer(regs);
