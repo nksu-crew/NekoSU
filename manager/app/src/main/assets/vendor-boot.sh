@@ -191,55 +191,8 @@ cat "$WORK/replace.log"
 NEW_IMG="$TARGET_IMG.new"
 [ -f "$NEW_IMG" ] || die "patched image not created: $NEW_IMG"
 
-# ncore -r updates the header field vendor_ramdisk_size but does not sync the
-# per-entry ramdisk_size in the v4 vendor_ramdisk_table.
-# Header fields (LE u32): page_size@12, vendor_ramdisk_size@24, dtb_size@2100,
-#                         table_size@2112, entry_num@2116, entry_size@2120
-fix_v4_table() {
-  img="$1"
-
-  read_u32() {
-    "$TOYBOX" od -An -tu4 -j "$1" -N4 "$img" | tr -d ' '
-  }
-
-  PAGE=$(read_u32 12)
-  VRSIZE=$(read_u32 24)
-  DTBSIZE=$(read_u32 2100)
-  TSIZE=$(read_u32 2112)
-  TNUM=$(read_u32 2116)
-
-  [ -n "$TSIZE" ] || return 0
-  [ "$TSIZE" -gt 0 ] 2>/dev/null || return 0   # no table on v3
-  [ "$TNUM" -eq 1 ] 2>/dev/null || {
-    warn "vendor_ramdisk_table has $TNUM entries, skipping auto fix"
-    return 0
-  }
-
-  align() { echo $(( (($1) + PAGE - 1) / PAGE * PAGE )); }
-  HDR=$(align 2128)
-  VROFF=$HDR
-  DTB_OFF=$(( VROFF + $(align "$VRSIZE") ))
-  TOFF=$(( DTB_OFF + $(align "$DTBSIZE") ))
-
-  ENTRY_SIZE=$("$TOYBOX" od -An -tu4 -j "$TOFF" -N4 "$img" | tr -d ' ')
-  [ "$ENTRY_SIZE" = "$VRSIZE" ] && {
-    log "  v4 table entry already correct (size=$VRSIZE)"
-    return 0
-  }
-
-  log "  fixing v4 table entry ramdisk_size: $ENTRY_SIZE -> $VRSIZE"
-  fmt=""
-  shift_i=0
-  while [ "$shift_i" -lt 32 ]; do
-    byte=$(( (VRSIZE >> shift_i) & 0xFF ))
-    oct=$(printf '%03o' "$byte")
-    fmt="${fmt}\\$oct"
-    shift_i=$(( shift_i + 8 ))
-  done
-  printf "$fmt" | dd of="$img" bs=1 seek="$TOFF" conv=notrunc 2>/dev/null
-}
-
-fix_v4_table "$NEW_IMG"
+# ncore -r now keeps the v4 vendor_ramdisk_table in sync with the rebuilt
+# vendor_ramdisk section, so no post-processing of the table is needed here.
 
 cp "$NEW_IMG" "$OUT" || die "write failed: $OUT"
 chmod 0644 "$OUT" 2>/dev/null || true
