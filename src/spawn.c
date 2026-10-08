@@ -27,7 +27,6 @@
 #include <linux/cred.h>
 #include <linux/kthread.h>
 #include <linux/completion.h>
-#include <linux/initrd.h>
 
 #include <fmac.h>
 #include "symbol_compat.h"
@@ -88,6 +87,19 @@ static void nksu_spawn_complete(struct nksu_spawn *work)
 		nksu_spawn_free(work);
 }
 
+/*
+ * wait_for_initramfs() only exists from 5.11 on (and only with
+ * CONFIG_BLK_DEV_INITRD).  Resolve it by name at run time so the same source
+ * builds against older KMIs, where it is simply skipped.
+ */
+static void nksu_spawn_wait_initramfs(void)
+{
+	void (*wait_fn)(void) = (void (*)(void))nksu_ksym_lookup("wait_for_initramfs");
+
+	if (wait_fn)
+		wait_fn();
+}
+
 /* Deep-copy a NULL-terminated vector; NULL input yields a zeroed one. */
 static char **nksu_spawn_dup_strv(char *const *src)
 {
@@ -144,7 +156,7 @@ static int nksu_spawn_child(void *data)
 	commit_creds(new);
 
 	/* Make sure files provided by the initramfs are visible. */
-	wait_for_initramfs();
+	nksu_spawn_wait_initramfs();
 
 	ret = kernel_execve(work->path,
 			    (const char *const *)work->argv,
