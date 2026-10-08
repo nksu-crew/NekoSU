@@ -226,6 +226,12 @@
     <!-- 安装 (vendor_boot / LKM) -->
     <string name="install_title">安装 nksu</string>
     <string name="install_desc">将 nksu.ko 打入 vendor_boot 镜像后刷入。</string>
+    <string name="install_device_info">设备与内核</string>
+    <string name="install_mode">安装模式</string>
+    <string name="install_current_kmi">当前 KMI</string>
+    <string name="install_method">安装方式</string>
+    <string name="install_method_file">选择 vendor_boot 镜像</string>
+    <string name="install_recommended">推荐</string>
     <string name="install_pick_vendor_boot">选择 vendor_boot.img</string>
     <string name="install_pick_vendor_boot_desc">选择从本机提取的 vendor_boot 镜像</string>
     <string name="install_select_ko">内核模块 (KMI)</string>
