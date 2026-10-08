@@ -9,6 +9,7 @@
 
 #include "type.h"
 #include <fmac.h>
+#include "syscall.h"
 
 syscall_fn_t nksu_orig_table[__NR_syscalls] ____cacheline_aligned;
 nksu_handler_t virt_table[__NR_syscalls] ____cacheline_aligned;
