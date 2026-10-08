@@ -30,12 +30,20 @@ typedef struct {
     void (*exit)(void);
 } module_component_t;
 
-static const module_component_t core_components[] = {
+/*
+ * SELinux needs the policy, which is loaded during the "selinux_setup"
+ * stage; everything else needs /data and the zygote.  Late load runs both
+ * groups back to back, a first-stage (vendor_boot) load stages them.
+ */
+static const module_component_t selinux_components[] = {
     {
         .name = "SELinux Hook",
         .init = init_selinux_hook,
         .exit = selinux_exit,
     },
+};
+
+static const module_component_t feature_components[] = {
     {
         .name = "Anonymous FD",
         .init = fmac_anonfd_init,
@@ -71,8 +79,6 @@ static const module_component_t core_components[] = {
     },
 #endif
 };
-
-#define CORE_COMPONENTS_COUNT ARRAY_SIZE(core_components)
 
 static int nekosu_init_component(const module_component_t *comp, int index)
 {
@@ -118,37 +124,62 @@ static void nekosu_cleanup_components(const module_component_t *comps, int count
     }
 }
 
-static int nekosu_init_all_components(void)
+static int init_component_list(const module_component_t *comps, int count)
 {
     int ret, i;
-#ifdef CONFIG_NKSU_DEBUG
-    ktime_t t_total = ktime_get();
-#endif
 
-    for (i = 0; i < CORE_COMPONENTS_COUNT; i++) {
-        ret = nekosu_init_component(&core_components[i], i);
+    for (i = 0; i < count; i++) {
+        ret = nekosu_init_component(&comps[i], i);
         if (ret) {
-            nekosu_cleanup_components(core_components, i);
+            nekosu_cleanup_components(comps, i);
             return ret;
         }
     }
-
-#ifdef CONFIG_NKSU_DEBUG
-    pr_info("All components initialized in %lld us total\n", ktime_to_us(ktime_sub(ktime_get(), t_total)));
-#else
-    pr_info("All components initialized successfully\n");
-#endif
     return 0;
+}
+
+int nksu_init_selinux_components(void)
+{
+    return init_component_list(selinux_components,
+                               ARRAY_SIZE(selinux_components));
+}
+
+void nksu_exit_selinux_components(void)
+{
+    nekosu_cleanup_components(selinux_components,
+                              ARRAY_SIZE(selinux_components));
+}
+
+int nksu_init_feature_components(void)
+{
+    return init_component_list(feature_components,
+                               ARRAY_SIZE(feature_components));
+}
+
+void nksu_exit_feature_components(void)
+{
+    nekosu_cleanup_components(feature_components,
+                              ARRAY_SIZE(feature_components));
+}
+
+static int nekosu_init_all_components(void)
+{
+    int ret = nksu_init_selinux_components();
+
+    if (ret)
+        return ret;
+
+    ret = nksu_init_feature_components();
+    if (ret)
+        nksu_exit_selinux_components();
+
+    return ret;
 }
 
 static void nekosu_cleanup_all_components(void)
 {
-    nekosu_cleanup_components(core_components, CORE_COMPONENTS_COUNT);
-
-    nksu_symbol_compat_exit();
-    nksu_ksym_cache_clear();
-
-    pr_info("All components cleaned up\n");
+    nksu_exit_feature_components();
+    nksu_exit_selinux_components();
 }
 
 static int __init nekosu_init(void)
@@ -195,11 +226,13 @@ static int __init nekosu_init(void)
 static void __exit nekosu_exit(void)
 {
     pr_info("Unloading nekosu module...\n");
-    if (!late_load) {
+    if (!late_load)
         exit_nksu();
-    } else {
+    else
         nekosu_cleanup_all_components();
-    }
+
+    nksu_symbol_compat_exit();
+    nksu_ksym_cache_clear();
     pr_info("nekosu module unloaded\n");
 }
 
