@@ -1,4 +1,4 @@
-nksu-y += src/nksu.o src/privilege.o src/ioctl.o src/manager.o
+nksu-y += src/nksu.o src/privilege.o src/ioctl.o src/manager.o src/init.o
 
 nksu-y += src/selinux/rule.o src/selinux/selinux.o src/selinux/policy.o src/selinux/domain.o
 

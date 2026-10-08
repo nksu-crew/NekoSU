@@ -11,6 +11,7 @@
 #include <linux/string.h>
 #include <fmac.h>
 #include "symbol_compat.h"
+#include "nksu.h"
 
 #ifndef NKSU_GIT_COMMIT
 #define NKSU_GIT_COMMIT "unknown"
@@ -20,6 +21,8 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Aqnya");
 MODULE_DESCRIPTION("nekosu");
 MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
+
+bool late_load = false;
 
 typedef struct {
     const char *name;
@@ -151,6 +154,8 @@ static void nekosu_cleanup_all_components(void)
 static int __init nekosu_init(void)
 {
     int ret;
+    
+    late_load = ((current->pid != 1) || strcmp(current->comm, "init"));
 
     pr_info("Loading nekosu module...\n");
 
@@ -171,7 +176,19 @@ static int __init nekosu_init(void)
         return ret;
     }
 
-    ret = nekosu_init_all_components();
+    goto PROBE;
+
+    if (late_load) {
+        ret = nekosu_init_all_components();
+    } else {
+        ret = init_nksu();
+    }
+PROBE:
+
+    ret = 0;
+
+    pr_info("probe: current pid (%d), current comm (%s)\n", current->pid, current->comm);
+    pr_info("bool late_load (%s)\n", late_load ? "true" : "false");
     if (ret) {
         pr_err("Failed to initialize nekosu: %d\n", ret);
         nksu_symbol_compat_exit();
