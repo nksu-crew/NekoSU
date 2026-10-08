@@ -21,6 +21,10 @@
 #include <linux/sched.h>
 #include <linux/sched/signal.h>
 #include <linux/sched/task.h>
+#include <linux/version.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0)
+#include <linux/initrd.h>
+#endif
 #include <linux/fs_struct.h>
 #include <linux/signal.h>
 #include <linux/binfmts.h>
@@ -87,19 +91,6 @@ static void nksu_spawn_complete(struct nksu_spawn *work)
 		nksu_spawn_free(work);
 }
 
-/*
- * wait_for_initramfs() only exists from 5.11 on (and only with
- * CONFIG_BLK_DEV_INITRD).  Resolve it by name at run time so the same source
- * builds against older KMIs, where it is simply skipped.
- */
-static void nksu_spawn_wait_initramfs(void)
-{
-	void (*wait_fn)(void) = (void (*)(void))nksu_ksym_lookup("wait_for_initramfs");
-
-	if (wait_fn)
-		wait_fn();
-}
-
 /* Deep-copy a NULL-terminated vector; NULL input yields a zeroed one. */
 static char **nksu_spawn_dup_strv(char *const *src)
 {
@@ -155,8 +146,14 @@ static int nksu_spawn_child(void *data)
 
 	commit_creds(new);
 
-	/* Make sure files provided by the initramfs are visible. */
-	nksu_spawn_wait_initramfs();
+	/*
+	 * Make sure files provided by the initramfs are visible.
+	 * wait_for_initramfs() was introduced in 5.13; older kernels did not
+	 * need it in their usermode helper, so the call is compiled out there.
+	 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0)
+	wait_for_initramfs();
+#endif
 
 	ret = kernel_execve(work->path,
 			    (const char *const *)work->argv,
