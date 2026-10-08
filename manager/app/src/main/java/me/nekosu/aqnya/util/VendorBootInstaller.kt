@@ -13,7 +13,7 @@ import java.io.File
 
 object VendorBootInstaller {
 
-    private const val SCRIPT_NAME = "install-vendor-boot.sh"
+    private const val SCRIPT_NAME = "vendor-boot.sh"
 
     private const val NCORE_LIB_NAME = "libncore.so"
 

@@ -71,7 +71,6 @@ jobs:
 
     - name: Prepare KOs (assets)
       run: |
-        mkdir -p manager/app/src/main/assets
         find lkm-artifacts -name '*_nksu.ko' -exec cp {} manager/app/src/main/assets/ \;
         ls -la manager/app/src/main/assets/
 
@@ -105,8 +104,6 @@ jobs:
 
     - name: Copy install script to assets
       run: |
-        cp scripts/install-vendor-boot.sh manager/app/src/main/assets/install-vendor-boot.sh
-        chmod 0755 manager/app/src/main/assets/install-vendor-boot.sh
         ls -la manager/app/src/main/assets/
 
     - name: Build init (arm64-v8a)

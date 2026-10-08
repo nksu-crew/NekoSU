@@ -496,7 +496,7 @@ int sepolicy_dup_and_apply(void)
 
 void sepolicy_restore(void)
 {
-	struct selinux_policy *work;
+	struct selinux_policy *live;
 
 	if (!nksu_orig_policy) {
 		pr_warn("[selinux] sepolicy_restore: nothing to restore\n");
@@ -505,22 +505,30 @@ void sepolicy_restore(void)
 
 	mutex_lock(&selinux_state.policy_mutex);
 
-	work = rcu_dereference_protected(selinux_state.policy,
+	live = rcu_dereference_protected(selinux_state.policy,
 					 lockdep_is_held(&selinux_state.policy_mutex));
-
-	rcu_assign_pointer(selinux_state.policy, nksu_orig_policy);
+	if (live == nksu_work_policy)
+		rcu_assign_pointer(selinux_state.policy, nksu_orig_policy);
+	else
+		pr_warn("[selinux] live policy already replaced, leaving it\n");
 
 	mutex_unlock(&selinux_state.policy_mutex);
 	synchronize_rcu();
 
-	nksu_destroy_policy(work);
-
-	nksu_orig_policy = NULL;
+	/*
+	 * Deliberately leak the working copy.  Freeing it raced live SELinux
+	 * permission checks on other CPUs (rmmod paniced in avtab_search_node
+	 * on a just-freed node), and it shares subtrees with the original
+	 * policy, so destroying it is not safe once checks may still walk it.
+	 * One leaked policy per load is a small price for a safe unload, and
+	 * it mirrors KernelSU, which never tears its policy down either.
+	 */
 	nksu_work_policy = NULL;
+	nksu_orig_policy = NULL;
 
 	nksu_commit_avc_reset();
 
-	pr_info("[selinux] original policy restored\n");
+	pr_info("[selinux] original policy restored (working copy kept)\n");
 }
 
 /* Static rule definitions — loaded once after the copy is in place */
