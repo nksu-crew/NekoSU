@@ -7,7 +7,6 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 object VendorBootInstaller {
-    const val ASSET_DIR = ""
 
     private const val SCRIPT_NAME = "install-vendor-boot.sh"
 
@@ -32,20 +31,20 @@ object VendorBootInstaller {
         File(context.applicationInfo.nativeLibraryDir, NCORE_LIB_NAME)
 
     /**
-     * 把 assets/nksu 下的资源 (脚本 + nksu.ko) 复制到 filesDir。
+     * 把 assets 根目录下的资源 (脚本 + nksu.ko) 复制到 filesDir。
      * ncore 不在这里处理 —— 它走 nativeLibraryDir。
      */
     fun prepare(context: Context): File {
         val dir = installDir(context)
-        val assets = context.assets.list(ASSET_DIR) ?: emptyArray()
+        val assets = context.assets.list("") ?: emptyArray()
         if (assets.isEmpty()) {
-            throw IllegalStateException("assets/$ASSET_DIR 为空, 未打包 nksu.ko 等文件")
+            throw IllegalStateException("assets 为空, 未打包 nksu.ko 等文件")
         }
 
         assets.forEach { name ->
             val out = File(dir, name)
             out.outputStream().use { os ->
-                context.assets.open("$ASSET_DIR/$name").use { it.copyTo(os) }
+                context.assets.open(name).use { it.copyTo(os) }
             }
             out.setReadable(true, false)
         }
@@ -54,7 +53,7 @@ object VendorBootInstaller {
     }
 
     fun koCandidates(context: Context): List<String> =
-        (context.assets.list(ASSET_DIR) ?: emptyArray())
+        (context.assets.list("") ?: emptyArray())
             .filter { it.endsWith("_nksu.ko") }
             .sorted()
 
@@ -91,13 +90,14 @@ object VendorBootInstaller {
                 )
             }
 
+            // prepare() 已把 assets 根目录下的文件都复制到 dir,
+            // 这里只做一次存在性校验即可。
             val koFile =
                 koName?.let { name ->
                     File(dir, name).also { out ->
-                        context.assets.open("$ASSET_DIR/$name").use { input ->
-                            out.outputStream().use { input.copyTo(it) }
+                        if (!out.exists()) {
+                            throw IllegalStateException("assets/$name 未找到或未被复制")
                         }
-                        out.setReadable(true, false)
                     }
                 }
 
