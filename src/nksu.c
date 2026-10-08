@@ -64,7 +64,7 @@ static const module_component_t feature_components[] = {
     {
         .name = "manager scan",
         .init = appscan_init,
-        .exit = NULL,
+        .exit = appscan_exit,
     },
 #ifdef CONFIG_NKSU_SYSCALL
     {

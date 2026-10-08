@@ -1,5 +1,5 @@
 #include <linux/kthread.h>
-#include <linux/completion.h>
+#include <linux/wait.h>
 #include <linux/delay.h>
 #include "syscall.h"
 #include "dispatch.h"
@@ -33,16 +33,18 @@ int boot_stage = INIT_FIRST_STAGE;
  */
 
 static struct task_struct *init_thread;
-static DECLARE_COMPLETION(stage_event);
-static bool stop_requested;
+static DECLARE_WAIT_QUEUE_HEAD(stage_wq);
+static bool stage_pending;
 static bool zygote_seen;
 static bool selinux_loaded;
 static bool features_loaded;
 
 static void notify_stage(void)
 {
-    if (init_thread)
-        complete(&stage_event);
+    if (init_thread) {
+        WRITE_ONCE(stage_pending, true);
+        wake_up_interruptible(&stage_wq);
+    }
 }
 
 /* argv[1] of the current execve/execveat; returns length or < 0. */
@@ -143,11 +145,19 @@ int load_temp_syscall(void)
 
 static int init_thread_fn(void *data)
 {
-    for (;;) {
-        wait_for_completion(&stage_event);
-
-        if (READ_ONCE(stop_requested) || kthread_should_stop())
+    /*
+     * The loop must never return on its own: a kthread that exits while
+     * the module still holds its task_struct makes the later kthread_stop()
+     * dereference freed memory.  It only leaves when kthread_stop() asks.
+     */
+    while (!kthread_should_stop()) {
+        wait_event_interruptible(stage_wq,
+                                 READ_ONCE(stage_pending) ||
+                                 kthread_should_stop());
+        if (kthread_should_stop())
             break;
+
+        WRITE_ONCE(stage_pending, false);
 
         if (READ_ONCE(boot_stage) == INIT_SECOND_STAGE && !selinux_loaded) {
             if (nksu_init_selinux_components() == 0)
@@ -174,8 +184,6 @@ static int init_thread_fn(void *data)
                 features_loaded = true;
             else
                 pr_err("nksu: feature init failed\n");
-
-            break;
         }
     }
     return 0;
@@ -196,9 +204,7 @@ static int start_init_thread(void)
 static void stop_init_thread(void)
 {
     if (init_thread) {
-        WRITE_ONCE(stop_requested, true);
-        complete(&stage_event);
-        kthread_stop(init_thread);
+        kthread_stop(init_thread); /* sets KTHREAD_SHOULD_STOP and wakes us */
         init_thread = NULL;
     }
 }
