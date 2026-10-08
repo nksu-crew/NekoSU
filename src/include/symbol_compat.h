@@ -121,6 +121,23 @@ extern typeof(copy_to_kernel_nofault) *nksu_copy_to_kernel_nofault;
 #define kernel_execve                    nksu_kernel_execve
 #define kernel_wait                      nksu_kernel_wait
 #define flush_signal_handlers            nksu_flush_signal_handlers
+/*
+ * kernel_thread() gained a @name argument in 6.4:
+ *
+ *   <= 6.3 : pid_t kernel_thread(int (*fn)(void *), void *arg,
+ *                                unsigned long flags);
+ *   >= 6.4 : pid_t kernel_thread(int (*fn)(void *), void *arg,
+ *                                const char *name, unsigned long flags);
+ *
+ * Wrap it so call sites stay identical on both sides of the change.
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0)
+#define nksu_kernel_thread_run(fn, arg, name, flags) \
+	kernel_thread((fn), (arg), (name), (flags))
+#else
+#define nksu_kernel_thread_run(fn, arg, name, flags) \
+	kernel_thread((fn), (arg), (flags))
+#endif
 #define selinux_state                    (*nksu_selinux_state)
 #define init_nsproxy                     (*nksu_init_nsproxy)
 #define __set_fixmap nksu___set_fixmap

@@ -194,7 +194,8 @@ static int nksu_spawn_supervisor(void *data)
 	kernel_sigaction(SIGCHLD, SIG_DFL);
 
 	if (work->wait == NKSU_SPAWN_WAIT_PROC) {
-		pid = kernel_thread(nksu_spawn_child, work, SIGCHLD);
+		pid = nksu_kernel_thread_run(nksu_spawn_child, work,
+					     "nksu-spawn", SIGCHLD);
 		if (pid < 0) {
 			work->ret = pid;
 		} else {
@@ -211,7 +212,8 @@ static int nksu_spawn_supervisor(void *data)
 	 * SIGCHLD, so the helper is reaped automatically and never pollutes
 	 * our children list.
 	 */
-	pid = kernel_thread(nksu_spawn_child, work, CLONE_PARENT | SIGCHLD);
+	pid = nksu_kernel_thread_run(nksu_spawn_child, work,
+				     "nksu-spawn", CLONE_PARENT | SIGCHLD);
 	if (pid < 0) {
 		work->ret = pid;
 		nksu_spawn_complete(work);
