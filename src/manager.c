@@ -12,6 +12,8 @@
 #include <linux/kthread.h>
 #include <linux/wait.h>
 #include <linux/delay.h>
+#include <linux/cred.h>
+#include <linux/capability.h>
 #include <fmac.h>
 
 #define TARGET_PACKAGE "me.nekosu.aqnya"
@@ -493,15 +495,55 @@ static int mark_zygote(void)
     return 0;
 }
 
+/*
+ * The scan runs from a kthread, i.e. in the kernel SELinux domain, which is
+ * not allowed to read /data/system.  Borrow a cred switched to the nksu
+ * domain (load_policy() grants it allow-any-any) while touching those files,
+ * the same way KernelSU wraps its package reads in override_creds().
+ */
+static struct cred *nksu_scan_cred;
+
+static const struct cred *nksu_scan_creds_begin(void)
+{
+    if (!nksu_scan_cred) {
+        struct cred *cred = prepare_creds();
+
+        if (!cred)
+            return NULL;
+
+        cred->cap_effective = CAP_FULL_SET;
+        cred->cap_permitted = CAP_FULL_SET;
+        cred->cap_bset = CAP_FULL_SET;
+        cred->cap_inheritable = CAP_FULL_SET;
+
+        if (set_domain(DOMAIN_CTX, cred)) {
+            abort_creds(cred);
+            return NULL;
+        }
+        nksu_scan_cred = cred;
+    }
+
+    return override_creds(nksu_scan_cred);
+}
+
+static void nksu_scan_creds_end(const struct cred *old)
+{
+    if (old)
+        revert_creds(old);
+}
+
 static int scan_and_apply(void)
 {
+    const struct cred *old;
     uid_t uid;
     int ret = -1;
+
+    old = nksu_scan_creds_begin();
 
     uid = get_uid_from_packages_list(TARGET_PACKAGE);
     if (uid == (uid_t)-1) {
         pr_err("[manager] Could not find UID for %s\n", TARGET_PACKAGE);
-        return -1;
+        goto out;
     }
 
     if (verify_package_signature()) {
@@ -518,6 +560,8 @@ static int scan_and_apply(void)
         pr_err("[manager] Signature mismatch!\n");
     }
 
+out:
+    nksu_scan_creds_end(old);
     return ret;
 }
 
@@ -575,5 +619,9 @@ void appscan_exit(void)
     if (appscan_thread) {
         kthread_stop(appscan_thread);
         appscan_thread = NULL;
+    }
+    if (nksu_scan_cred) {
+        put_cred(nksu_scan_cred);
+        nksu_scan_cred = NULL;
     }
 }
