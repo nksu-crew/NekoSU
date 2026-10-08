@@ -1,4 +1,4 @@
-nksu-y += src/nksu.o src/privilege.o src/ioctl.o src/manager.o
+nksu-y += src/nksu.o src/privilege.o src/ioctl.o src/manager.o src/init.o
 
 nksu-y += src/selinux/rule.o src/selinux/selinux.o src/selinux/policy.o src/selinux/domain.o
 
@@ -11,12 +11,11 @@ nksu-y += src/symbol_compat.o
 nksu-y += src/fd/anonfd.o
 nksu-y += src/fd/eventfd.o
 nksu-y += src/fd/shm_hash.o
-
+nksu-y += src/syscall/syscall.o
+	
 ifeq ($(CONFIG_NKSU_SYSCALL),y)
 	ccflags-y += -DCONFIG_NKSU_SYSCALL=1
-	nksu-y += src/syscall/syscall.o
 	nksu-y += src/syscall/dispatch.o
-	CFLAGS_src/syscall/syscall.o := -O3
 	CFLAGS_src/syscall/dispatch.o := -O3
 endif
 

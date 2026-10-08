@@ -7,54 +7,48 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 object VendorBootInstaller {
-    const val ASSET_DIR = ""
 
     private const val SCRIPT_NAME = "install-vendor-boot.sh"
 
-    /**
-     * ncore 以 native lib 的形式打包在 jniLibs/<abi>/libncore.so。
-     * 安装后系统会把它落到 applicationInfo.nativeLibraryDir,
-     * 那里的挂载点允许执行 (而 filesDir 所在的 /data 是 noexec)。
-     */
     private const val NCORE_LIB_NAME = "libncore.so"
 
     fun installDir(context: Context): File =
         File(context.filesDir, "nksu-install").apply { mkdirs() }
 
-    /**
-     * 返回 nativeLibraryDir 下的 ncore 可执行路径。
-     *
-     * 注意: 需要 app 侧打开 android:extractNativeLibs="true"
-     * (AGP 4.2+ 对应 packaging.jniLibs.useLegacyPackaging = true),
-     * 否则 .so 会直接从 APK mmap, 磁盘上不存在可执行文件。
-     */
     fun ncorePath(context: Context): File =
         File(context.applicationInfo.nativeLibraryDir, NCORE_LIB_NAME)
 
-    /**
-     * 把 assets/nksu 下的资源 (脚本 + nksu.ko) 复制到 filesDir。
-     * ncore 不在这里处理 —— 它走 nativeLibraryDir。
-     */
-    fun prepare(context: Context): File {
+    fun prepare(context: Context, koName: String?): File {
         val dir = installDir(context)
-        val assets = context.assets.list(ASSET_DIR) ?: emptyArray()
-        if (assets.isEmpty()) {
-            throw IllegalStateException("assets/$ASSET_DIR 为空, 未打包 nksu.ko 等文件")
+        val script = File(dir, SCRIPT_NAME)
+
+        copyAsset(context, SCRIPT_NAME, script)
+        script.setReadable(true, false)
+        script.setExecutable(true, false)
+
+        if (koName != null) {
+            val koFile = File(dir, koName)
+            copyAsset(context, koName, koFile)
+            koFile.setReadable(true, false)
         }
 
-        assets.forEach { name ->
-            val out = File(dir, name)
-            out.outputStream().use { os ->
-                context.assets.open("$ASSET_DIR/$name").use { it.copyTo(os) }
+        return script
+    }
+
+    private fun copyAsset(context: Context, assetName: String, dest: File) {
+        try {
+            context.assets.open(assetName).use { input ->
+                dest.outputStream().use { output ->
+                    input.copyTo(output)
+                }
             }
-            out.setReadable(true, false)
+        } catch (e: Exception) {
+            throw IllegalStateException("复制 assets/$assetName 失败: ${e.message}", e)
         }
-
-        return File(dir, SCRIPT_NAME)
     }
 
     fun koCandidates(context: Context): List<String> =
-        (context.assets.list(ASSET_DIR) ?: emptyArray())
+        (context.assets.list("") ?: emptyArray())
             .filter { it.endsWith("_nksu.ko") }
             .sorted()
 
@@ -77,7 +71,7 @@ object VendorBootInstaller {
         onOutput: (String) -> Unit,
     ): Int =
         withContext(Dispatchers.IO) {
-            val script = prepare(context)
+            val script = prepare(context, koName)
             val dir = installDir(context)
 
             val ncore = ncorePath(context)
@@ -91,15 +85,13 @@ object VendorBootInstaller {
                 )
             }
 
-            val koFile =
-                koName?.let { name ->
-                    File(dir, name).also { out ->
-                        context.assets.open("$ASSET_DIR/$name").use { input ->
-                            out.outputStream().use { input.copyTo(it) }
-                        }
-                        out.setReadable(true, false)
+            val koFile = koName?.let { name ->
+                File(dir, name).also { out ->
+                    if (!out.exists()) {
+                        throw IllegalStateException("assets/$name 未找到或复制失败")
                     }
                 }
+            }
 
             val cmd = buildList {
                 add("sh")
