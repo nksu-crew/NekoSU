@@ -9,4 +9,4 @@ extern syscall_fn_t *syscall_table;
 
 int hook_save(int nr, syscall_fn_t fn, syscall_fn_t *orig, const char *name);
 
-int hook_nosave(int nr, syscall_fn_t fn, const char* name);
+int hook_nosave(int nr, syscall_fn_t fn, const char* name)

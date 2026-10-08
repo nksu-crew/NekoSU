@@ -195,9 +195,11 @@ static int __init nekosu_init(void)
 static void __exit nekosu_exit(void)
 {
     pr_info("Unloading nekosu module...\n");
-
-    nekosu_cleanup_all_components();
-
+    if (!late_load) {
+        exit_nksu();
+    } else {
+        nekosu_cleanup_all_components();
+    }
     pr_info("nekosu module unloaded\n");
 }
 

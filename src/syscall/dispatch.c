@@ -15,7 +15,7 @@ nksu_handler_t virt_table[__NR_syscalls] ____cacheline_aligned;
 
 static int nksu_syscall_nr = -1;
 
-static int hook_and_save(int nr, syscall_fn_t new_fn, const char *tag)
+int hook_and_save(int nr, syscall_fn_t new_fn, const char *tag)
 {
     syscall_fn_t orig = NULL;
     int ret;
@@ -23,7 +23,7 @@ static int hook_and_save(int nr, syscall_fn_t new_fn, const char *tag)
     if ((unsigned int)nr >= (unsigned int)__NR_syscalls)
         return -EINVAL;
 
-    ret = hook_one(nr, new_fn, &orig, tag);
+    ret = hook_save(nr, new_fn, &orig, tag);
     if (ret)
         return ret;
 

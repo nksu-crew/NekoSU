@@ -12,11 +12,10 @@ nksu-y += src/fd/anonfd.o
 nksu-y += src/fd/eventfd.o
 nksu-y += src/fd/shm_hash.o
 nksu-y += src/syscall/syscall.o
-	
+nksu-y += src/syscall/dispatch.o
+
 ifeq ($(CONFIG_NKSU_SYSCALL),y)
 	ccflags-y += -DCONFIG_NKSU_SYSCALL=1
-	nksu-y += src/syscall/dispatch.o
-	CFLAGS_src/syscall/dispatch.o := -O3
 endif
 
 obj-$(CONFIG_NKSU) += nksu.o
