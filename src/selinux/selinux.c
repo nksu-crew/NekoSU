@@ -141,11 +141,13 @@ int load_hook(void)
 	}
 
 #ifdef CONFIG_NKSU_DEBUG
+    // Too noisy, disabled.
+    /*
 	rc = sepolicy_make_audit();
 	if (rc) {
 		pr_err("[selinux]: failed to make audit: %d\n", rc);
 		return rc;
-	}
+	}*/
 #endif
 
 	rc = sepolicy_add_domain(DOMAIN);
