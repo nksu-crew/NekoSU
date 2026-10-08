@@ -36,6 +36,24 @@
 #include "symbol_compat.h"
 
 /*
+ * kernel_thread() gained a @name argument in 6.4:
+ *
+ *   <= 6.3 : pid_t kernel_thread(int (*fn)(void *), void *arg,
+ *                                unsigned long flags);
+ *   >= 6.4 : pid_t kernel_thread(int (*fn)(void *), void *arg,
+ *                                const char *name, unsigned long flags);
+ *
+ * Wrap it so the call sites below stay identical across versions.
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0)
+#define nksu_kernel_thread_run(fn, arg, name, flags) \
+	kernel_thread((fn), (arg), (name), (flags))
+#else
+#define nksu_kernel_thread_run(fn, arg, name, flags) \
+	kernel_thread((fn), (arg), (flags))
+#endif
+
+/*
  * The resolved primitives are invoked through pointers; a foreign function
  * pointer can fail the compiler's CFI type check, so opt this file out.
  */
