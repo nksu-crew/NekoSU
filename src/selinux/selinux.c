@@ -198,7 +198,7 @@ static int nksu_selinux_init_thread(void *data)
 	return load_hook();
 }
 
-int __init init_selinux_hook(void)
+int init_selinux_hook(void)
 {
 	if (!READ_ONCE(selinux_state.policy)) {
 		nksu_init_thread = kthread_run(nksu_selinux_init_thread,
@@ -214,7 +214,7 @@ int __init init_selinux_hook(void)
 	return load_hook();
 }
 
-void __exit selinux_exit(void)
+void selinux_exit(void)
 {
 	pr_info("[selinux]: sepolicy exit – restoring original policy\n");
 
