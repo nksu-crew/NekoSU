@@ -1,4 +1,4 @@
 
-int init_nksu(){
+int init_nksu(void){
 return 0;
 }
