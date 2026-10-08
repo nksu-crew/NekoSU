@@ -1,4 +1,7 @@
-#include "type.h"
+#pragma once
+#include <linux/types.h>
+
+typedef long (*nksu_handler_t)(struct pt_regs *regs);
 
 int nksu_dispatch_init(void);
 void nksu_dispatch_exit(void);
