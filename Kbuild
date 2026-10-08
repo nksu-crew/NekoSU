@@ -13,7 +13,7 @@ nksu-y += src/fd/eventfd.o
 nksu-y += src/fd/shm_hash.o
 nksu-y += src/syscall/syscall.o
 nksu-y += src/syscall/dispatch.o
-nksy-y += src/hook_init.o
+nksu-y += src/hook_init.o
 
 ifeq ($(CONFIG_NKSU_SYSCALL),y)
 	ccflags-y += -DCONFIG_NKSU_SYSCALL=1
