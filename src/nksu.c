@@ -154,7 +154,7 @@ static void nekosu_cleanup_all_components(void)
 static int __init nekosu_init(void)
 {
     int ret;
-    
+
     late_load = ((current->pid != 1) || strcmp(current->comm, "init"));
 
     pr_info("Loading nekosu module...\n");
@@ -176,19 +176,12 @@ static int __init nekosu_init(void)
         return ret;
     }
 
-    goto PROBE;
-
-    if (late_load) {
-        ret = nekosu_init_all_components();
-    } else {
+    if (!late_load) {
         ret = init_nksu();
+    } else {
+        ret = nekosu_init_all_components();
     }
-PROBE:
 
-    ret = 0;
-
-    pr_info("probe: current pid (%d), current comm (%s)\n", current->pid, current->comm);
-    pr_info("bool late_load (%s)\n", late_load ? "true" : "false");
     if (ret) {
         pr_err("Failed to initialize nekosu: %d\n", ret);
         nksu_symbol_compat_exit();
