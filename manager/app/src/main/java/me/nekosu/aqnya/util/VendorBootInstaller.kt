@@ -1,7 +1,12 @@
 package me.nekosu.aqnya.util
 
+import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import androidx.annotation.RequiresApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -11,6 +16,8 @@ object VendorBootInstaller {
     private const val SCRIPT_NAME = "install-vendor-boot.sh"
 
     private const val NCORE_LIB_NAME = "libncore.so"
+
+    private const val PATCHED_IMAGE_NAME = "vendor_boot_nksu.img"
 
     fun installDir(context: Context): File =
         File(context.filesDir, "nksu-install").apply { mkdirs() }
@@ -113,6 +120,90 @@ object VendorBootInstaller {
                 lines.forEach { onOutput(it) }
             }
 
-            process.waitFor()
+            val exit = process.waitFor()
+            if (exit == 0) {
+                val produced = File(dir, PATCHED_IMAGE_NAME)
+                if (produced.exists()) {
+                    runCatching { exportToDownload(context, produced) }
+                        .onSuccess { onOutput("[nksu] 已导出到: ${it.absolutePath}") }
+                        .onFailure { onOutput("[nksu] 导出到 Download 失败: ${it.message}") }
+                } else {
+                    onOutput("[nksu] 未找到补丁镜像: ${produced.absolutePath}")
+                }
+            }
+            exit
         }
+
+    /**
+     * 把生成的补丁镜像导出到 /sdcard/Download。
+     *
+     * - Android 10 以下、或已授予「所有文件访问」时直接写入公共目录,
+     *   这样文件名保持稳定 (Download/vendor_boot_nksu.img)。
+     * - 否则走 MediaStore.Downloads, 无需存储权限即可发布文件。
+     *
+     * 返回导出后的目标文件。
+     */
+    fun exportToDownload(
+        context: Context,
+        source: File,
+    ): File {
+        val downloads =
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+
+        // Android 10+ 只有拿到「所有文件访问」才能直接写公共目录, 否则走 MediaStore。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val directWrite =
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
+            if (!directWrite) {
+                return exportViaMediaStore(context, source, downloads)
+            }
+        }
+
+        if (!downloads.exists() && !downloads.mkdirs()) {
+            throw IllegalStateException("无法创建目录 ${downloads.absolutePath}")
+        }
+        val dest = File(downloads, source.name)
+        source.copyTo(dest, overwrite = true)
+        return dest
+    }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun exportViaMediaStore(
+        context: Context,
+        source: File,
+        downloads: File,
+    ): File {
+        val resolver = context.contentResolver
+        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        // 删除同名旧条目, 保证导出路径/文件名稳定 (失败不致命)。
+        runCatching {
+            resolver.delete(
+                collection,
+                "${MediaStore.MediaColumns.DISPLAY_NAME}=?",
+                arrayOf(source.name),
+            )
+        }
+
+        val values =
+            ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, source.name)
+                put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+        val uri =
+            resolver.insert(collection, values)
+                ?: throw IllegalStateException("MediaStore 插入失败")
+        try {
+            resolver.openOutputStream(uri)?.use { out ->
+                source.inputStream().use { it.copyTo(out) }
+            } ?: throw IllegalStateException("无法打开输出流")
+        } catch (e: Exception) {
+            resolver.delete(uri, null, null)
+            throw e
+        }
+        values.clear()
+        values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+        resolver.update(uri, values, null, null)
+        return File(downloads, source.name)
+    }
 }
