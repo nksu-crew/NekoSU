@@ -13,6 +13,7 @@ nksu-y += src/fd/anonfd.o
 nksu-y += src/fd/eventfd.o
 nksu-y += src/fd/shm_hash.o
 nksu-y += src/syscall/syscall.o
+
 nksu-y += src/syscall/dispatch.o
 nksu-y += src/hook_init.o
 nksu-y += src/tools/get_arg.o
