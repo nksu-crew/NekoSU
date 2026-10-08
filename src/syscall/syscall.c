@@ -13,6 +13,7 @@
 #include <linux/cpumask.h>
 
 #include <fmac.h>
+#include "symbol_compat.h"
 
 static struct mm_struct *init_mm_ptr;
 syscall_fn_t *syscall_table;
@@ -80,7 +81,7 @@ struct patch_info {
     int result;
 };
 
-static int do_patch_nosync(struct patch_info *p)
+static __nocfi int do_patch_nosync(struct patch_info *p)
 {
     unsigned long addr = (unsigned long)p->dst;
     unsigned long phy;

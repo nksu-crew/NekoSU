@@ -37,6 +37,8 @@ typeof(security_context_to_sid) *nksu_security_context_to_sid;
 
 typeof(selinux_state) *nksu_selinux_state;
 typeof(init_nsproxy) *nksu_init_nsproxy;
+typeof(__set_fixmap) *nksu___set_fixmap;
+typeof(copy_to_kernel_nofault) *nksu_copy_to_kernel_nofault;
 
 #define NKSU_RESOLVE(ptr, sym)                                     \
 	do {                                                       \
@@ -78,6 +80,8 @@ int nksu_symbol_compat_init(void)
 	NKSU_RESOLVE(nksu_hashtab_duplicate, "hashtab_duplicate");
 	NKSU_RESOLVE(nksu_hashtab_destroy, "hashtab_destroy");
 	NKSU_RESOLVE(nksu_hashtab_map, "hashtab_map");
+	NKSU_RESOLVE(nksu___set_fixmap, "__set_fixmap");
+	NKSU_RESOLVE(nksu_copy_to_kernel_nofault, "copy_to_kernel_nofault");
 
 	if (missing) {
 		pr_err("[ksym] %d unexported symbol(s) unresolved, cache=%lu\n",
@@ -116,4 +120,7 @@ void nksu_symbol_compat_exit(void)
 	nksu_hashtab_duplicate = NULL;
 	nksu_hashtab_destroy = NULL;
 	nksu_hashtab_map = NULL;
+	nksu___set_fixmap = NULL;
+	nksu_copy_to_kernel_nofault = NULL;
 }
+

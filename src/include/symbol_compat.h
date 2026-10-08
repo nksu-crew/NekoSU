@@ -31,6 +31,7 @@
 #include <linux/nsproxy.h>
 #include <linux/uidgid.h>
 #include <linux/user_namespace.h>
+#include <asm/fixmap.h>
 
 #include "security.h"
 #include "ss/policydb.h"
@@ -73,6 +74,8 @@ extern typeof(security_context_to_sid) *nksu_security_context_to_sid;
 extern typeof(selinux_state) *nksu_selinux_state;
 extern typeof(init_nsproxy) *nksu_init_nsproxy;
 
+extern typeof(__set_fixmap) *nksu___set_fixmap;
+extern typeof(copy_to_kernel_nofault) *nksu_copy_to_kernel_nofault;
 /*
  * Macro redirection. symbol_compat.c needs the real types to define the
  * variables and cast, so it defines NKSU_SYMBOL_COMPAT_NO_MACROS before
@@ -103,6 +106,8 @@ extern typeof(init_nsproxy) *nksu_init_nsproxy;
 #define security_context_to_sid          nksu_security_context_to_sid
 #define selinux_state                    (*nksu_selinux_state)
 #define init_nsproxy                     (*nksu_init_nsproxy)
+#define __set_fixmap nksu___set_fixmap
+#define copy_to_kernel_nofault           nksu_copy_to_kernel_nofault
 #endif /* NKSU_SYMBOL_COMPAT_NO_MACROS */
 
 /* Resolve all symbols into the pointers; returns negative errno if any fail. */
