@@ -3,6 +3,7 @@
 #include <linux/uaccess.h>
 #include <linux/errno.h>
 #include <asm/ptrace.h>
+#include "klog.h"
 
 #define MAX_ARG_CNT   64
 #define MAX_ARG_LEN   256

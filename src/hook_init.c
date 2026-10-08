@@ -5,6 +5,7 @@
 #include "dispatch.h"
 #include "tools.h"
 #include "selinux/selinux.h"
+#include "klog.h"
 
 enum init_boot_stage {
     INIT_FIRST_STAGE,

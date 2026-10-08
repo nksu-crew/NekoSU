@@ -28,6 +28,7 @@
 #include "hook.h"
 #include "ns.h"
 #include "symbol.h"
+#include "umh.h"
 
 #include "../profile/profile.h"
 #include "../fd/fd.h"

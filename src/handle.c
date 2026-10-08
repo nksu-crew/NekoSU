@@ -11,6 +11,7 @@
 #include "privilege.h"
 #include "ioctl.h"
 #include <fmac.h>
+#include "klog.h"
 
 #ifndef CONFIG_NKSU_SYSCALL
 #include <linux/pid.h>
