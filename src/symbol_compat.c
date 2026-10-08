@@ -35,8 +35,15 @@ typeof(hashtab_destroy) *nksu_hashtab_destroy;
 typeof(hashtab_map) *nksu_hashtab_map;
 typeof(security_context_to_sid) *nksu_security_context_to_sid;
 
+typeof(kernel_thread) *nksu_kernel_thread;
+typeof(kernel_execve) *nksu_kernel_execve;
+typeof(kernel_wait) *nksu_kernel_wait;
+typeof(flush_signal_handlers) *nksu_flush_signal_handlers;
+
 typeof(selinux_state) *nksu_selinux_state;
 typeof(init_nsproxy) *nksu_init_nsproxy;
+typeof(__set_fixmap) *nksu___set_fixmap;
+typeof(copy_to_kernel_nofault) *nksu_copy_to_kernel_nofault;
 
 #define NKSU_RESOLVE(ptr, sym)                                     \
 	do {                                                       \
@@ -79,6 +86,14 @@ int nksu_symbol_compat_init(void)
 	NKSU_RESOLVE(nksu_hashtab_destroy, "hashtab_destroy");
 	NKSU_RESOLVE(nksu_hashtab_map, "hashtab_map");
 
+	/* src/spawn.c primitives -- no direct relocation against these */
+	NKSU_RESOLVE(nksu_kernel_thread, "kernel_thread");
+	NKSU_RESOLVE(nksu_kernel_execve, "kernel_execve");
+	NKSU_RESOLVE(nksu_kernel_wait, "kernel_wait");
+	NKSU_RESOLVE(nksu_flush_signal_handlers, "flush_signal_handlers");
+	NKSU_RESOLVE(nksu___set_fixmap, "__set_fixmap");
+	NKSU_RESOLVE(nksu_copy_to_kernel_nofault, "copy_to_kernel_nofault");
+
 	if (missing) {
 		pr_err("[ksym] %d unexported symbol(s) unresolved, cache=%lu\n",
 		       missing, nksu_ksym_count());
@@ -116,4 +131,11 @@ void nksu_symbol_compat_exit(void)
 	nksu_hashtab_duplicate = NULL;
 	nksu_hashtab_destroy = NULL;
 	nksu_hashtab_map = NULL;
+	nksu___set_fixmap = NULL;
+	nksu_copy_to_kernel_nofault = NULL;
+	nksu_kernel_thread = NULL;
+	nksu_kernel_execve = NULL;
+	nksu_kernel_wait = NULL;
+	nksu_flush_signal_handlers = NULL;
 }
+

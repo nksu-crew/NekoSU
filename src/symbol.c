@@ -670,6 +670,7 @@ static int consume_buffer(const u8 *buf, unsigned long len,
     offset = 0;
     for (i = 0; i < ctx.num_syms; i++) {
         char nm[KSYM_NAME_MAX];
+        char raw[KSYM_NAME_MAX];
         unsigned long a;
 
         if (decode_symbol(names, v.names_end, v.token_index,
@@ -679,9 +680,24 @@ static int consume_buffer(const u8 *buf, unsigned long len,
         a = symbol_addr(&ctx.ai, i);
         if (!a)
             continue;
+
+        /*
+         * Keep the original name as well as the suffix-stripped alias.
+         *
+         * With CONFIG_CFI_CLANG the linker emits a jump-table stub per
+         * address-taken function (foo.cfi_jt); sys_call_table holds those
+         * stub addresses, not the plain function addresses. The stubs live
+         * at the end of .text, so the plain symbol is always seen first and
+         * would otherwise win the stripped name. resolve_ni_syscall() looks
+         * up "__arm64_sys_ni_syscall.cfi_jt" and must get the stub, so the
+         * exact name has to stay resolvable too.
+         */
+        strscpy(raw, nm, sizeof(raw));
         strip_symbol_suffix(nm);
         if (nm[0])
             ksym_cache_add(nm, a);
+        if (strstr(raw, ".cfi_jt"))
+            ksym_cache_add(raw, a);
     }
 
     return 0;
@@ -967,6 +983,18 @@ static unsigned long lookup_proc_kallsyms(const char *name)
     f = filp_open("/proc/kallsyms", O_RDONLY, 0);
     if (IS_ERR(f))
         return 0;
+
+    /*
+     * kernel_read() drives ->read_iter only. This kernel's kallsyms proc
+     * file registers .proc_read = seq_read without proc_read_iter, so
+     * kernel_read() fails with -EINVAL and prints "kernel read not
+     * supported for file /kallsyms". Detect that up-front and let the
+     * in-memory kallsyms scan handle the lookup instead.
+     */
+    if (!f->f_op->read_iter) {
+        filp_close(f, NULL);
+        return 0;
+    }
 
     buf = kvmalloc(SZ_64K, GFP_KERNEL);
     if (!buf) {

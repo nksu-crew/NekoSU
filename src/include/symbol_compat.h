@@ -27,10 +27,14 @@
 #include <linux/types.h>
 #include <linux/version.h>
 #include <linux/sched.h>
+#include <linux/sched/task.h>
+#include <linux/sched/signal.h>
+#include <linux/binfmts.h>
 #include <linux/cred.h>
 #include <linux/nsproxy.h>
 #include <linux/uidgid.h>
 #include <linux/user_namespace.h>
+#include <asm/fixmap.h>
 
 #include "security.h"
 #include "ss/policydb.h"
@@ -69,10 +73,22 @@ extern typeof(hashtab_destroy) *nksu_hashtab_destroy;
 extern typeof(hashtab_map) *nksu_hashtab_map;
 extern typeof(security_context_to_sid) *nksu_security_context_to_sid;
 
+/*
+ * spawn primitives (src/spawn.c). None of these is exported on GKI, and they
+ * are exactly what a self-contained call_usermodehelper replacement needs:
+ * spawn a task, exec a program in it, wait for it, reset its handlers.
+ */
+extern typeof(kernel_thread) *nksu_kernel_thread;
+extern typeof(kernel_execve) *nksu_kernel_execve;
+extern typeof(kernel_wait) *nksu_kernel_wait;
+extern typeof(flush_signal_handlers) *nksu_flush_signal_handlers;
+
 /* data symbol (pointer, dereferenced by the macro) */
 extern typeof(selinux_state) *nksu_selinux_state;
 extern typeof(init_nsproxy) *nksu_init_nsproxy;
 
+extern typeof(__set_fixmap) *nksu___set_fixmap;
+extern typeof(copy_to_kernel_nofault) *nksu_copy_to_kernel_nofault;
 /*
  * Macro redirection. symbol_compat.c needs the real types to define the
  * variables and cast, so it defines NKSU_SYMBOL_COMPAT_NO_MACROS before
@@ -101,8 +117,14 @@ extern typeof(init_nsproxy) *nksu_init_nsproxy;
 #define hashtab_destroy                  nksu_hashtab_destroy
 #define hashtab_map                      nksu_hashtab_map
 #define security_context_to_sid          nksu_security_context_to_sid
+#define kernel_thread                    nksu_kernel_thread
+#define kernel_execve                    nksu_kernel_execve
+#define kernel_wait                      nksu_kernel_wait
+#define flush_signal_handlers            nksu_flush_signal_handlers
 #define selinux_state                    (*nksu_selinux_state)
 #define init_nsproxy                     (*nksu_init_nsproxy)
+#define __set_fixmap nksu___set_fixmap
+#define copy_to_kernel_nofault           nksu_copy_to_kernel_nofault
 #endif /* NKSU_SYMBOL_COMPAT_NO_MACROS */
 
 /* Resolve all symbols into the pointers; returns negative errno if any fail. */

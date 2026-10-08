@@ -13,6 +13,7 @@
 #include <linux/cpumask.h>
 
 #include <fmac.h>
+#include "symbol_compat.h"
 
 static struct mm_struct *init_mm_ptr;
 syscall_fn_t *syscall_table;
@@ -80,7 +81,7 @@ struct patch_info {
     int result;
 };
 
-static int do_patch_nosync(struct patch_info *p)
+static __nocfi int do_patch_nosync(struct patch_info *p)
 {
     unsigned long addr = (unsigned long)p->dst;
     unsigned long phy;
@@ -199,7 +200,7 @@ static syscall_fn_t syscalltable_get_original(unsigned long addr)
     return orig;
 }
 
-int hook_one(int nr, syscall_fn_t fn, syscall_fn_t *orig, const char *name)
+int hook_save(int nr, syscall_fn_t fn, syscall_fn_t *orig, const char *name)
 {
     unsigned long addr = (unsigned long)&syscall_table[nr];
     int ret = syscalltable_hook(addr, fn);
@@ -208,6 +209,17 @@ int hook_one(int nr, syscall_fn_t fn, syscall_fn_t *orig, const char *name)
         return ret;
     }
     *orig = syscalltable_get_original(addr);
+    pr_info("nksu: hooked %s\n", name);
+    return 0;
+}
+
+int hook_nosave(int nr, syscall_fn_t fn, const char* name){
+    unsigned long addr = (unsigned long)&syscall_table[nr];
+    int ret = syscalltable_hook(addr, fn);
+    if (ret) {
+        pr_err("nksu: failed to hook %s: %d\n", name, ret);
+        return ret;
+    }
     pr_info("nksu: hooked %s\n", name);
     return 0;
 }

@@ -5,6 +5,7 @@ nksu-y += src/selinux/rule.o src/selinux/selinux.o src/selinux/policy.o src/seli
 nksu-y += src/profile/profile.o
 nksu-y += src/ns.o
 nksu-y += src/handle.o
+nksu-y += src/spawn.o
 nksu-y += src/symbol.o
 nksu-y += src/symbol_compat.o
 
@@ -12,11 +13,13 @@ nksu-y += src/fd/anonfd.o
 nksu-y += src/fd/eventfd.o
 nksu-y += src/fd/shm_hash.o
 nksu-y += src/syscall/syscall.o
-	
+
+nksu-y += src/syscall/dispatch.o
+nksu-y += src/hook_init.o
+nksu-y += src/tools/get_arg.o
+
 ifeq ($(CONFIG_NKSU_SYSCALL),y)
 	ccflags-y += -DCONFIG_NKSU_SYSCALL=1
-	nksu-y += src/syscall/dispatch.o
-	CFLAGS_src/syscall/dispatch.o := -O3
 endif
 
 obj-$(CONFIG_NKSU) += nksu.o
@@ -41,6 +44,7 @@ ifeq ($(CONFIG_LTO_CLANG),y)
     CFLAGS_src/profile/profile.o := -flto=thin
     CFLAGS_src/ns.o := -flto=thin
     CFLAGS_src/handle.o := -flto=thin -O3
+    CFLAGS_src/spawn.o := -flto=thin
     CFLAGS_src/symbol.o := -flto=thin
     CFLAGS_src/symbol_compat.o := -flto=thin
     CFLAGS_src/fd/anonfd.o := -flto=thin

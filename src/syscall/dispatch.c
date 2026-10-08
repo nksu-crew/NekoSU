@@ -7,15 +7,22 @@
 #include <linux/syscalls.h>
 #include <linux/nospec.h>
 
-#include "type.h"
 #include <fmac.h>
+#include "syscall.h"
+#include "dispatch.h"
 
 syscall_fn_t nksu_orig_table[__NR_syscalls] ____cacheline_aligned;
 nksu_handler_t virt_table[__NR_syscalls] ____cacheline_aligned;
 
 static int nksu_syscall_nr = -1;
+static bool dispatch_unconditional;
 
-static int hook_and_save(int nr, syscall_fn_t new_fn, const char *tag)
+void nksu_dispatch_set_unconditional(bool on)
+{
+	WRITE_ONCE(dispatch_unconditional, on);
+}
+
+int hook_and_save(int nr, syscall_fn_t new_fn, const char *tag)
 {
     syscall_fn_t orig = NULL;
     int ret;
@@ -23,7 +30,7 @@ static int hook_and_save(int nr, syscall_fn_t new_fn, const char *tag)
     if ((unsigned int)nr >= (unsigned int)__NR_syscalls)
         return -EINVAL;
 
-    ret = hook_one(nr, new_fn, &orig, tag);
+    ret = hook_save(nr, new_fn, &orig, tag);
     if (ret)
         return ret;
 
@@ -62,7 +69,8 @@ asmlinkage long nksu_dispatch_fast(const struct pt_regs *regs)
     nr = array_index_nospec(nr, __NR_syscalls);
     orig = READ_ONCE(nksu_orig_table[nr]);
 
-    if (likely(!nksu_profile_has_uid(current_uid().val)))
+    if (likely(!READ_ONCE(dispatch_unconditional) &&
+               !nksu_profile_has_uid(current_uid().val)))
         return orig ? orig(regs) : -ENOSYS;
 
     {
@@ -125,6 +133,8 @@ int nksu_dispatch_init(void)
 {
     int rc, ret;
 
+    nksu_dispatch_set_unconditional(false);
+
     rc = syscalltable_init();
     if (rc < 0)
         return rc;
@@ -148,6 +158,8 @@ int nksu_dispatch_init(void)
 
 void nksu_dispatch_exit(void)
 {
+    nksu_dispatch_set_unconditional(false);
+
     if (nksu_syscall_nr < 0)
         return;
 

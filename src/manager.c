@@ -9,6 +9,9 @@
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/sched/signal.h>
+#include <linux/kthread.h>
+#include <linux/wait.h>
+#include <linux/delay.h>
 #include <fmac.h>
 
 #define TARGET_PACKAGE "me.nekosu.aqnya"
@@ -389,34 +392,45 @@ static uid_t get_uid_from_packages_list(const char *package_name)
     char *buf, *line, *p, *token;
     loff_t pos = 0;
     uid_t target_uid = (uid_t)-1;
+    size_t fsize;
     ssize_t read_size;
 
-    buf = kmalloc(BUF_SIZE, GFP_KERNEL);
-    if (!buf)
+    file = filp_open("/data/system/packages.list", O_RDONLY, 0);
+    if (IS_ERR(file))
         return (uid_t)-1;
 
-    file = filp_open("/data/system/packages.list", O_RDONLY, 0);
-    if (IS_ERR(file)) {
-        kfree(buf);
+    fsize = i_size_read(file->f_inode);
+    if (fsize == 0 || fsize > MAX_PACKAGES_XML_SIZE) {
+        filp_close(file, NULL);
         return (uid_t)-1;
     }
 
-    read_size = kernel_read(file, buf, BUF_SIZE - 1, &pos);
-    if (read_size > 0) {
-        buf[read_size] = '\0';
-        p = buf;
-        while ((line = strsep(&p, "\n")) != NULL) {
+    /* The list can exceed one read buffer; read it whole. */
+    buf = kvmalloc(fsize + 1, GFP_KERNEL);
+    if (!buf) {
+        filp_close(file, NULL);
+        return (uid_t)-1;
+    }
+
+    read_size = kernel_read(file, buf, fsize, &pos);
+    filp_close(file, NULL);
+    if (read_size <= 0) {
+        kvfree(buf);
+        return (uid_t)-1;
+    }
+    buf[read_size] = '\0';
+
+    p = buf;
+    while ((line = strsep(&p, "\n")) != NULL) {
+        token = strsep(&line, " ");
+        if (token && strcmp(token, package_name) == 0) {
             token = strsep(&line, " ");
-            if (token && strcmp(token, package_name) == 0) {
-                token = strsep(&line, " ");
-                if (token && kstrtouint(token, 10, &target_uid) == 0)
-                    break;
-            }
+            if (token && kstrtouint(token, 10, &target_uid) == 0)
+                break;
         }
     }
 
-    filp_close(file, NULL);
-    kfree(buf);
+    kvfree(buf);
     return target_uid;
 }
 
@@ -507,8 +521,59 @@ static int scan_and_apply(void)
     return ret;
 }
 
+static struct task_struct *appscan_thread;
+static DECLARE_WAIT_QUEUE_HEAD(appscan_wq);
+
+static int appscan_retry_thread(void *data)
+{
+    int tries = 120; /* up to ~60s */
+
+    while (!kthread_should_stop()) {
+        if (scan_and_apply() == 0) {
+            pr_info("[manager] manager profile applied\n");
+            break;
+        }
+        if (--tries <= 0) {
+            pr_err("[manager] manager package not found, giving up\n");
+            break;
+        }
+        msleep(500);
+    }
+
+    /*
+     * Never return on our own: a kthread that exits while the module still
+     * holds its task_struct makes the later kthread_stop() touch freed
+     * memory.
+     */
+    wait_event_interruptible(appscan_wq, kthread_should_stop());
+    return 0;
+}
+
 int appscan_init(void)
 {
     pr_info("[manager] Module starting scan...\n");
-    return scan_and_apply();
+
+    if (scan_and_apply() == 0)
+        return 0;
+
+    /*
+     * A first-stage (vendor_boot) load starts the feature components at the
+     * zygote, before PackageManagerService has (re)written the package list,
+     * so keep retrying in the background.
+     */
+    appscan_thread = kthread_run(appscan_retry_thread, NULL, "nksu-appscan");
+    if (IS_ERR(appscan_thread)) {
+        int ret = PTR_ERR(appscan_thread);
+        appscan_thread = NULL;
+        return ret;
+    }
+    return 0;
+}
+
+void appscan_exit(void)
+{
+    if (appscan_thread) {
+        kthread_stop(appscan_thread);
+        appscan_thread = NULL;
+    }
 }

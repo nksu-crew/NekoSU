@@ -14,6 +14,10 @@
 #include "ss/services.h"
 #include "objsec.h"
 
+#include <linux/kthread.h>
+#include <linux/wait.h>
+#include <linux/delay.h>
+
 #include <fmac.h>
 #include "symbol_compat.h"
 /*
@@ -27,6 +31,7 @@
 #endif
 
 static struct task_struct *nksu_init_thread;
+static DECLARE_WAIT_QUEUE_HEAD(nksu_selinux_wq);
 
 /* toggle enforcing / permissive */
 
@@ -175,12 +180,13 @@ int load_hook(void)
 static int nksu_selinux_init_thread(void *data)
 {
 	int timeout_ms = 30 * 1000;
+	int ret = -ETIMEDOUT;
 
 	pr_info("[selinux]: waiting for SELinux policy...\n");
 
 	while (timeout_ms > 0) {
 		if (kthread_should_stop())
-			return -EINTR;
+			return 0;
 
 		if (READ_ONCE(selinux_state.policy))
 			break;
@@ -189,16 +195,23 @@ static int nksu_selinux_init_thread(void *data)
 		timeout_ms -= 10;
 	}
 
-	if (!READ_ONCE(selinux_state.policy)) {
+	if (READ_ONCE(selinux_state.policy)) {
+		pr_info("[selinux]: SELinux policy ready, continuing init\n");
+		ret = load_hook();
+	} else {
 		pr_err("[selinux]: SELinux policy not ready after 30s, giving up\n");
-		return -ETIMEDOUT;
 	}
 
-	pr_info("[selinux]: SELinux policy ready, continuing init\n");
-	return load_hook();
+	/*
+	 * Do not return on our own: if we exit while the module still holds
+	 * our task_struct, the later kthread_stop() dereferences freed memory.
+	 * Wait here until selinux_exit() asks us to stop.
+	 */
+	wait_event_interruptible(nksu_selinux_wq, kthread_should_stop());
+	return ret;
 }
 
-int __init init_selinux_hook(void)
+int init_selinux_hook(void)
 {
 	if (!READ_ONCE(selinux_state.policy)) {
 		nksu_init_thread = kthread_run(nksu_selinux_init_thread,
@@ -214,7 +227,7 @@ int __init init_selinux_hook(void)
 	return load_hook();
 }
 
-void __exit selinux_exit(void)
+void selinux_exit(void)
 {
 	pr_info("[selinux]: sepolicy exit – restoring original policy\n");
 
