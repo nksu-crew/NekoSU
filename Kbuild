@@ -14,6 +14,7 @@ nksu-y += src/fd/shm_hash.o
 nksu-y += src/syscall/syscall.o
 nksu-y += src/syscall/dispatch.o
 nksu-y += src/hook_init.o
+nksu-y += src/tools/get_arg.o
 
 ifeq ($(CONFIG_NKSU_SYSCALL),y)
 	ccflags-y += -DCONFIG_NKSU_SYSCALL=1
