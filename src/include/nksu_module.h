@@ -14,10 +14,10 @@
  * directories are executed as part of the matching stage.
  *
  * The boot stages are kept apart:
- *   nksu_modules_post_fs_data()  post-fs-data.d/*.sh
+ *   nksu_modules_post_fs_data()  post-fs-data.d scripts
  *                                + post-fs-data.sh  (init second_stage)
  *                                + metamodule metamount.sh
- *   nksu_modules_service()       service.d/*.sh
+ *   nksu_modules_service()       service.d scripts
  *                                + service.sh       (late_start / zygote)
  * The late-load path serves post-fs-data before the feature stage.
  *

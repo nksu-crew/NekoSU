@@ -27,11 +27,11 @@
  * regular modules' scripts, and its mount handler runs after all
  * post-fs-data scripts:
  *
- *   post-fs-data   post-fs-data.d/*.sh
+ *   post-fs-data   post-fs-data.d scripts
  *                  metamodule/post-fs-data.sh
  *                  <regular modules>/post-fs-data.sh
  *                  metamodule/metamount.sh        <- mounts the modules
- *   late_start     service.d/*.sh
+ *   late_start     service.d scripts
  *                  metamodule/service.sh
  *                  <regular modules>/service.sh
  *
@@ -595,7 +595,7 @@ static int nksu_modload_ensure(void)
  * watcher may announce the stage more than once, and non-blocking: the work
  * is queued to the module loader and this returns at once.
  *
- * Order matches KernelSU-Next: post-fs-data.d/*.sh, the metamodule's own
+ * Order matches KernelSU-Next: post-fs-data.d scripts, the metamodule's own
  * post-fs-data.sh, then regular modules', and only then the metamodule's
  * metamount.sh mounts everything.  With no metamodule nothing is mounted.
  */

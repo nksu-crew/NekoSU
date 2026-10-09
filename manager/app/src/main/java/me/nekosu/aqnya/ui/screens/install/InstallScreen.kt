@@ -287,7 +287,7 @@ private fun InstallMethodSection(
                                     stringResource(R.string.install_method_direct_desc)
                                 state.directChecking -> stringResource(R.string.install_direct_checking)
                                 state.rootAvailable == false -> stringResource(R.string.install_direct_no_root)
-                                state.directTarget != null -> state.directTarget
+                                state.directTarget != null -> state.directTarget.orEmpty()
                                 else -> stringResource(R.string.install_direct_no_part)
                             },
                         )
