@@ -51,15 +51,17 @@
  *
  *   /system/bin/sh <module>/<hook>
  *
- * with root credentials in the "nksu" SELinux domain (unconfined), and its
- * exit status is waited on so hooks run in order.
+ * with root credentials in the "nksu" SELinux domain (unconfined).
+ * post-fs-data hooks are waited on so they run in order (a module's
+ * sepolicy.rule first, then the metamodule's, then regular modules', then
+ * metamount.sh).  The late_start service scripts are dispatched detached,
+ * matching Magisk/KernelSU: a service.sh may keep a foreground daemon, and
+ * waiting for it would stall every module after it.
  *
  * The two stages are dispatched to a dedicated "nksu-modload" kthread and
  * this file's public entry points return as soon as the work is queued, so
  * a slow module script can never stall init, the boot watcher, the zygote
- * feature stage or a late insmod.  The worker still runs each stage's hooks
- * one at a time, preserving the ordering above (metamodule before regular
- * modules, metamount.sh last).
+ * feature stage or a late insmod.
  */
 
 #include <linux/kernel.h>
@@ -308,7 +310,7 @@ static int nksu_read_dir_entries(const char *path, struct nksu_module_dir *out, 
     return ret;
 }
 
-static void nksu_spawn_script(const char *script)
+static void nksu_spawn_script(const char *script, int wait)
 {
     char *argv[3];
     struct nksu_spawn_args args;
@@ -327,20 +329,21 @@ static void nksu_spawn_script(const char *script)
     args.argv = (char *const *)argv;
     args.envp = (char *const *)nksu_module_envp;
     args.domain = DOMAIN_CTX;
-    args.wait = NKSU_SPAWN_WAIT_PROC;
+    args.wait = wait;
 
-    pr_info("nksu: running module hook %s\n", script);
+    pr_info("nksu: running module hook %s%s\n", script,
+            wait == NKSU_SPAWN_NOWAIT ? " (async)" : "");
     nksu_spawn(&args);
 }
 
-static void nksu_module_run_hook(const char *moddir, const char *hook)
+static void nksu_module_run_hook(const char *moddir, const char *hook, int wait)
 {
     char script[NKSU_MODULE_PATH_MAX];
 
     if (nksu_path_join(script, sizeof(script), moddir, hook))
         return;
 
-    nksu_spawn_script(script);
+    nksu_spawn_script(script, wait);
 }
 
 static bool nksu_has_suffix(const char *name, const char *suffix)
@@ -355,7 +358,7 @@ static bool nksu_has_suffix(const char *name, const char *suffix)
  * Run every "*.sh" in a Magisk-style script directory (post-fs-data.d,
  * service.d).  The directory is optional; a missing one is not an error.
  */
-static void nksu_run_scripts_dir(const char *dir)
+static void nksu_run_scripts_dir(const char *dir, int wait)
 {
     struct nksu_module_dir files;
     const struct cred *old;
@@ -379,7 +382,7 @@ static void nksu_run_scripts_dir(const char *dir)
         if (nksu_path_join(script, sizeof(script), dir, files.names[i]))
             continue;
 
-        nksu_spawn_script(script);
+        nksu_spawn_script(script, wait);
     }
 
     nksu_module_dir_free(&files);
@@ -493,8 +496,12 @@ static bool nksu_module_is_metamodule(const char *moddir)
 /*
  * Run @hook for every enabled module of one kind, in directory order:
  * want_meta=false runs regular modules, want_meta=true the metamodule.
+ * @wait is NKSU_SPAWN_WAIT_PROC while a stage must finish before the next
+ * one (post-fs-data), or NKSU_SPAWN_NOWAIT for the detached late_start
+ * service stage (a service script may legally keep a daemon in the
+ * foreground, so it must not stall the modules after it).
  */
-static void nksu_modules_foreach(const char *hook, bool want_meta)
+static void nksu_modules_foreach(const char *hook, bool want_meta, int wait)
 {
     struct nksu_module_dir dirs;
     const struct cred *old;
@@ -521,7 +528,7 @@ static void nksu_modules_foreach(const char *hook, bool want_meta)
         if (nksu_module_is_metamodule(moddir) != want_meta)
             continue;
 
-        nksu_module_run_hook(moddir, hook);
+        nksu_module_run_hook(moddir, hook, wait);
     }
 
     nksu_module_dir_free(&dirs);
@@ -671,11 +678,14 @@ static void nksu_modules_run_post_fs_data_hooks(void)
     /* Each module's sepolicy.rule is applied before its boot scripts. */
     nksu_modules_apply_sepolicy();
 
-    nksu_modules_foreach(NKSU_MODULE_POST_FS_DATA, true);
-    nksu_modules_foreach(NKSU_MODULE_POST_FS_DATA, false);
+    nksu_modules_foreach(NKSU_MODULE_POST_FS_DATA, true,
+                         NKSU_SPAWN_WAIT_PROC);
+    nksu_modules_foreach(NKSU_MODULE_POST_FS_DATA, false,
+                         NKSU_SPAWN_WAIT_PROC);
 
     pr_info("nksu: metamodule mount stage\n");
-    nksu_modules_foreach(NKSU_MODULE_METAMOUNT, true);
+    nksu_modules_foreach(NKSU_MODULE_METAMOUNT, true,
+                         NKSU_SPAWN_WAIT_PROC);
 
     WRITE_ONCE(modules_post_fs_data_done, true);
 }
@@ -703,7 +713,7 @@ static void nksu_modules_do_post_fs_data(void)
     modules_ready = nksu_wait_for_modules();
 
     /* Magisk-compatible extra scripts run before the modules. */
-    nksu_run_scripts_dir(NKSU_POST_FS_DATA_DIR);
+    nksu_run_scripts_dir(NKSU_POST_FS_DATA_DIR, NKSU_SPAWN_WAIT_PROC);
 
     if (modules_ready)
         nksu_modules_run_post_fs_data_hooks();
@@ -724,10 +734,15 @@ static void nksu_modules_do_service(void)
     if (!READ_ONCE(modules_post_fs_data_done))
         nksu_modules_run_post_fs_data_hooks();
 
-    nksu_run_scripts_dir(NKSU_SERVICE_DIR);
+    /*
+     * service.d and the modules' service.sh run detached, like Magisk's
+     * late_start stage: a service script may keep a foreground daemon, so
+     * waiting for it would stall every module after it.
+     */
+    nksu_run_scripts_dir(NKSU_SERVICE_DIR, NKSU_SPAWN_NOWAIT);
 
-    nksu_modules_foreach(NKSU_MODULE_SERVICE, true);
-    nksu_modules_foreach(NKSU_MODULE_SERVICE, false);
+    nksu_modules_foreach(NKSU_MODULE_SERVICE, true, NKSU_SPAWN_NOWAIT);
+    nksu_modules_foreach(NKSU_MODULE_SERVICE, false, NKSU_SPAWN_NOWAIT);
 }
 
 static int nksu_modload_thread_fn(void *data)
