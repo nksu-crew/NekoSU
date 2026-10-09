@@ -104,20 +104,24 @@ static ssize_t (*nksu_orig_read)(struct file *, char __user *, size_t, loff_t *)
 static ssize_t (*nksu_orig_read_iter)(struct kiocb *, struct iov_iter *);
 
 /*
- * None of getname_kernel() or do_mkdirat() is part of the GKI KMI, and
- * vfs_mkdir() changed its first argument across the KMI range we build for,
- * so resolve them through the module's own kallsyms scanner (like every
- * other unexported symbol).  do_mkdirat() has kept a stable signature across
- * those kernels and hides the vfs_mkdir() differences.
+ * None of getname_kernel()/do_mkdirat()/do_unlinkat()/do_rmdir() is part of
+ * the GKI KMI, and vfs_mkdir() changed its first argument across the KMI
+ * range we build for, so resolve them through the module's own kallsyms
+ * scanner (like every other unexported symbol).  The do_*() helpers have
+ * kept a stable signature and hide the vfs_*() differences.
  *
- * do_mkdirat() takes ownership of the filename and putname()s it on every
- * path (including its error path), so the caller must NOT put it again.
+ * All of them take ownership of the filename and putname() it on every path
+ * (including the error path), so the caller must NOT put it again.
  */
 typedef struct filename *(*nksu_getname_kernel_t)(const char *);
 typedef long (*nksu_do_mkdirat_t)(int, struct filename *, umode_t);
+typedef long (*nksu_do_unlinkat_t)(int, struct filename *);
+typedef long (*nksu_do_rmdir_t)(int, struct filename *);
 
 static nksu_getname_kernel_t nksu_getname_kernel;
 static nksu_do_mkdirat_t nksu_do_mkdirat;
+static nksu_do_unlinkat_t nksu_do_unlinkat;
+static nksu_do_rmdir_t nksu_do_rmdir;
 
 /* saved originals for the two syscall-table hooks */
 static syscall_fn_t nksu_orig_read_sys;
@@ -150,6 +154,38 @@ static int nksu_rc_mkdir(const char *path)
 
     if (ret == -EEXIST)
         return 0;
+    return ret < 0 ? (int)ret : 0;
+}
+
+static int nksu_rc_unlink(const char *path)
+{
+    struct filename *name;
+    long ret;
+
+    if (!nksu_getname_kernel || !nksu_do_unlinkat)
+        return -ENOSYS;
+
+    name = nksu_getname_kernel(path);
+    if (IS_ERR(name))
+        return PTR_ERR(name);
+
+    ret = nksu_do_unlinkat(AT_FDCWD, name);
+    return ret < 0 ? (int)ret : 0;
+}
+
+static int nksu_rc_rmdir(const char *path)
+{
+    struct filename *name;
+    long ret;
+
+    if (!nksu_getname_kernel || !nksu_do_rmdir)
+        return -ENOSYS;
+
+    name = nksu_getname_kernel(path);
+    if (IS_ERR(name))
+        return PTR_ERR(name);
+
+    ret = nksu_do_rmdir(AT_FDCWD, name);
     return ret < 0 ? (int)ret : 0;
 }
 
@@ -421,6 +457,31 @@ static bool nksu_rc_marker_seen(const char *path)
     return true;
 }
 
+/*
+ * Remove the temp dir once every marker has been consumed (or the watcher
+ * has given up).  It is a tmpfs directory, so leaving it behind only wastes
+ * /dev entries, but the injected rc no longer needs it after boot-completed.
+ */
+static void nksu_rc_remove_dir(void)
+{
+    static const char *const files[] = {
+        NKSU_RC_MARK_POST_FS_DATA,
+        NKSU_RC_MARK_SERVICES,
+        NKSU_RC_MARK_BOOT_COMPLETED,
+        NKSU_RC_SCRIPT,
+    };
+    struct cred *cred = nksu_rc_cred_get();
+    const struct cred *old = cred ? override_creds(cred) : NULL;
+    size_t i;
+
+    for (i = 0; i < ARRAY_SIZE(files); i++)
+        nksu_rc_unlink(files[i]);
+    nksu_rc_rmdir(NKSU_RC_DIR);
+
+    if (old)
+        revert_creds(old);
+}
+
 static int nksu_rc_watch_fn(void *data)
 {
     bool post = false, serv = false, boot = false;
@@ -450,6 +511,8 @@ static int nksu_rc_watch_fn(void *data)
         msleep(100);
     }
 
+    nksu_rc_remove_dir();
+
     return 0;
 }
 
@@ -464,6 +527,8 @@ int nksu_init_rc_init(void)
 
     nksu_getname_kernel = (nksu_getname_kernel_t)nksu_ksym_lookup("getname_kernel");
     nksu_do_mkdirat = (nksu_do_mkdirat_t)nksu_ksym_lookup("do_mkdirat");
+    nksu_do_unlinkat = (nksu_do_unlinkat_t)nksu_ksym_lookup("do_unlinkat");
+    nksu_do_rmdir = (nksu_do_rmdir_t)nksu_ksym_lookup("do_rmdir");
 
     if (!nksu_getname_kernel || !nksu_do_mkdirat)
         pr_warn("nksu: cannot resolve VFS mkdir helpers, using fallback\n");
@@ -497,6 +562,9 @@ void nksu_init_rc_exit(void)
         kthread_stop(nksu_rc_watch_thread);
         nksu_rc_watch_thread = NULL;
     }
+
+    /* Drop the tmpfs dir in case the watcher was stopped before it did. */
+    nksu_rc_remove_dir();
 
     if (nksu_rc_cred) {
         put_cred(nksu_rc_cred);
