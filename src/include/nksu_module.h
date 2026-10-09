@@ -16,12 +16,18 @@
  * The boot stages are kept apart:
  *   nksu_modules_post_fs_data()  post-fs-data.d scripts
  *                                + each module's sepolicy.rule
- *                                + post-fs-data.sh  (first zygote exec,
- *                                  i.e. once /data is mounted/decrypted)
+ *                                + post-fs-data.sh  (init.rc `on post-fs-data`
+ *                                  marker; /data/adb is ready by then)
  *                                + metamodule metamount.sh
  *   nksu_modules_service()       service.d scripts
- *                                + service.sh       (late_start / zygote)
+ *                                + service.sh       (init.rc late_start)
  * The late-load path serves post-fs-data before the feature stage.
+ *
+ * The stage triggers come from the KernelSU-style init.rc injection (see
+ * src/init_rc.c): nksu creates /dev/nksu, init runs a stage script there and
+ * the kernel watches for the resulting marker.  The legacy first-zygote-exec
+ * path still calls post-fs-data once as a fallback.  Both stage entry points
+ * are idempotent.
  *
  * Both entry points are non-blocking: the work is queued to an internal
  * kthread and the caller returns immediately, so a slow module script cannot

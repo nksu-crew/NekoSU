@@ -11,9 +11,10 @@
  * The two stages are kept strictly apart, matching Magisk:
  *
  *   post-fs-data   nksu_modules_post_fs_data()  -> post-fs-data.sh
- *                  (first zygote exec: /data is mounted and decrypted)
+ *                  (driven by the init.rc `on post-fs-data` marker injected
+ *                  by src/init_rc.c; /data is mounted and /data/adb readable)
  *   late_start     nksu_modules_service()       -> service.sh
- *                  (feature-component stage, same zygote event)
+ *                  (init.rc late_start marker)
  *
  * A late load (insmod after boot) never saw the post-fs-data stage; the
  * late-load path calls nksu_modules_post_fs_data() before the feature stage
@@ -75,6 +76,7 @@
 #include <linux/dcache.h>
 #include <linux/cred.h>
 #include <linux/capability.h>
+#include <linux/atomic.h>
 
 #include <fmac.h>
 
@@ -104,8 +106,8 @@ static const char *const nksu_module_envp[] = {
     NULL,
 };
 
-/* set once the post-fs-data stage has been served */
-static bool post_fs_data_done;
+/* set once the post-fs-data stage has been queued */
+static atomic_t post_fs_data_done = ATOMIC_INIT(0);
 
 /*
  * Enumeration touches /data/adb from a kthread (kernel domain) or from the
@@ -606,6 +608,9 @@ static bool service_pending;
 /* set once the module hooks of the post-fs-data stage have actually run */
 static bool modules_post_fs_data_done;
 
+/* the service stage is queued once (init.rc marker or the late-load path) */
+static atomic_t service_done = ATOMIC_INIT(0);
+
 /*
  * Poll until /data/adb exists (i.e. /data has been mounted).  The post-fs-data
  * stage can fire before vold mounts /data, which made the kernel-side loader
@@ -773,24 +778,29 @@ static int nksu_modload_ensure(void)
  */
 void nksu_modules_post_fs_data(void)
 {
-    if (READ_ONCE(post_fs_data_done))
+    if (atomic_xchg(&post_fs_data_done, 1))
         return;
 
     if (nksu_modload_ensure()) {
         pr_err("nksu: failed to start module loader\n");
+        atomic_set(&post_fs_data_done, 0);
         return;
     }
 
-    WRITE_ONCE(post_fs_data_done, true);
     WRITE_ONCE(post_fs_data_pending, true);
     wake_up_interruptible(&modload_wq);
 }
 
-/* late_start stage: called from the feature-component stage. */
+/* late_start stage: called from the init.rc marker (or the feature stage). */
 int nksu_modules_service(void)
 {
-    if (nksu_modload_ensure())
+    if (atomic_xchg(&service_done, 1))
+        return 0;
+
+    if (nksu_modload_ensure()) {
+        atomic_set(&service_done, 0);
         return -ENOMEM;
+    }
 
     WRITE_ONCE(service_pending, true);
     wake_up_interruptible(&modload_wq);

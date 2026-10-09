@@ -7,6 +7,7 @@
 #include "selinux/selinux.h"
 #include "nksu.h"
 #include "nksu_module.h"
+#include "init_rc.h"
 #include "klog.h"
 
 enum init_boot_stage {
@@ -26,11 +27,15 @@ int boot_stage = INIT_FIRST_STAGE;
  * components up at the right moment:
  *
  *   execve(id, "selinux_setup")  -> logged; the policy is loaded next
- *   execve(id, "second_stage")   -> SELinux Hook (domain + rules)
- *   execve(app_process -Xzygote) -> /data is prepared: post-fs-data module
- *                                   stage, feature components (profile,
- *                                   tracepoint, manager scan...), then drop
- *                                   the watcher
+ *   execve(id, "second_stage")   -> SELinux Hook (domain + rules); the
+ *                                   init.rc proxy is installed from the
+ *                                   first init.rc read (see src/init_rc.c)
+ *   execve(app_process -Xzygote) -> feature components (profile, tracepoint,
+ *                                   manager scan...); post-fs-data module
+ *                                   loading is normally driven by the
+ *                                   injected init.rc marker and only called
+ *                                   here as a fallback.  Then drop the
+ *                                   watcher.
  *
  * Late load just initializes everything at once (see nksu.c).
  */
@@ -247,7 +252,21 @@ int hook_init(void)
     if (ret)
         goto err_dispatch;
 
+    /*
+     * Inject the KernelSU-style init.rc rc (read/fstat proxy) and start the
+     * stage-marker watcher.  On failure the zygote fallback below still
+     * serves the module stages, so this is not fatal.
+     */
+    ret = nksu_init_rc_init();
+    if (ret) {
+        pr_err("nksu: init.rc injection failed: %d\n", ret);
+        goto err_thread;
+    }
+
     return 0;
+
+err_thread:
+    stop_init_thread();
 
 err_dispatch:
     nksu_dispatch_exit();
@@ -256,6 +275,7 @@ err_dispatch:
 
 void hook_exit(void)
 {
+    nksu_init_rc_exit();
     stop_init_thread();
 
     if (READ_ONCE(features_loaded))
