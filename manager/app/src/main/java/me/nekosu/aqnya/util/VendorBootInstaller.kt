@@ -148,15 +148,24 @@ object VendorBootInstaller {
     /**
      * 定位本机 vendor_boot 分区。
      *
-     * 依次尝试标准的 by-name 链接，并优先当前 slot 的 `vendor_boot<slot>`。
-     * 返回可直接 `dd` 的路径；找不到（如非 GKI 设备）返回 null。
+     * A/B 设备优先选择当前 slot 的分区（`vendor_boot_a` / `vendor_boot_b`），
+     * slot 依次从 `ro.boot.slot_suffix`、`ro.boot.slot`、`/proc/cmdline` 读取；
+     * 找不到带后缀的分区时退回无后缀的 `vendor_boot` 链接。返回可直接 `dd`
+     * 的路径；找不到（如非 GKI 设备）返回 null。
      */
     fun detectVendorBootPartition(): String? {
         val cmd =
             """
             SLOT=${'$'}(getprop ro.boot.slot_suffix 2>/dev/null)
+            if [ -z "${'$'}SLOT" ]; then
+              slot=${'$'}(getprop ro.boot.slot 2>/dev/null)
+              [ -n "${'$'}slot" ] && SLOT="_${'$'}slot"
+            fi
+            if [ -z "${'$'}SLOT" ]; then
+              SLOT=${'$'}(tr ' ' '\n' < /proc/cmdline 2>/dev/null | sed -n 's/^androidboot.slot_suffix=//p' | head -n1)
+            fi
             for base in /dev/block/by-name /dev/block/bootdevice/by-name; do
-              for name in vendor_boot vendor_boot${'$'}SLOT; do
+              for name in "vendor_boot${'$'}SLOT" vendor_boot; do
                 if [ -e "${'$'}base/${'$'}name" ]; then
                   echo "${'$'}base/${'$'}name"
                   exit 0
@@ -171,6 +180,24 @@ object VendorBootInstaller {
             .lineSequence()
             .map { it.trim() }
             .firstOrNull { it.startsWith("/dev/") }
+    }
+
+    /** 当前设备的 slot 后缀（如 "_a"）；非 A/B 或未知时返回 null。 */
+    fun currentSlotSuffix(): String? {
+        val cmd =
+            """
+            slot=${'$'}(getprop ro.boot.slot_suffix 2>/dev/null)
+            if [ -z "${'$'}slot" ]; then
+              s=${'$'}(getprop ro.boot.slot 2>/dev/null)
+              [ -n "${'$'}s" ] && slot="_${'$'}s"
+            fi
+            [ -n "${'$'}slot" ] && echo "${'$'}slot"
+            """.trimIndent()
+
+        return RootShell.exec(cmd).output
+            .lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.startsWith("_") }
     }
 
     /**
@@ -210,6 +237,12 @@ object VendorBootInstaller {
             if (part == null) {
                 onOutput("[nksu] ERROR: 未找到 vendor_boot 分区")
                 return@withContext -1
+            }
+            val slot = currentSlotSuffix()
+            if (slot != null) {
+                onOutput("[nksu] A/B 设备，当前 slot: $slot -> 仅刷入当前 slot")
+            } else {
+                onOutput("[nksu] 非 A/B 设备")
             }
             onOutput("[nksu] vendor_boot: $part")
 
