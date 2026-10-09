@@ -313,8 +313,10 @@ static void nksu_spawn_script(const char *script)
     char *argv[3];
     struct nksu_spawn_args args;
 
-    if (!nksu_file_exists(script))
+    if (!nksu_file_exists(script)) {
+        pr_info("nksu: module hook %s missing\n", script);
         return;
+    }
 
     argv[0] = (char *)NKSU_MODULE_SHELL;
     argv[1] = (char *)script;
