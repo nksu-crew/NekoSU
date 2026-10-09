@@ -101,24 +101,35 @@ fun InstallScreen(navController: NavController) {
 
     LaunchedEffect(Unit) { installViewModel.load() }
 
-    var showConfirm by remember { mutableStateOf(false) }
+    var confirmMethod by remember { mutableStateOf<InstallMethod?>(null) }
 
-    if (showConfirm) {
+    confirmMethod?.let { method ->
+        val inactive = method == InstallMethod.INACTIVE
         AlertDialog(
-            onDismissRequest = { showConfirm = false },
-            title = { Text(stringResource(R.string.install_direct_confirm_title)) },
+            onDismissRequest = { confirmMethod = null },
+            title = {
+                Text(
+                    stringResource(
+                        if (inactive) R.string.install_inactive_confirm_title else R.string.install_direct_confirm_title,
+                    ),
+                )
+            },
             text = {
                 Text(
                     stringResource(
-                        R.string.install_direct_confirm_message,
-                        state.directTarget.orEmpty(),
+                        if (inactive) {
+                            R.string.install_inactive_confirm_message
+                        } else {
+                            R.string.install_direct_confirm_message
+                        },
+                        (if (inactive) state.inactiveTarget else state.directTarget).orEmpty(),
                     ),
                 )
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        showConfirm = false
+                        confirmMethod = null
                         installViewModel.install()
                     },
                 ) {
@@ -126,7 +137,7 @@ fun InstallScreen(navController: NavController) {
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showConfirm = false }) {
+                TextButton(onClick = { confirmMethod = null }) {
                     Text(stringResource(R.string.dialog_cancel))
                 }
             },
@@ -158,7 +169,10 @@ fun InstallScreen(navController: NavController) {
             InstallBottomBar(
                 state = state,
                 onInstall = {
-                    if (state.method == InstallMethod.DIRECT) showConfirm = true else installViewModel.install()
+                    when (state.method) {
+                        InstallMethod.FILE -> installViewModel.install()
+                        InstallMethod.DIRECT, InstallMethod.INACTIVE -> confirmMethod = state.method
+                    }
                 },
                 onDone = { navController.popBackStack() },
             )
@@ -186,7 +200,7 @@ fun InstallScreen(navController: NavController) {
                     state = state,
                     onPick = { pickVendorBoot.launch(arrayOf("*/*")) },
                     onSelectMethod = installViewModel::selectMethod,
-                    onRetryDirect = installViewModel::checkDirect,
+                    onRetryRoot = installViewModel::checkRoot,
                 )
                 KernelModuleSection(state = state, onSelect = installViewModel::selectKo)
                 if (state.candidates.isEmpty()) {
@@ -237,88 +251,116 @@ private fun InstallMethodSection(
     state: InstallUiState,
     onPick: () -> Unit,
     onSelectMethod: (InstallMethod) -> Unit,
-    onRetryDirect: () -> Unit,
+    onRetryRoot: () -> Unit,
 ) {
+    val options =
+        buildList {
+            add(InstallMethod.FILE)
+            if (state.isGki && state.rootAvailable) {
+                if (state.directTarget != null) add(InstallMethod.DIRECT)
+                if (state.inactiveTarget != null) add(InstallMethod.INACTIVE)
+            }
+        }
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SectionTitle(stringResource(R.string.install_method))
         CardGroup {
-            CardItem(index = 0, total = 2) {
-                ListItem(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable(enabled = !state.running) {
-                                if (state.method == InstallMethod.FILE) onPick() else onSelectMethod(InstallMethod.FILE)
-                            },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    leadingContent = {
-                        RadioButton(
-                            selected = state.method == InstallMethod.FILE,
-                            onClick = { onSelectMethod(InstallMethod.FILE) },
-                        )
-                    },
-                    headlineContent = { Text(stringResource(R.string.install_method_file)) },
-                    supportingContent = {
-                        Text(state.vendorBootName ?: stringResource(R.string.install_pick_vendor_boot_desc))
-                    },
-                    trailingContent = {
-                        Icon(Icons.Filled.InsertDriveFile, contentDescription = null)
-                    },
-                )
+            options.forEachIndexed { index, option ->
+                CardItem(index = index, total = options.size) {
+                    InstallMethodRow(
+                        state = state,
+                        option = option,
+                        onPick = onPick,
+                        onSelectMethod = onSelectMethod,
+                    )
+                }
             }
-            CardItem(index = 1, total = 2) {
-                ListItem(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable(enabled = !state.running) { onSelectMethod(InstallMethod.DIRECT) },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    leadingContent = {
-                        RadioButton(
-                            selected = state.method == InstallMethod.DIRECT,
-                            onClick = { onSelectMethod(InstallMethod.DIRECT) },
-                        )
-                    },
-                    headlineContent = { Text(stringResource(R.string.install_method_direct)) },
-                    supportingContent = {
-                        Text(
-                            when {
-                                state.method != InstallMethod.DIRECT ->
-                                    stringResource(R.string.install_method_direct_desc)
-                                state.directChecking -> stringResource(R.string.install_direct_checking)
-                                state.rootAvailable == false -> stringResource(R.string.install_direct_no_root)
-                                state.directTarget != null -> state.directTarget.orEmpty()
-                                else -> stringResource(R.string.install_direct_no_part)
-                            },
-                        )
-                    },
-                    trailingContent = {
-                        if (state.method == InstallMethod.DIRECT) {
-                            when {
-                                state.directChecking ->
-                                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                                state.directReady ->
-                                    Icon(
-                                        Icons.Filled.CheckCircle,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                    )
-                                state.rootAvailable != null ->
-                                    IconButton(onClick = onRetryDirect) {
-                                        Icon(
-                                            Icons.Filled.Refresh,
-                                            contentDescription = stringResource(R.string.install_direct_retry),
-                                        )
-                                    }
-                            }
-                        } else {
-                            Icon(Icons.Filled.Smartphone, contentDescription = null)
-                        }
-                    },
-                )
+        }
+
+        when {
+            state.isGki && state.rootChecked && !state.rootAvailable -> {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 4.dp)) {
+                    Text(
+                        text = stringResource(R.string.install_direct_no_root),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = onRetryRoot) {
+                        Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.install_direct_retry))
+                    }
+                }
+            }
+
+            state.rootChecking -> {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 4.dp)) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.install_root_checking),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
+}
+
+@Composable
+private fun InstallMethodRow(
+    state: InstallUiState,
+    option: InstallMethod,
+    onPick: () -> Unit,
+    onSelectMethod: (InstallMethod) -> Unit,
+) {
+    val selected = state.method == option
+    ListItem(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable(enabled = !state.running) {
+                    when (option) {
+                        InstallMethod.FILE ->
+                            if (state.method == InstallMethod.FILE) onPick() else onSelectMethod(InstallMethod.FILE)
+                        else -> onSelectMethod(option)
+                    }
+                },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        leadingContent = {
+            RadioButton(selected = selected, onClick = { onSelectMethod(option) })
+        },
+        headlineContent = {
+            Text(
+                stringResource(
+                    when (option) {
+                        InstallMethod.FILE -> R.string.install_method_file
+                        InstallMethod.DIRECT -> R.string.install_method_direct
+                        InstallMethod.INACTIVE -> R.string.install_method_inactive
+                    },
+                ),
+            )
+        },
+        supportingContent = {
+            Text(
+                when (option) {
+                    InstallMethod.FILE -> state.vendorBootName ?: stringResource(R.string.install_pick_vendor_boot_desc)
+                    InstallMethod.DIRECT -> state.directTarget ?: stringResource(R.string.install_method_direct_desc)
+                    InstallMethod.INACTIVE -> state.inactiveTarget ?: stringResource(R.string.install_method_inactive_desc)
+                },
+            )
+        },
+        trailingContent = {
+            Icon(
+                imageVector =
+                    when (option) {
+                        InstallMethod.FILE -> Icons.Filled.InsertDriveFile
+                        else -> Icons.Filled.Smartphone
+                    },
+                contentDescription = null,
+            )
+        },
+    )
 }
 
 @Composable
@@ -404,10 +446,10 @@ private fun InstallStatusSection(state: InstallUiState) {
                             state.running -> stringResource(R.string.install_working)
                             state.success == true ->
                                 stringResource(
-                                    if (state.method == InstallMethod.DIRECT) {
-                                        R.string.install_direct_success
-                                    } else {
-                                        R.string.install_success
+                                    when (state.method) {
+                                        InstallMethod.FILE -> R.string.install_success
+                                        InstallMethod.DIRECT -> R.string.install_direct_success
+                                        InstallMethod.INACTIVE -> R.string.install_inactive_success
                                     },
                                 )
                             else -> stringResource(R.string.install_failed)

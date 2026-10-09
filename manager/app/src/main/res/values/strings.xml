@@ -260,6 +260,12 @@
     <string name="install_direct_confirm_message">The patched image will be written to\n%1$s\n\nThe original image is backed up to Download first, and the bootloader must be unlocked. Continue?</string>
     <string name="install_direct_confirm_ok">Flash</string>
     <string name="install_direct_success">Installed. Reboot to take effect.</string>
+    <string name="install_root_checking">Checking root…</string>
+    <string name="install_method_inactive">Install to inactive slot (root)</string>
+    <string name="install_method_inactive_desc">Patch the inactive A/B slot\'s vendor_boot (use right after an OTA)</string>
+    <string name="install_inactive_confirm_title">Install to inactive slot?</string>
+    <string name="install_inactive_confirm_message">The patched image will be written to the inactive slot\'s vendor_boot:\n%1$s\n\nUse this right after an OTA, before rebooting. The bootloader must be unlocked. Continue?</string>
+    <string name="install_inactive_success">Installed to inactive slot. It takes effect after the next slot switch.</string>
 
     <!-- Modules -->
     <string name="nav_modules">Modules</string>

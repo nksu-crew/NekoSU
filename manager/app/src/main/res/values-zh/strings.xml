@@ -254,6 +254,12 @@
     <string name="install_direct_confirm_message">补丁镜像将写入：\n%1$s\n\n原镜像会先备份到 Download，且需要设备已解锁 bootloader。是否继续？</string>
     <string name="install_direct_confirm_ok">刷入</string>
     <string name="install_direct_success">安装完成，重启后生效</string>
+    <string name="install_root_checking">正在检测 Root…</string>
+    <string name="install_method_inactive">安装到非活动分区（Root）</string>
+    <string name="install_method_inactive_desc">给非活动 A/B 分区的 vendor_boot 打补丁（用于 OTA 之后）</string>
+    <string name="install_inactive_confirm_title">安装到非活动分区？</string>
+    <string name="install_inactive_confirm_message">补丁镜像将写入非活动分区的 vendor_boot：\n%1$s\n\n请在 OTA 之后、重启之前使用。需要设备已解锁 bootloader。是否继续？</string>
+    <string name="install_inactive_success">已安装到非活动分区，切槽后生效</string>
 
     <!-- 模块 -->
     <string name="nav_modules">模块</string>

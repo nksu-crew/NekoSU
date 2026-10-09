@@ -146,43 +146,17 @@ object VendorBootInstaller {
         }
 
     /**
-     * 定位本机 vendor_boot 分区。
-     *
-     * A/B 设备优先选择当前 slot 的分区（`vendor_boot_a` / `vendor_boot_b`），
-     * slot 依次从 `ro.boot.slot_suffix`、`ro.boot.slot`、`/proc/cmdline` 读取；
-     * 找不到带后缀的分区时退回无后缀的 `vendor_boot` 链接。返回可直接 `dd`
-     * 的路径；找不到（如非 GKI 设备）返回 null。
+     * 定位本机当前 slot 的 vendor_boot 分区；找不到返回 null。
      */
-    fun detectVendorBootPartition(): String? {
-        val cmd =
-            """
-            SLOT=${'$'}(getprop ro.boot.slot_suffix 2>/dev/null)
-            if [ -z "${'$'}SLOT" ]; then
-              slot=${'$'}(getprop ro.boot.slot 2>/dev/null)
-              [ -n "${'$'}slot" ] && SLOT="_${'$'}slot"
-            fi
-            if [ -z "${'$'}SLOT" ]; then
-              SLOT=${'$'}(tr ' ' '\n' < /proc/cmdline 2>/dev/null | sed -n 's/^androidboot.slot_suffix=//p' | head -n1)
-            fi
-            for base in /dev/block/by-name /dev/block/bootdevice/by-name; do
-              for name in "vendor_boot${'$'}SLOT" vendor_boot; do
-                if [ -e "${'$'}base/${'$'}name" ]; then
-                  echo "${'$'}base/${'$'}name"
-                  exit 0
-                fi
-              done
-            done
-            exit 1
-            """.trimIndent()
+    fun detectVendorBootPartition(): String? = findVendorBoot(currentSlotSuffix(), allowSlotless = true)
 
-        val r = RootShell.exec(cmd)
-        return r.output
-            .lineSequence()
-            .map { it.trim() }
-            .firstOrNull { it.startsWith("/dev/") }
+    /** 定位非活动 slot 的 vendor_boot 分区；非 A/B 设备返回 null。 */
+    fun detectInactiveVendorBootPartition(): String? {
+        val inactive = inactiveSlotSuffix() ?: return null
+        return findVendorBoot(inactive, allowSlotless = false)
     }
 
-    /** 当前设备的 slot 后缀（如 "_a"）；非 A/B 或未知时返回 null。 */
+    /** 当前设备 slot 后缀（如 "_a"）；非 A/B 或未知时返回 null。 */
     fun currentSlotSuffix(): String? {
         val cmd =
             """
@@ -200,18 +174,60 @@ object VendorBootInstaller {
             .firstOrNull { it.startsWith("_") }
     }
 
+    /** 非活动 slot 后缀；非 A/B 设备返回 null。 */
+    fun inactiveSlotSuffix(): String? =
+        when (currentSlotSuffix()) {
+            "_a" -> "_b"
+            "_b" -> "_a"
+            else -> null
+        }
+
     /**
-     * 直接安装：以 root 读取本机 vendor_boot，打入 nksu.ko 后写回分区，
+     * 查找 vendor_boot 分区路径。
+     *
+     * @slotSuffix null/空按无后缀处理；@allowSlotless 允许回退到无后缀的
+     * `vendor_boot` 链接（只对当前 slot 安全，非活动 slot 不能回退，否则会
+     * 误写当前分区）。
+     */
+    private fun findVendorBoot(
+        slotSuffix: String?,
+        allowSlotless: Boolean,
+    ): String? {
+        val slot = slotSuffix.orEmpty()
+        val names = if (allowSlotless) "vendor_boot$slot vendor_boot" else "vendor_boot$slot"
+        val cmd =
+            """
+            for base in /dev/block/by-name /dev/block/bootdevice/by-name; do
+              for name in $names; do
+                if [ -e "${'$'}base/${'$'}name" ]; then
+                  echo "${'$'}base/${'$'}name"
+                  exit 0
+                fi
+              done
+            done
+            exit 1
+            """.trimIndent()
+
+        return RootShell.exec(cmd).output
+            .lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.startsWith("/dev/") }
+    }
+
+    /**
+     * 直接安装：以 root 读取指定 vendor_boot 分区，打入 nksu.ko 后写回，
      * 不再需要用户手动 fastboot。
      *
-     * 流程：检测分区 -> dump 原镜像并导出备份 -> patch -> 导出补丁镜像 ->
-     * 写回分区 -> 读回校验（失败则自动回滚原镜像）。
+     * 流程：dump 原镜像并导出备份 -> patch -> 导出补丁镜像 -> 写回分区 ->
+     * 读回校验（失败则自动回滚原镜像）。KernelSU 的「直接安装 / 刷入非活动
+     * 分区」都走这里，区别只是 @partition 指向当前或非活动 slot。
      *
      * 需要设备已具备 root（Magisk/KernelSU 等 su，或已装 nksu）。
      */
     suspend fun directInstall(
         context: Context,
         koName: String,
+        partition: String,
         onOutput: (String) -> Unit,
     ): Int =
         withContext(Dispatchers.IO) {
@@ -228,23 +244,17 @@ object VendorBootInstaller {
                 onOutput("[nksu] ERROR: assets/$koName 未找到或复制失败")
                 return@withContext -1
             }
+            if (partition.isBlank()) {
+                onOutput("[nksu] ERROR: 未找到 vendor_boot 分区")
+                return@withContext -1
+            }
             if (!RootShell.available()) {
                 onOutput("[nksu] ERROR: 未检测到 root（需要 Magisk/KernelSU 等 su，或已安装 nksu）")
                 return@withContext -1
             }
 
-            val part = detectVendorBootPartition()
-            if (part == null) {
-                onOutput("[nksu] ERROR: 未找到 vendor_boot 分区")
-                return@withContext -1
-            }
-            val slot = currentSlotSuffix()
-            if (slot != null) {
-                onOutput("[nksu] A/B 设备，当前 slot: $slot -> 仅刷入当前 slot")
-            } else {
-                onOutput("[nksu] 非 A/B 设备")
-            }
-            onOutput("[nksu] vendor_boot: $part")
+            val part = partition
+            onOutput("[nksu] vendor_boot: ${part}")
 
             // 1) dump 当前分区作为源镜像，同时作为回滚备份。
             val dump = File(dir, backupImageName())

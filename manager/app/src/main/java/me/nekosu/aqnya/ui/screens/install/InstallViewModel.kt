@@ -17,8 +17,13 @@ import me.nekosu.aqnya.util.KernelInfo
 import me.nekosu.aqnya.util.RootShell
 import me.nekosu.aqnya.util.VendorBootInstaller
 
-/** 安装方式：选择本地镜像，或直接读写本机 vendor_boot 分区。 */
-enum class InstallMethod { FILE, DIRECT }
+/**
+ * 安装方式，与 KernelSU 的安装页对应：
+ *  - [FILE]     选择镜像（不需要 root，仅生成补丁镜像）
+ *  - [DIRECT]   直接安装到当前 slot（需要 root + GKI）
+ *  - [INACTIVE] 安装到非活动 slot（需要 root + GKI + A/B）
+ */
+enum class InstallMethod { FILE, DIRECT, INACTIVE }
 
 /**
  * 安装页面的可观察状态。
@@ -33,16 +38,19 @@ data class InstallUiState(
     val method: InstallMethod = InstallMethod.FILE,
     val vendorBootUri: Uri? = null,
     val vendorBootName: String? = null,
-    val directChecking: Boolean = false,
+    val rootChecking: Boolean = false,
+    val rootChecked: Boolean = false,
+    val rootAvailable: Boolean = false,
     val directTarget: String? = null,
-    val rootAvailable: Boolean? = null,
+    val inactiveTarget: String? = null,
     val running: Boolean = false,
     val done: Boolean = false,
     val success: Boolean? = null,
     val message: String = "",
 ) {
-    /** 直接安装是否就绪：已取得 root 且找到 vendor_boot 分区。 */
-    val directReady: Boolean get() = rootAvailable == true && directTarget != null
+    val directReady: Boolean get() = rootAvailable && directTarget != null
+
+    val inactiveReady: Boolean get() = rootAvailable && inactiveTarget != null
 
     val canInstall: Boolean
         get() =
@@ -51,6 +59,7 @@ data class InstallUiState(
                 when (method) {
                     InstallMethod.FILE -> vendorBootUri != null
                     InstallMethod.DIRECT -> directReady
+                    InstallMethod.INACTIVE -> inactiveReady
                 }
 }
 
@@ -58,9 +67,8 @@ data class InstallUiState(
  * vendor_boot 安装流程的状态持有者。
  *
  * 通过 [KernelInfo] 展示 JNI 查询到的内核版本 / KMI，并据此预选匹配的 nksu.ko。
- * 安装支持两种方式：
- *  - [InstallMethod.FILE]：用户提供 vendor_boot 镜像，仅生成补丁镜像导出到 Download；
- *  - [InstallMethod.DIRECT]：以 root 读取本机 vendor_boot、打补丁写回分区，无需手动刷入。
+ * 安装方式与 KernelSU 对齐：选择镜像、直接安装、安装到非活动 slot；后两者
+ * 只有在检测到 root（且为 GKI 设备）时才显示。
  */
 class InstallViewModel(app: Application) : AndroidViewModel(app) {
     private val _uiState = MutableStateFlow(InstallUiState())
@@ -96,6 +104,38 @@ class InstallViewModel(app: Application) : AndroidViewModel(app) {
                     selectedKo = current.selectedKo ?: loaded.recommendedKo,
                 )
             }
+            checkRoot()
+        }
+    }
+
+    /** 检测 root 与可用的 vendor_boot 分区（当前 / 非活动 slot）。 */
+    fun checkRoot() {
+        if (_uiState.value.rootChecking) return
+        _uiState.update { it.copy(rootChecking = true) }
+        viewModelScope.launch {
+            val (root, current, inactive) =
+                withContext(Dispatchers.IO) {
+                    val hasRoot = RootShell.available()
+                    val currentPart = if (hasRoot) VendorBootInstaller.detectVendorBootPartition() else null
+                    val inactivePart = if (hasRoot) VendorBootInstaller.detectInactiveVendorBootPartition() else null
+                    Triple(hasRoot, currentPart, inactivePart)
+                }
+            _uiState.update { state ->
+                val method =
+                    when (state.method) {
+                        InstallMethod.DIRECT -> if (root && current != null) state.method else InstallMethod.FILE
+                        InstallMethod.INACTIVE -> if (root && inactive != null) state.method else InstallMethod.FILE
+                        InstallMethod.FILE -> state.method
+                    }
+                state.copy(
+                    rootChecking = false,
+                    rootChecked = true,
+                    rootAvailable = root,
+                    directTarget = current,
+                    inactiveTarget = inactive,
+                    method = method,
+                )
+            }
         }
     }
 
@@ -107,22 +147,6 @@ class InstallViewModel(app: Application) : AndroidViewModel(app) {
     fun selectMethod(method: InstallMethod) {
         if (_uiState.value.running || _uiState.value.method == method) return
         _uiState.update { it.copy(method = method, done = false, success = null, message = "") }
-        if (method == InstallMethod.DIRECT) checkDirect()
-    }
-
-    /** 检测 root 与 vendor_boot 分区，供直接安装使用。 */
-    fun checkDirect() {
-        if (_uiState.value.directChecking) return
-        _uiState.update { it.copy(directChecking = true, rootAvailable = null, directTarget = null) }
-        viewModelScope.launch {
-            val (root, target) =
-                withContext(Dispatchers.IO) {
-                    val hasRoot = RootShell.available()
-                    val part = if (hasRoot) VendorBootInstaller.detectVendorBootPartition() else null
-                    hasRoot to part
-                }
-            _uiState.update { it.copy(directChecking = false, rootAvailable = root, directTarget = target) }
-        }
     }
 
     fun selectVendorBoot(uri: Uri) {
@@ -134,6 +158,7 @@ class InstallViewModel(app: Application) : AndroidViewModel(app) {
                 ?: uri.toString()
         _uiState.update {
             it.copy(
+                method = InstallMethod.FILE,
                 vendorBootUri = uri,
                 vendorBootName = name,
                 done = false,
@@ -156,7 +181,8 @@ class InstallViewModel(app: Application) : AndroidViewModel(app) {
             val exit =
                 when (current.method) {
                     InstallMethod.FILE -> runFileInstall(current, ko, log)
-                    InstallMethod.DIRECT -> runDirectInstall(ko, log)
+                    InstallMethod.DIRECT -> runDirectInstall(current.directTarget.orEmpty(), ko, log)
+                    InstallMethod.INACTIVE -> runDirectInstall(current.inactiveTarget.orEmpty(), ko, log)
                 }
 
             val ok = exit == 0
@@ -187,11 +213,12 @@ class InstallViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun runDirectInstall(
+        partition: String,
         ko: String,
         log: StringBuilder,
     ): Int =
         runCatching {
-            VendorBootInstaller.directInstall(appContext, ko) { line -> appendLog(log, line) }
+            VendorBootInstaller.directInstall(appContext, ko, partition) { line -> appendLog(log, line) }
         }.getOrElse { e ->
             appendError(log, e)
             -1
