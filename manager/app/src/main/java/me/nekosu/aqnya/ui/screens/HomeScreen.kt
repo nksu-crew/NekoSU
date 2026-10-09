@@ -19,7 +19,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Rule
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Memory
-import androidx.compose.material.icons.filled.Numbers
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.*
@@ -46,7 +45,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import me.nekosu.aqnya.R
@@ -66,9 +64,7 @@ enum class InstallStatus {
 fun HomeScreenContent(
     installStatus: InstallStatus,
     isGki: Boolean,
-    suCount: Int,
     managerVersion: String,
-    onNavigateToApps: () -> Unit,
     onInstallClick: () -> Unit,
     onAboutClick: () -> Unit = {},
 ) {
@@ -107,20 +103,6 @@ fun HomeScreenContent(
                 customBadgeText = if (isGki) "GKI" else "LKM",
             )
 
-            if (installStatus == InstallStatus.INSTALLED) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    StatCard(
-                        label = stringResource(R.string.superuser),
-                        value = suCount.toString(),
-                        modifier = Modifier.weight(1f),
-                        bgIcon = Icons.Filled.Numbers,
-                        onClick = onNavigateToApps,
-                    )
-                }
-            }
             DeviceInfoCard(modifier = Modifier.fillMaxWidth())
 
             AboutCard(modifier = Modifier.fillMaxWidth(), onClick = onAboutClick)
@@ -132,12 +114,10 @@ fun HomeScreenContent(
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel,
-    onNavigateToApps: () -> Unit = {},
     onAboutClick: () -> Unit = {},
     onInstallClick: () -> Unit = {},
 ) {
     val installStatus by viewModel.installStatus.collectAsState()
-    val suCount by viewModel.suCount.collectAsState()
     val managerVersion by viewModel.managerVersion.collectAsState()
     val isGki by viewModel.isGki.collectAsState()
 
@@ -150,67 +130,10 @@ fun HomeScreen(
     HomeScreenContent(
         installStatus = installStatus,
         isGki = isGki,
-        suCount = suCount,
         managerVersion = managerVersion,
-        onNavigateToApps = onNavigateToApps,
         onInstallClick = onInstallClick,
         onAboutClick = onAboutClick,
     )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun StatCard(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier,
-    bgIcon: ImageVector? = null,
-    onClick: () -> Unit = {},
-) {
-    Card(
-        modifier = modifier,
-        onClick = onClick,
-        shape = RoundedCornerShape(24.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        colors =
-            CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            ),
-    ) {
-        Box(modifier = Modifier.fillMaxWidth()) {
-            if (bgIcon != null) {
-                Icon(
-                    imageVector = bgIcon,
-                    contentDescription = null,
-                    modifier =
-                        Modifier
-                            .align(Alignment.BottomEnd)
-                            .size(58.dp)
-                            .padding(end = 18.dp, bottom = 12.dp),
-                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                )
-            }
-            Column(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = value,
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.60f),
-                )
-            }
-        }
-    }
 }
 
 @Composable
@@ -349,9 +272,7 @@ fun HomeScreenPreviewInstalled() {
         HomeScreenContent(
             installStatus = InstallStatus.INSTALLED,
             isGki = true,
-            suCount = 0,
             managerVersion = "1.0.0",
-            onNavigateToApps = {},
             onInstallClick = {},
             onAboutClick = {},
         )
@@ -365,9 +286,7 @@ fun HomeScreenPreviewNotInstalled() {
         HomeScreenContent(
             installStatus = InstallStatus.NOT_INSTALLED,
             isGki = false,
-            suCount = 0,
             managerVersion = "1.0.0",
-            onNavigateToApps = {},
             onInstallClick = {},
             onAboutClick = {},
         )

@@ -210,9 +210,6 @@ fun MainScreen() {
                 ) {
                     HomeScreen(
                         viewModel = homeViewModel,
-                        onNavigateToApps = {
-                            onTabClick(navItems.indexOfFirst { it is BottomNavItem.History })
-                        },
                         onInstallClick = { navController.navigate("install") },
                     )
                 }

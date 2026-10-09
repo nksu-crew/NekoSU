@@ -12,7 +12,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.nekosu.aqnya.ncore
 import me.nekosu.aqnya.util.KernelInfo
-import me.nekosu.aqnya.util.RootDbHelper
 import me.nekosu.aqnya.util.getAppVersion
 
 class HomeViewModel(
@@ -21,9 +20,6 @@ class HomeViewModel(
     private val _installStatus = MutableStateFlow(InstallStatus.NOT_INSTALLED)
     val installStatus: StateFlow<InstallStatus> = _installStatus
 
-    private val _suCount = MutableStateFlow(0)
-    val suCount: StateFlow<Int> = _suCount
-
     private val _managerVersion = MutableStateFlow("")
     val managerVersion: StateFlow<String> = _managerVersion
 
@@ -31,7 +27,6 @@ class HomeViewModel(
     val isGki: StateFlow<Boolean> = _isGki
 
     private val appContext = app.applicationContext
-    private val rootDbHelper = RootDbHelper(appContext)
 
     init {
         viewModelScope.launch {
@@ -50,14 +45,8 @@ class HomeViewModel(
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 ncore.ctl(3)
-                _suCount.value = rootDbHelper.getAllowedCount()
             }
         }
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        rootDbHelper.close()
     }
 }
 
