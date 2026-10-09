@@ -103,19 +103,20 @@ static ssize_t (*nksu_orig_read)(struct file *, char __user *, size_t, loff_t *)
 static ssize_t (*nksu_orig_read_iter)(struct kiocb *, struct iov_iter *);
 
 /*
- * None of getname_kernel(), do_mkdirat() or putname() is part of the GKI
- * KMI, and vfs_mkdir() changed its first argument across the KMI range we
- * build for, so resolve the three through the module's own kallsyms scanner
- * (like every other unexported symbol).  do_mkdirat() has kept a stable
- * signature across those kernels and hides the vfs_mkdir() differences.
+ * None of getname_kernel() or do_mkdirat() is part of the GKI KMI, and
+ * vfs_mkdir() changed its first argument across the KMI range we build for,
+ * so resolve them through the module's own kallsyms scanner (like every
+ * other unexported symbol).  do_mkdirat() has kept a stable signature across
+ * those kernels and hides the vfs_mkdir() differences.
+ *
+ * do_mkdirat() takes ownership of the filename and putname()s it on every
+ * path (including its error path), so the caller must NOT put it again.
  */
 typedef struct filename *(*nksu_getname_kernel_t)(const char *);
 typedef long (*nksu_do_mkdirat_t)(int, struct filename *, umode_t);
-typedef void (*nksu_putname_t)(struct filename *);
 
 static nksu_getname_kernel_t nksu_getname_kernel;
 static nksu_do_mkdirat_t nksu_do_mkdirat;
-static nksu_putname_t nksu_putname;
 
 /* saved originals for the two syscall-table hooks */
 static syscall_fn_t nksu_orig_read_sys;
@@ -136,15 +137,15 @@ static int nksu_rc_mkdir(const char *path)
     struct filename *name;
     long ret;
 
-    if (!nksu_getname_kernel || !nksu_do_mkdirat || !nksu_putname)
+    if (!nksu_getname_kernel || !nksu_do_mkdirat)
         return -ENOSYS;
 
     name = nksu_getname_kernel(path);
     if (IS_ERR(name))
         return PTR_ERR(name);
 
+    /* do_mkdirat() owns @name and putname()s it itself. */
     ret = nksu_do_mkdirat(AT_FDCWD, name, 0700);
-    nksu_putname(name);
 
     if (ret == -EEXIST)
         return 0;
@@ -404,9 +405,8 @@ int nksu_init_rc_init(void)
 
     nksu_getname_kernel = (nksu_getname_kernel_t)nksu_ksym_lookup("getname_kernel");
     nksu_do_mkdirat = (nksu_do_mkdirat_t)nksu_ksym_lookup("do_mkdirat");
-    nksu_putname = (nksu_putname_t)nksu_ksym_lookup("putname");
 
-    if (!nksu_getname_kernel || !nksu_do_mkdirat || !nksu_putname)
+    if (!nksu_getname_kernel || !nksu_do_mkdirat)
         pr_warn("nksu: cannot resolve VFS mkdir helpers, using fallback\n");
 
     ret = hook_save(__NR_read, nksu_sys_read, &nksu_orig_read_sys, "nksu_rc_read");
