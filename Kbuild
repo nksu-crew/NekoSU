@@ -65,9 +65,7 @@ ccflags-y += -include $(srctree)/include/uapi/asm-generic/errno.h
 # Embed the source commit so debug builds can report exactly what is running.
 NKSU_SRCDIR := $(if $(src),$(src),$(M))
 ifneq ($(NKSU_SRCDIR),)
-# `?=` so callers (e.g. the Bazel wrapper) can override it when the sources are
-# built from a staging copy that has no `.git` directory.
-NKSU_GIT_COMMIT ?= $(shell git -C $(NKSU_SRCDIR) rev-parse --short=12 HEAD 2>/dev/null)
+NKSU_GIT_COMMIT := $(shell git -C $(NKSU_SRCDIR) rev-parse --short=12 HEAD 2>/dev/null)
 endif
 ifeq ($(NKSU_GIT_COMMIT),)
 NKSU_GIT_COMMIT := unknown

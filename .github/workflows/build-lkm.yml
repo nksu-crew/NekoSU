@@ -7,17 +7,6 @@ on:
     paths:
       - "src/*.c"
       - "src/**/*.c"
-      - "src/**/*.h"
-      - "Kbuild"
-      - "Kconfig"
-      - "Makefile"
-      - "BUILD.bazel"
-      - "MODULE.bazel"
-      - ".bazelrc"
-      - ".bazelversion"
-      - "bazel/**"
-      - ".github/workflows/build-lkm.yml"
-      - ".github/workflows/ddk-lkm.yml"
 jobs:
   build-lkm:
     strategy:
