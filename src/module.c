@@ -3,10 +3,9 @@
  * nksu -- kernel side of Magisk/KernelSU-style modules.
  *
  * Module loading itself now lives in userspace: the rc that nksu injects into
- * init (src/init_rc.c) execs /dev/nksu/modules.sh at `on post-fs-data` and at
- * late_start, and that script enumerates /data/adb/modules, runs the boot
- * hooks and drives the metamodule mount.  See src/include/nksu_module.h for
- * the stage contract; the script's source lives in src/init_rc.c.
+ * init (src/init_rc.c) execs ncore (/data/adb/nksu/ncore) at `on post-fs-data`,
+ * `services` and `boot-completed`, and ncore runs the KernelSU-compatible
+ * module runtime.  See src/include/nksu_module.h.
  *
  * This file keeps only the two pieces that genuinely need the kernel:
  *

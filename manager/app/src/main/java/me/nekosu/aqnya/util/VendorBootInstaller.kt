@@ -256,6 +256,14 @@ object VendorBootInstaller {
             val part = partition
             onOutput("[nksu] vendor_boot: ${part}")
 
+            // 已具备 root：顺便把 ncore 放到 init.rc 会 exec 的固定路径，
+            // 免去“首次重启后再由管理器补装、需二次重启”的往返。
+            if (NcoreBoot.install(context)) {
+                onOutput("[nksu] ncore 已安装到 ${NcoreBoot.BOOT_PATH}")
+            } else {
+                onOutput("[nksu] WARN: ncore 安装失败，模块将在下次启动由管理器重试")
+            }
+
             // 1) dump 当前分区作为源镜像，同时作为回滚备份。
             val dump = File(dir, backupImageName())
             dump.delete()

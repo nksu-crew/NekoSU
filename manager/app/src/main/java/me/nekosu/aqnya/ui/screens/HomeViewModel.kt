@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.nekosu.aqnya.ncore
 import me.nekosu.aqnya.util.KernelInfo
+import me.nekosu.aqnya.util.NcoreBoot
 import me.nekosu.aqnya.util.getAppVersion
 
 class HomeViewModel(
@@ -31,10 +32,15 @@ class HomeViewModel(
     init {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                _installStatus.value =
-                    if (ncore.ctl(1) == 0) InstallStatus.INSTALLED else InstallStatus.NOT_INSTALLED
+                val installed = ncore.ctl(1) == 0
+                _installStatus.value = if (installed) InstallStatus.INSTALLED else InstallStatus.NOT_INSTALLED
                 _managerVersion.value = getAppVersion(appContext)
                 _isGki.value = KernelInfo.isGki()
+
+                // nksu 已生效：确保启动用的 ncore 位于 /data/adb/nksu/ncore。
+                if (installed) {
+                    NcoreBoot.install(appContext)
+                }
             }
             refresh()
         }

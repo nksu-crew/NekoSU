@@ -8,35 +8,33 @@
  * KernelSU-style init.rc injection.
  *
  * nksu hooks init's read() of /system/etc/init/hw/init.rc through the syscall
- * table (__NR_read / __NR_fstat) and appends a static rc that execs the
- * userspace module loader at the well-defined boot stages:
+ * table (__NR_read / __NR_fstat) and appends a static rc that execs ncore,
+ * nksu's userspace module runtime, at the well-defined boot stages:
  *
  *   on post-fs-data
- *       exec u:r:nksu:s0 root -- /system/bin/sh /dev/nksu/modules.sh post-fs-data
+ *       exec u:r:nksu:s0 root -- /data/adb/nksu/ncore post-fs-data
  *   on nonencrypted
  *   on property:vold.decrypt=trigger_restart_framework
- *       exec u:r:nksu:s0 root -- /system/bin/sh /dev/nksu/modules.sh late_start
+ *       exec u:r:nksu:s0 root -- /data/adb/nksu/ncore services
+ *   on property:sys.boot_completed=1
+ *       exec u:r:nksu:s0 root -- /data/adb/nksu/ncore boot-completed
  *
- * nksu writes the loader (and its directory) into /dev as soon as init first
- * reads init.rc, i.e. at second stage, long before `on post-fs-data` runs.
+ * /data/adb/nksu/ncore is installed by the manager (it is the same binary the
+ * app ships as libncore.so).  ncore is a KernelSU-compatible userspace module
+ * runtime: it enumerates /data/adb/modules, runs the boot hooks and drives the
+ * metamodule mount, and pushes each module's sepolicy.rule through the
+ * write-only /proc/nksu/sepolicy sink created here.
  *
- * init runs `exec` synchronously, so the post-fs-data hooks (including the
- * metamodule mount) finish before init continues: modules are mounted before
- * zygote/system_server start, and none of the old marker polling or kernel-side
- * timing heuristics are needed.
+ * init runs `exec` synchronously, so the post-fs-data hooks (metamodule mount
+ * included) finish before init continues and modules are mounted before
+ * zygote/system_server start.
  *
- * nksu_init_rc_init() hooks __NR_read and __NR_fstat and creates the sepolicy
- * sink; it must run after nksu_dispatch_init().  Because the module is loaded
- * from init's first stage (modules.load), this is a boot-time feature: a late
- * load injects nothing here and brings no modules up.
+ * The module is loaded from init's first stage (modules.load), so this is a
+ * boot-time feature: a late load injects nothing here and brings no modules up.
  */
+#define NKSU_NCORE_PATH "/data/adb/nksu/ncore"
+
 int nksu_init_rc_init(void);
 void nksu_init_rc_exit(void);
-
-/*
- * Idempotently create /dev/nksu and write the module loader into it.  Called
- * from the read proxy, the first time init reads init.rc.
- */
-void nksu_rc_prepare_loader(void);
 
 #endif /* NKSU_INIT_RC_H */
