@@ -30,6 +30,16 @@ int sepolicy_add_typeattribute(const char *type_name,
 int sepolicy_add_xperm(const char *s, const char *t, const char *c,
 		       const char *range, int effect, bool invert);
 
+/* ── Module rule files (/data/adb/modules/<id>/sepolicy.rule) ─ */
+
+/*
+ * Parse a KernelSU-style sepolicy rule file body and apply every statement
+ * to the live policy.  Returns the number of statements applied, or a
+ * negative errno when @text is missing / memory is exhausted.  Unsupported
+ * or unknown statements are logged and skipped, never fatal.
+ */
+int sepolicy_apply_rule_text(const char *text);
+
 /* ── Debug audit (CONFIG_NKSU_DEBUG only) ────────────────── */
 
 #ifdef CONFIG_NKSU_DEBUG

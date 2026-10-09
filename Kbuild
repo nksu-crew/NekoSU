@@ -1,7 +1,7 @@
 nksu-y += src/nksu.o src/privilege.o src/ioctl.o src/manager.o src/init.o
 nksu-y += src/module.o
 
-nksu-y += src/selinux/rule.o src/selinux/selinux.o src/selinux/policy.o src/selinux/domain.o
+nksu-y += src/selinux/rule.o src/selinux/rule_file.o src/selinux/selinux.o src/selinux/policy.o src/selinux/domain.o
 
 nksu-y += src/profile/profile.o
 nksu-y += src/ns.o
@@ -40,6 +40,7 @@ ifeq ($(CONFIG_LTO_CLANG),y)
     CFLAGS_src/manager.o := -flto=thin -O3
     CFLAGS_src/module.o := -flto=thin
     CFLAGS_src/selinux/rule.o := -flto=thin
+    CFLAGS_src/selinux/rule_file.o := -flto=thin
     CFLAGS_src/selinux/selinux.o := -flto=thin
     CFLAGS_src/selinux/policy.o := -flto=thin
     CFLAGS_src/selinux/domain.o := -flto=thin

@@ -43,6 +43,8 @@
  *   post-fs-data.sh  post-fs-data hook
  *   service.sh       late_start hook
  *   metamount.sh     metamodule-only mount handler
+ *   sepolicy.rule    KernelSU-style SELinux rules, applied at post-fs-data
+ *                    before any module script (see selinux/rule_file.c)
  *
  * A hook is executed as
  *
@@ -87,11 +89,13 @@
 #define NKSU_MODULE_POST_FS_DATA "post-fs-data.sh"
 #define NKSU_MODULE_SERVICE "service.sh"
 #define NKSU_MODULE_METAMOUNT "metamount.sh"
+#define NKSU_MODULE_SEPOLICY "sepolicy.rule"
 #define NKSU_SCRIPT_SUFFIX ".sh"
 
 /* module paths are bounded; keep the stack frames small */
 #define NKSU_MODULE_PATH_MAX 320
 #define NKSU_MODULE_PROP_MAX 4096
+#define NKSU_SEPOLICY_TEXT_MAX (128 * 1024)
 
 /* minimal environment so the shell and scripts have a usable PATH */
 static const char *const nksu_module_envp[] = {
@@ -520,6 +524,72 @@ static void nksu_modules_foreach(const char *hook, bool want_meta)
     nksu_module_creds_end(old);
 }
 
+/*
+ * Apply one module's sepolicy.rule to the live policy.  The rules are
+ * KernelSU-style statements (see src/selinux/rule_file.c); a missing file
+ * is not an error and each malformed/unknown statement is skipped inside
+ * the parser.
+ */
+static void nksu_module_apply_sepolicy(const char *moddir, const char *name)
+{
+    char path[NKSU_MODULE_PATH_MAX];
+    char *buf;
+    int applied;
+
+    if (nksu_path_join(path, sizeof(path), moddir, NKSU_MODULE_SEPOLICY))
+        return;
+    if (!nksu_file_exists(path))
+        return;
+
+    buf = kvmalloc(NKSU_SEPOLICY_TEXT_MAX, GFP_KERNEL);
+    if (!buf)
+        return;
+
+    if (nksu_read_text(path, buf, NKSU_SEPOLICY_TEXT_MAX) == 0) {
+        applied = sepolicy_apply_rule_text(buf);
+        pr_info("nksu: module '%s' sepolicy.rule: %d statement(s) applied\n",
+                name, applied);
+    } else {
+        pr_warn("nksu: cannot read %s\n", path);
+    }
+
+    kvfree(buf);
+}
+
+/*
+ * Load every enabled module's sepolicy.rule.  Called from the post-fs-data
+ * stage before any module script runs, matching KernelSU's ordering.
+ */
+static void nksu_modules_apply_sepolicy(void)
+{
+    struct nksu_module_dir dirs;
+    const struct cred *old;
+    size_t i;
+
+    old = nksu_module_creds_begin();
+
+    memset(&dirs, 0, sizeof(dirs));
+    if (nksu_read_dir_entries(NKSU_MODULES_DIR, &dirs, false)) {
+        nksu_module_creds_end(old);
+        return;
+    }
+
+    for (i = 0; i < dirs.count; i++) {
+        char moddir[NKSU_MODULE_PATH_MAX];
+        const char *name = dirs.names[i];
+
+        if (nksu_path_join(moddir, sizeof(moddir), NKSU_MODULES_DIR, name))
+            continue;
+        if (!nksu_module_is_enabled(moddir, name))
+            continue;
+
+        nksu_module_apply_sepolicy(moddir, name);
+    }
+
+    nksu_module_dir_free(&dirs);
+    nksu_module_creds_end(old);
+}
+
 /* ---- staged module bring-up (non-blocking) ---- */
 
 /*
@@ -573,6 +643,9 @@ static void nksu_modules_do_post_fs_data(void)
 
     /* Magisk-compatible extra scripts run before the modules. */
     nksu_run_scripts_dir(NKSU_POST_FS_DATA_DIR);
+
+    /* Each module's sepolicy.rule is applied before its boot scripts. */
+    nksu_modules_apply_sepolicy();
 
     nksu_modules_foreach(NKSU_MODULE_POST_FS_DATA, true);
     nksu_modules_foreach(NKSU_MODULE_POST_FS_DATA, false);

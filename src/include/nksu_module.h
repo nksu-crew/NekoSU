@@ -15,6 +15,7 @@
  *
  * The boot stages are kept apart:
  *   nksu_modules_post_fs_data()  post-fs-data.d scripts
+ *                                + each module's sepolicy.rule
  *                                + post-fs-data.sh  (init second_stage)
  *                                + metamodule metamount.sh
  *   nksu_modules_service()       service.d scripts

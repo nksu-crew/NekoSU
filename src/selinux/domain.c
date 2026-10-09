@@ -204,6 +204,36 @@ out:
 	return rc;
 }
 
+/*
+ * Add a concrete type without attaching it to any attribute.  Used by the
+ * module sepolicy.rule loader for "type <name> { <attrs> }", where the
+ * attributes are attached separately via sepolicy_add_typeattribute().
+ */
+int sepolicy_add_type(const char *name)
+{
+	struct selinux_policy *policy;
+	struct policydb *p;
+	int rc;
+
+	if (!name || !*name)
+		return -EINVAL;
+
+	mutex_lock(&selinux_state.policy_mutex);
+
+	policy = rcu_dereference_protected(selinux_state.policy,
+		lockdep_is_held(&selinux_state.policy_mutex));
+	if (!policy) {
+		rc = -EINVAL;
+		goto out;
+	}
+
+	rc = add_type_to_policy(&policy->policydb, name);
+
+out:
+	mutex_unlock(&selinux_state.policy_mutex);
+	return rc;
+}
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
