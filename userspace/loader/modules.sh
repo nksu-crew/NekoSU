@@ -28,7 +28,12 @@ SERVICE_D=/data/adb/service.d
 SEPOLICY_SINK=/proc/nksu/sepolicy
 STATE_DIR=/dev/nksu
 
-log() { echo "nksu: $*"; }
+# init does not necessarily keep the loader's stdout, so mirror every line to
+# the kernel log; that is where nksu's other diagnostics show up.
+log() {
+    echo "nksu: $*"
+    echo "nksu: $*" > /dev/kmsg 2>/dev/null
+}
 
 # A module is skipped when it is disabled or pending removal.
 enabled() {
@@ -41,6 +46,20 @@ enabled() {
 is_metamodule() {
     [ -f "$1/module.prop" ] || return 1
     grep -Eq '^[[:space:]]*metamodule[[:space:]]*=[[:space:]]*(1|true)' "$1/module.prop" 2>/dev/null
+}
+
+# /data/adb is mounted with /data, but on FBE devices the module tree only
+# becomes readable once vold finishes decrypting.  Reading it too early finds
+# zero modules and (with the .done guard) would skip the whole stage, so wait
+# (bounded, ~2s) for it before enumerating.  A missing /data/adb means nothing
+# is installed, so do not stall.
+wait_modules() {
+    [ -d /data/adb ] || return 0
+    n=0
+    while [ ! -d "$MODULES_DIR" ] && [ "$n" -lt 20 ]; do
+        sleep 0.1
+        n=$((n + 1))
+    done
 }
 
 apply_sepolicy() {
@@ -75,7 +94,14 @@ run_hooks() {
 }
 
 do_post_fs_data() {
-    log "post-fs-data stage"
+    wait_modules
+
+    count=0
+    for d in "$MODULES_DIR"/*; do
+        [ -d "$d" ] && count=$((count + 1))
+    done
+    log "post-fs-data: $count module dir(s)"
+
     run_dir_scripts "$POST_FS_DATA_D" wait
     apply_sepolicy
     run_hooks post-fs-data.sh wait meta
@@ -92,6 +118,8 @@ do_late_start() {
     run_hooks service.sh nowait regular
     log "late_start done"
 }
+
+log "loader start: stage=$STAGE"
 
 case "$STAGE" in
     post-fs-data)
