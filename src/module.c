@@ -224,20 +224,34 @@ static void nksu_module_dir_free(struct nksu_module_dir *dir)
     dir->cap = 0;
 }
 
-/* Returning false stops the walk; only OOM makes us do that. */
-static bool nksu_filldir(struct dir_context *ctx, const char *name, int namlen, loff_t offset, u64 ino,
-                         unsigned int d_type)
+/*
+ * filldir_t returned int (0 = keep going) before v6.1 and bool (true = keep
+ * going) from v6.1 on; keep the callback in sync with the kernel we build for.
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+typedef bool nksu_filldir_ret_t;
+#define NKSU_FILLDIR_CONTINUE true
+#define NKSU_FILLDIR_STOP false
+#else
+typedef int nksu_filldir_ret_t;
+#define NKSU_FILLDIR_CONTINUE 0
+#define NKSU_FILLDIR_STOP (-ENOMEM)
+#endif
+
+/* Stopping the walk early only happens on OOM. */
+static nksu_filldir_ret_t nksu_filldir(struct dir_context *ctx, const char *name, int namlen, loff_t offset, u64 ino,
+                                       unsigned int d_type)
 {
     struct nksu_dir_ctx *dctx = container_of(ctx, struct nksu_dir_ctx, ctx);
 
     if (namlen == 1 && name[0] == '.')
-        return true;
+        return NKSU_FILLDIR_CONTINUE;
     if (namlen == 2 && name[0] == '.' && name[1] == '.')
-        return true;
+        return NKSU_FILLDIR_CONTINUE;
     if (d_type != DT_DIR && d_type != DT_UNKNOWN)
-        return true;
+        return NKSU_FILLDIR_CONTINUE;
 
-    return nksu_module_dir_add(&dctx->dir, name, namlen) == 0;
+    return nksu_module_dir_add(&dctx->dir, name, namlen) == 0 ? NKSU_FILLDIR_CONTINUE : NKSU_FILLDIR_STOP;
 }
 
 static int nksu_read_module_dirs(const char *path, struct nksu_module_dir *out)
