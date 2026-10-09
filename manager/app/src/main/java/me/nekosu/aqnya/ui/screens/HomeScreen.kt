@@ -1,7 +1,6 @@
 package me.nekosu.aqnya.ui.screens
 
 import android.os.Build
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -137,8 +136,6 @@ fun HomeScreen(
     onAboutClick: () -> Unit = {},
     onInstallClick: () -> Unit = {},
 ) {
-    val context = LocalContext.current
-
     val installStatus by viewModel.installStatus.collectAsState()
     val suCount by viewModel.suCount.collectAsState()
     val managerVersion by viewModel.managerVersion.collectAsState()
@@ -156,13 +153,7 @@ fun HomeScreen(
         suCount = suCount,
         managerVersion = managerVersion,
         onNavigateToApps = onNavigateToApps,
-        onInstallClick = {
-            if (installStatus == InstallStatus.INSTALLED) {
-                Toast.makeText(context, context.getString(R.string.running), Toast.LENGTH_SHORT).show()
-            } else {
-                onInstallClick()
-            }
-        },
+        onInstallClick = onInstallClick,
         onAboutClick = onAboutClick,
     )
 }
