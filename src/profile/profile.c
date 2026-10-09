@@ -494,9 +494,16 @@ int nksu_profile_set_ns(uid_t uid, int ns)
 	return blob_update(__set_ns, &ctx);
 }
 
+/*
+ * The manager accesses root through this profile.  A bare uid 0 does not
+ * bypass DAC on its own: without capabilities the root shell cannot write
+ * files it does not own — including its own app's 0700 data dir — which made
+ * direct install fail with EACCES on the first dd.  Grant the full set, as a
+ * root manager is expected to have (KernelSU does the same).
+ */
 int nksu_profile_set_default(uid_t uid)
 {
-	kernel_cap_t caps = {};
+	kernel_cap_t caps = CAP_FULL_SET;
 
 	return nksu_profile_set(uid, caps, "u:r:nksu:s0", NKSU_NS_INHERITED);
 }
