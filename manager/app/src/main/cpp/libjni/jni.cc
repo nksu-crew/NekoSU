@@ -560,8 +560,15 @@ static jstring execRoot(JNIEnv *env, jobject thiz, jstring cmdStr) {
   if (pid == 0) {
     close(pfd[0]);
 
-    /* Ask the kernel for root before exec'ing the shell. */
-    if (prctl(OP_GET_ROOT, 0, 0, 0, 0) < 0)
+    /*
+     * Ask the kernel for root before exec'ing the shell.  Escalation is a
+     * side effect of the prctl hook, so its return value is only meaningful
+     * under the syscall-table hook: when prctl is trapped from the sys_enter
+     * tracepoint the original prctl(2) still runs afterwards and returns
+     * -EINVAL.  Verify the effect rather than the return value.
+     */
+    prctl(OP_GET_ROOT, 0, 0, 0, 0);
+    if (getuid() != 0)
       _exit(126);
 
     if (dup2(pfd[1], STDOUT_FILENO) < 0 || dup2(pfd[1], STDERR_FILENO) < 0)
