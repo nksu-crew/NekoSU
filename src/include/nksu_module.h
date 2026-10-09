@@ -5,45 +5,41 @@
 #include <linux/types.h>
 
 /*
- * Magisk/KernelSU-style module loading, driven from the kernel.
+ * Magisk/KernelSU-style module loading.
  *
- * Enumerates /data/adb/modules and runs each enabled module's boot hooks
- * through nksu_spawn(), so bringing modules up does not depend on a userspace
- * daemon (ksud/ncore) walking the directory and forking the scripts.  The
- * Magisk-compatible /data/adb/post-fs-data.d and /data/adb/service.d script
- * directories are executed as part of the matching stage.
+ * Module loading lives in userspace and is driven by the rc nksu injects into
+ * init.rc (see src/init_rc.c).  That rc execs the loader nksu writes to
+ * /dev/nksu at the well-defined boot stages, and the loader enumerates
+ * /data/adb/modules, runs the boot hooks and drives the metamodule mount --
+ * like KernelSU's ksud, but without a resident daemon:
  *
- * The boot stages are kept apart:
- *   nksu_modules_post_fs_data()  post-fs-data.d scripts
- *                                + each module's sepolicy.rule
- *                                + post-fs-data.sh  (init.rc `on post-fs-data`
- *                                  marker; /data/adb is ready by then)
- *                                + metamodule metamount.sh
- *   nksu_modules_service()       service.d scripts
- *                                + service.sh       (init.rc late_start)
- * The late-load path serves post-fs-data before the feature stage.
+ *   post-fs-data   post-fs-data.d scripts
+ *                  each module's sepolicy.rule (through /proc/nksu/sepolicy)
+ *                  post-fs-data.sh  (metamodule first, then regular)
+ *                  metamodule metamount.sh
+ *   late_start     service.d scripts
+ *                  service.sh       (metamodule first, then regular,
+ *                                    detached so a daemon can survive)
  *
- * The stage triggers come from the KernelSU-style init.rc injection (see
- * src/init_rc.c): nksu creates /dev/nksu, init runs a stage script there and
- * the kernel watches for the resulting marker.  The legacy first-zygote-exec
- * path still calls post-fs-data once as a fallback.  Both stage entry points
- * are idempotent.
+ * Because init's `exec` is synchronous, post-fs-data completes before init
+ * proceeds, so modules are mounted before zygote/system_server start.  There is
+ * no kernel-side marker watcher and no timing heuristic left.
  *
- * Both entry points are non-blocking: the work is queued to an internal
- * kthread and the caller returns immediately, so a slow module script cannot
- * stall init, the boot watcher or a late insmod.
+ * This is a boot-time feature: nksu must be loaded by init from modules.load
+ * (the vendor_boot path) so that init.rc injection happens.  A late load (an
+ * insmod after init already parsed its rc files) has no rc left to fire and
+ * therefore does not bring modules up.
  *
- * Mounting is delegated to the metamodule (module.prop "metamodule=1"): its
- * lifecycle scripts run first and its metamount.sh performs the mount.
- *
- * Since there is no userspace daemon, the manager gets the module list from
- * the kernel: nksu_modules_emit_json() renders it as a JSON array that
- * IOC_LIST_MODULES hands to userspace.
+ * The kernel only keeps the module list the manager reads through
+ * IOC_LIST_MODULES (nksu_modules_emit_json) and the sepolicy sink the loader
+ * writes to (selinux/rule_file.c), because only the kernel can edit the live
+ * SELinux policy.
  */
+#define NKSU_LOADER_DIR "/dev/nksu"
+#define NKSU_LOADER_SCRIPT NKSU_LOADER_DIR "/modules.sh"
+
 #define NKSU_MODULES_JSON_MAX (256 * 1024)
 
-void nksu_modules_post_fs_data(void);
-int nksu_modules_service(void);
 void nksu_modules_exit(void);
 
 /*

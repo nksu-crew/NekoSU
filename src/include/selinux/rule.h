@@ -40,6 +40,15 @@ int sepolicy_add_xperm(const char *s, const char *t, const char *c,
  */
 int sepolicy_apply_rule_text(const char *text);
 
+/*
+ * Write-only /proc/nksu/sepolicy sink: writing a path to a module's
+ * sepolicy.rule applies that file to the live policy.  This is how the
+ * userspace module loader (which cannot issue the manager-gated ioctl)
+ * installs module rules.  Idempotent; returns 0 on success.
+ */
+int nksu_sepolicy_sink_init(void);
+void nksu_sepolicy_sink_exit(void);
+
 /* ── Debug audit (CONFIG_NKSU_DEBUG only) ────────────────── */
 
 #ifdef CONFIG_NKSU_DEBUG

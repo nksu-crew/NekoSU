@@ -5,33 +5,38 @@
 #include <linux/types.h>
 
 /*
- * KernelSU-style init.rc injection, adapted for a daemon-less nksu.
+ * KernelSU-style init.rc injection.
  *
- * KernelSU hooks init's read() of /system/etc/init/hw/init.rc and appends a
- * static rc that execs ksud at well-defined boot stages.  nksu has no
- * userspace daemon, so the injected rc instead execs a tiny script that nksu
- * writes into a temporary directory (/dev/nksu).  Running in the unconfined
- * nksu domain, the script writes a stage marker into that directory and the
- * kernel watches for it:
+ * nksu hooks init's read() of /system/etc/init/hw/init.rc through the syscall
+ * table (__NR_read / __NR_fstat) and appends a static rc that execs the
+ * userspace module loader at the well-defined boot stages:
  *
- *   on post-fs-data                                  -> /dev/nksu/post-fs-data
- *   on nonencrypted / vold.decrypt=trigger_restart_framework
- *                                                    -> /dev/nksu/services
- *   on property:sys.boot_completed=1                 -> /dev/nksu/boot-completed
+ *   on post-fs-data
+ *       exec u:r:nksu:s0 root -- /system/bin/sh /dev/nksu/modules.sh post-fs-data
+ *   on nonencrypted
+ *   on property:vold.decrypt=trigger_restart_framework
+ *       exec u:r:nksu:s0 root -- /system/bin/sh /dev/nksu/modules.sh late_start
  *
- * This replaces the old "first zygote execve" heuristic, which fired before
- * /data/adb/modules was readable on FBE devices and made every module look
- * absent.
+ * nksu writes the loader (and its directory) into /dev as soon as init first
+ * reads init.rc, i.e. at second stage, long before `on post-fs-data` runs.
  *
- * nksu_init_rc_init() hooks __NR_read and __NR_fstat (again like KernelSU)
- * and starts the marker watcher.  It must run after the syscall table is
- * initialised (nksu_dispatch_init()).  nksu_rc_injected() reports whether the
- * rc proxy was actually installed, so the zygote path can fall back to the
- * legacy trigger if init never read init.rc through us.
+ * init runs `exec` synchronously, so the post-fs-data hooks (including the
+ * metamodule mount) finish before init continues: modules are mounted before
+ * zygote/system_server start, and none of the old marker polling or kernel-side
+ * timing heuristics are needed.
+ *
+ * nksu_init_rc_init() hooks __NR_read and __NR_fstat and creates the sepolicy
+ * sink; it must run after nksu_dispatch_init().  Because the module is loaded
+ * from init's first stage (modules.load), this is a boot-time feature: a late
+ * load injects nothing here and brings no modules up.
  */
 int nksu_init_rc_init(void);
 void nksu_init_rc_exit(void);
 
-bool nksu_rc_injected(void);
+/*
+ * Idempotently create /dev/nksu and write the module loader into it.  Called
+ * from the read proxy, the first time init reads init.rc.
+ */
+void nksu_rc_prepare_loader(void);
 
 #endif /* NKSU_INIT_RC_H */

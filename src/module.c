@@ -1,74 +1,33 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /*
- * nksu -- Magisk/KernelSU-style module loading from kernel context.
+ * nksu -- kernel side of Magisk/KernelSU-style modules.
  *
- * Modules live under /data/adb/modules/<id>/ and ship shell hooks named after
- * the boot stage they belong to.  This file walks that directory *in the
- * kernel* and runs the hooks through nksu_spawn(), so bringing modules up no
- * longer depends on a userspace daemon (ksud/ncore) enumerating the directory
- * and forking the scripts.
+ * Module loading itself now lives in userspace: the rc that nksu injects into
+ * init (src/init_rc.c) execs /dev/nksu/modules.sh at `on post-fs-data` and at
+ * late_start, and that script enumerates /data/adb/modules, runs the boot
+ * hooks and drives the metamodule mount.  See src/include/nksu_module.h for
+ * the stage contract; the script's source lives in src/init_rc.c.
  *
- * The two stages are kept strictly apart, matching Magisk:
+ * This file keeps only the two pieces that genuinely need the kernel:
  *
- *   post-fs-data   nksu_modules_post_fs_data()  -> post-fs-data.sh
- *                  (driven by the init.rc `on post-fs-data` marker injected
- *                  by src/init_rc.c; /data is mounted and /data/adb readable)
- *   late_start     nksu_modules_service()       -> service.sh
- *                  (init.rc late_start marker)
+ *   - the module list the manager reads through IOC_LIST_MODULES
+ *     (nksu_modules_emit_json), which walks /data/adb/modules in the
+ *     unconfined nksu domain; and
+ *   - nksu_modules_exit(), which drops the borrowed cred and the sepolicy
+ *     sink on unload.
  *
- * A late load (insmod after boot) never saw the post-fs-data stage; the
- * late-load path calls nksu_modules_post_fs_data() before the feature stage
- * so both hooks still run once, in order.
+ * A late load (nksu.ko insmod'ed after init has parsed its rc files) has no
+ * rc left to fire, so it does not bring modules up at all: module loading is a
+ * boot-time, init.rc-driven feature.  See src/include/nksu_module.h.
  *
- * Metamodule
- * ----------
- * As in KernelSU-Next, mounting is delegated to a *metamodule*: a module
- * whose module.prop carries "metamodule=1" (or "=true").  Without one,
- * modules are never mounted.  The metamodule lifecycle scripts run before
- * regular modules' scripts, and its mount handler runs after all
- * post-fs-data scripts:
- *
- *   post-fs-data   post-fs-data.d scripts
- *                  metamodule/post-fs-data.sh
- *                  <regular modules>/post-fs-data.sh
- *                  metamodule/metamount.sh        <- mounts the modules
- *   late_start     service.d scripts
- *                  metamodule/service.sh
- *                  <regular modules>/service.sh
- *
- * Per-module layout handled here:
- *
- *   module.prop      may declare "metamodule=1"
- *   disable          present => module is disabled, skipped
- *   remove           present => module is pending removal, skipped
- *   post-fs-data.sh  post-fs-data hook
- *   service.sh       late_start hook
- *   metamount.sh     metamodule-only mount handler
- *   sepolicy.rule    KernelSU-style SELinux rules, applied at post-fs-data
- *                    before any module script (see selinux/rule_file.c)
- *
- * A hook is executed as
- *
- *   /system/bin/sh <module>/<hook>
- *
- * with root credentials in the "nksu" SELinux domain (unconfined).
- * post-fs-data hooks are waited on so they run in order (a module's
- * sepolicy.rule first, then the metamodule's, then regular modules', then
- * metamount.sh).  The late_start service scripts are dispatched detached,
- * matching Magisk/KernelSU: a service.sh may keep a foreground daemon, and
- * waiting for it would stall every module after it.
- *
- * The two stages are dispatched to a dedicated "nksu-modload" kthread and
- * this file's public entry points return as soon as the work is queued, so
- * a slow module script can never stall init, the boot watcher, the zygote
- * feature stage or a late insmod.
+ * Each module's sepolicy.rule is applied by the loader through the
+ * /proc/nksu/sepolicy sink (src/selinux/rule_file.c), because only the kernel
+ * can edit the live SELinux policy.  The old kernel-side enumeration, spawn
+ * code and marker watcher are gone.
  */
 
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/kthread.h>
-#include <linux/wait.h>
-#include <linux/delay.h>
 #include <linux/slab.h>
 #include <linux/mm.h>
 #include <linux/string.h>
@@ -78,43 +37,25 @@
 #include <linux/dcache.h>
 #include <linux/cred.h>
 #include <linux/capability.h>
-#include <linux/atomic.h>
+#include <linux/printk.h>
 
 #include <fmac.h>
 
+#include "nksu_module.h"
+
 #define NKSU_MODULES_DIR "/data/adb/modules"
-#define NKSU_ADB_DIR "/data/adb"
-#define NKSU_POST_FS_DATA_DIR "/data/adb/post-fs-data.d"
-#define NKSU_SERVICE_DIR "/data/adb/service.d"
 #define NKSU_MODULE_PROP "module.prop"
 #define NKSU_MODULE_DISABLE "disable"
 #define NKSU_MODULE_REMOVE "remove"
-#define NKSU_MODULE_SHELL "/system/bin/sh"
-#define NKSU_MODULE_POST_FS_DATA "post-fs-data.sh"
-#define NKSU_MODULE_SERVICE "service.sh"
-#define NKSU_MODULE_METAMOUNT "metamount.sh"
-#define NKSU_MODULE_SEPOLICY "sepolicy.rule"
-#define NKSU_SCRIPT_SUFFIX ".sh"
 
 /* module paths are bounded; keep the stack frames small */
 #define NKSU_MODULE_PATH_MAX 320
 #define NKSU_MODULE_PROP_MAX 4096
-#define NKSU_SEPOLICY_TEXT_MAX (128 * 1024)
-
-/* minimal environment so the shell and scripts have a usable PATH */
-static const char *const nksu_module_envp[] = {
-    "PATH=/sbin:/system/sbin:/system/bin:/system/xbin",
-    "ANDROID_ROOT=/system",
-    NULL,
-};
-
-/* set once the post-fs-data stage has been queued */
-static atomic_t post_fs_data_done = ATOMIC_INIT(0);
 
 /*
- * Enumeration touches /data/adb from a kthread (kernel domain) or from the
- * manager's ioctl context, neither of which the policy may allow to read
- * there.  Borrow an unconfined nksu-domain cred while walking the tree.
+ * Reading /data/adb from the manager's ioctl context needs a cred the policy
+ * allows there, so borrow an unconfined nksu-domain cred while walking the
+ * tree.
  */
 static struct cred *nksu_module_cred;
 
@@ -310,106 +251,6 @@ static int nksu_read_dir_entries(const char *path, struct nksu_module_dir *out, 
     return ret;
 }
 
-static void nksu_spawn_script(const char *script, int wait)
-{
-    char *argv[3];
-    struct nksu_spawn_args args;
-
-    if (!nksu_file_exists(script)) {
-        pr_info("nksu: module hook %s missing\n", script);
-        return;
-    }
-
-    argv[0] = (char *)NKSU_MODULE_SHELL;
-    argv[1] = (char *)script;
-    argv[2] = NULL;
-
-    memset(&args, 0, sizeof(args));
-    args.path = NKSU_MODULE_SHELL;
-    args.argv = (char *const *)argv;
-    args.envp = (char *const *)nksu_module_envp;
-    args.domain = DOMAIN_CTX;
-    args.wait = wait;
-
-    pr_info("nksu: running module hook %s%s\n", script,
-            wait == NKSU_SPAWN_NOWAIT ? " (async)" : "");
-    nksu_spawn(&args);
-}
-
-static void nksu_module_run_hook(const char *moddir, const char *hook, int wait)
-{
-    char script[NKSU_MODULE_PATH_MAX];
-
-    if (nksu_path_join(script, sizeof(script), moddir, hook))
-        return;
-
-    nksu_spawn_script(script, wait);
-}
-
-static bool nksu_has_suffix(const char *name, const char *suffix)
-{
-    size_t n = strlen(name);
-    size_t s = strlen(suffix);
-
-    return n >= s && strcmp(name + n - s, suffix) == 0;
-}
-
-/*
- * Run every "*.sh" in a Magisk-style script directory (post-fs-data.d,
- * service.d).  The directory is optional; a missing one is not an error.
- */
-static void nksu_run_scripts_dir(const char *dir, int wait)
-{
-    struct nksu_module_dir files;
-    const struct cred *old;
-    size_t i;
-
-    old = nksu_module_creds_begin();
-
-    memset(&files, 0, sizeof(files));
-    if (nksu_read_dir_entries(dir, &files, true)) {
-        pr_info("nksu: cannot read %s (not present yet?)\n", dir);
-        nksu_module_creds_end(old);
-        return;
-    }
-    pr_info("nksu: %s: %zu script(s)\n", dir, files.count);
-
-    for (i = 0; i < files.count; i++) {
-        char script[NKSU_MODULE_PATH_MAX];
-
-        if (!nksu_has_suffix(files.names[i], NKSU_SCRIPT_SUFFIX))
-            continue;
-        if (nksu_path_join(script, sizeof(script), dir, files.names[i]))
-            continue;
-
-        nksu_spawn_script(script, wait);
-    }
-
-    nksu_module_dir_free(&files);
-    nksu_module_creds_end(old);
-}
-
-/* A module participates in a stage unless it is disabled or being removed. */
-static bool nksu_module_is_enabled(const char *moddir, const char *name)
-{
-    char flag[NKSU_MODULE_PATH_MAX];
-
-    if (!nksu_is_dir(moddir))
-        return false;
-
-    if (!nksu_path_join(flag, sizeof(flag), moddir, NKSU_MODULE_DISABLE) && nksu_file_exists(flag)) {
-        pr_info("nksu: module '%s' is disabled, skipping\n", name);
-        return false;
-    }
-
-    if (!nksu_path_join(flag, sizeof(flag), moddir, NKSU_MODULE_REMOVE) && nksu_file_exists(flag)) {
-        pr_info("nksu: module '%s' is marked for removal, skipping\n", name);
-        return false;
-    }
-
-    return true;
-}
-
 /* Extract "<key>=<value>" from a module.prop body into @out (trimmed). */
 static bool nksu_prop_get(const char *text, const char *key, char *out, size_t outsz)
 {
@@ -466,375 +307,16 @@ static bool nksu_prop_has_metamodule(const char *text)
     return strcmp(v, "1") == 0 || strcasecmp(v, "true") == 0;
 }
 
-/*
- * A metamodule declares itself with "metamodule=1" in module.prop.  The
- * /data/adb/metamodule symlink (created at install time) is only a cache of
- * the same information, so scanning module.prop is enough to find it here.
- */
-static bool nksu_module_is_metamodule(const char *moddir)
-{
-    char path[NKSU_MODULE_PATH_MAX];
-    char *buf;
-    bool is_meta;
-
-    if (nksu_path_join(path, sizeof(path), moddir, NKSU_MODULE_PROP))
-        return false;
-
-    buf = kvmalloc(NKSU_MODULE_PROP_MAX, GFP_KERNEL);
-    if (!buf)
-        return false;
-
-    if (nksu_read_text(path, buf, NKSU_MODULE_PROP_MAX))
-        is_meta = false;
-    else
-        is_meta = nksu_prop_has_metamodule(buf);
-
-    kvfree(buf);
-    return is_meta;
-}
-
-/*
- * Run @hook for every enabled module of one kind, in directory order:
- * want_meta=false runs regular modules, want_meta=true the metamodule.
- * @wait is NKSU_SPAWN_WAIT_PROC while a stage must finish before the next
- * one (post-fs-data), or NKSU_SPAWN_NOWAIT for the detached late_start
- * service stage (a service script may legally keep a daemon in the
- * foreground, so it must not stall the modules after it).
- */
-static void nksu_modules_foreach(const char *hook, bool want_meta, int wait)
-{
-    struct nksu_module_dir dirs;
-    const struct cred *old;
-    size_t i;
-
-    old = nksu_module_creds_begin();
-
-    memset(&dirs, 0, sizeof(dirs));
-    if (nksu_read_dir_entries(NKSU_MODULES_DIR, &dirs, false)) {
-        pr_warn("nksu: cannot read %s\n", NKSU_MODULES_DIR);
-        nksu_module_creds_end(old);
-        return;
-    }
-    pr_info("nksu: %s: scanning %zu module dir(s)\n", hook, dirs.count);
-
-    for (i = 0; i < dirs.count; i++) {
-        char moddir[NKSU_MODULE_PATH_MAX];
-        const char *name = dirs.names[i];
-
-        if (nksu_path_join(moddir, sizeof(moddir), NKSU_MODULES_DIR, name))
-            continue;
-        if (!nksu_module_is_enabled(moddir, name))
-            continue;
-        if (nksu_module_is_metamodule(moddir) != want_meta)
-            continue;
-
-        nksu_module_run_hook(moddir, hook, wait);
-    }
-
-    nksu_module_dir_free(&dirs);
-    nksu_module_creds_end(old);
-}
-
-/*
- * Apply one module's sepolicy.rule to the live policy.  The rules are
- * KernelSU-style statements (see src/selinux/rule_file.c); a missing file
- * is not an error and each malformed/unknown statement is skipped inside
- * the parser.
- */
-static void nksu_module_apply_sepolicy(const char *moddir, const char *name)
-{
-    char path[NKSU_MODULE_PATH_MAX];
-    char *buf;
-    int applied;
-
-    if (nksu_path_join(path, sizeof(path), moddir, NKSU_MODULE_SEPOLICY))
-        return;
-    if (!nksu_file_exists(path))
-        return;
-
-    buf = kvmalloc(NKSU_SEPOLICY_TEXT_MAX, GFP_KERNEL);
-    if (!buf)
-        return;
-
-    if (nksu_read_text(path, buf, NKSU_SEPOLICY_TEXT_MAX) == 0) {
-        applied = sepolicy_apply_rule_text(buf);
-        pr_info("nksu: module '%s' sepolicy.rule: %d statement(s) applied\n",
-                name, applied);
-    } else {
-        pr_warn("nksu: cannot read %s\n", path);
-    }
-
-    kvfree(buf);
-}
-
-/*
- * Load every enabled module's sepolicy.rule.  Called from the post-fs-data
- * stage before any module script runs, matching KernelSU's ordering.
- */
-static void nksu_modules_apply_sepolicy(void)
-{
-    struct nksu_module_dir dirs;
-    const struct cred *old;
-    size_t i;
-
-    old = nksu_module_creds_begin();
-
-    memset(&dirs, 0, sizeof(dirs));
-    if (nksu_read_dir_entries(NKSU_MODULES_DIR, &dirs, false)) {
-        nksu_module_creds_end(old);
-        return;
-    }
-
-    for (i = 0; i < dirs.count; i++) {
-        char moddir[NKSU_MODULE_PATH_MAX];
-        const char *name = dirs.names[i];
-
-        if (nksu_path_join(moddir, sizeof(moddir), NKSU_MODULES_DIR, name))
-            continue;
-        if (!nksu_module_is_enabled(moddir, name))
-            continue;
-
-        nksu_module_apply_sepolicy(moddir, name);
-    }
-
-    nksu_module_dir_free(&dirs);
-    nksu_module_creds_end(old);
-}
-
-/* ---- staged module bring-up (non-blocking) ---- */
-
-/*
- * Both stages run on this worker so the callers (boot watcher, feature stage,
- * late insmod) never wait on a module script.  A stage is a single boolean
- * request; the worker drains post-fs-data before service, which keeps the
- * boot-time ordering intact even if the zygote stage arrives early.
- */
-static struct task_struct *modload_thread;
-static DECLARE_WAIT_QUEUE_HEAD(modload_wq);
-static bool post_fs_data_pending;
-static bool service_pending;
-
-/* set once the module hooks of the post-fs-data stage have actually run */
-static bool modules_post_fs_data_done;
-
-/* the service stage is queued once (init.rc marker or the late-load path) */
-static atomic_t service_done = ATOMIC_INIT(0);
-
-/*
- * Poll until /data/adb exists (i.e. /data has been mounted).  The post-fs-data
- * stage can fire before vold mounts /data, which made the kernel-side loader
- * see no modules at all.  Bounded to ~10s.
- */
-static bool nksu_wait_for_adb(void)
-{
-    int i;
-
-    for (i = 0; i < 100; i++) {
-        const struct cred *old = nksu_module_creds_begin();
-        bool ready = nksu_is_dir(NKSU_ADB_DIR);
-
-        nksu_module_creds_end(old);
-        if (ready)
-            return true;
-        if (kthread_should_stop())
-            return false;
-        msleep(100);
-    }
-
-    return false;
-}
-
-/*
- * Poll until /data/adb/modules is actually readable.  /data/adb appears the
- * instant /data is mounted, but on FBE devices the module tree only becomes
- * readable a little later (after vold finishes enablefilecrypto/init_user0).
- * Enumerating inside that window found zero modules and latched the stage as
- * done, so no module's post-fs-data.sh or the metamodule's metamount.sh ever
- * ran -- only late_start service.sh did.  Wait for the directory we are about
- * to read; bounded to ~5s so a device without modules does not stall.
- */
-static bool nksu_wait_for_modules(void)
-{
-    int i;
-
-    for (i = 0; i < 50; i++) {
-        const struct cred *old = nksu_module_creds_begin();
-        bool ready = nksu_is_dir(NKSU_MODULES_DIR);
-
-        nksu_module_creds_end(old);
-        if (ready)
-            return true;
-        if (kthread_should_stop())
-            return false;
-        msleep(100);
-    }
-
-    return false;
-}
-
-/* post-fs-data hooks that must run in order, once the module tree is there */
-static void nksu_modules_run_post_fs_data_hooks(void)
-{
-    /* Each module's sepolicy.rule is applied before its boot scripts. */
-    nksu_modules_apply_sepolicy();
-
-    nksu_modules_foreach(NKSU_MODULE_POST_FS_DATA, true,
-                         NKSU_SPAWN_WAIT_PROC);
-    nksu_modules_foreach(NKSU_MODULE_POST_FS_DATA, false,
-                         NKSU_SPAWN_WAIT_PROC);
-
-    pr_info("nksu: metamodule mount stage\n");
-    nksu_modules_foreach(NKSU_MODULE_METAMOUNT, true,
-                         NKSU_SPAWN_WAIT_PROC);
-
-    WRITE_ONCE(modules_post_fs_data_done, true);
-}
-
-static void nksu_modules_do_post_fs_data(void)
-{
-    bool modules_ready;
-
-    pr_info("nksu: post-fs-data module stage\n");
-
-    /*
-     * The stage now starts at the first zygote exec, so /data is already
-     * mounted and decrypted.  Keep the waits as a safety net (they are
-     * normally instant) and so a device without a modules directory does
-     * not hold the service stage back.
-     */
-    if (!nksu_wait_for_adb())
-        pr_warn("nksu: %s not ready, post-fs-data stage may be incomplete\n", NKSU_ADB_DIR);
-
-    /*
-     * Reading /data/adb/modules too early used to find zero modules and
-     * permanently skip every post-fs-data hook.  If it still is not there,
-     * the late_start stage retries.
-     */
-    modules_ready = nksu_wait_for_modules();
-
-    /* Magisk-compatible extra scripts run before the modules. */
-    nksu_run_scripts_dir(NKSU_POST_FS_DATA_DIR, NKSU_SPAWN_WAIT_PROC);
-
-    if (modules_ready)
-        nksu_modules_run_post_fs_data_hooks();
-    else
-        pr_warn("nksu: %s not ready, deferring module stage to late_start\n",
-                NKSU_MODULES_DIR);
-}
-
-static void nksu_modules_do_service(void)
-{
-    pr_info("nksu: service module stage\n");
-
-    /*
-     * If the module tree was not readable when the post-fs-data stage ran,
-     * serve its module hooks now, before the late_start hooks, so they are
-     * never lost.
-     */
-    if (!READ_ONCE(modules_post_fs_data_done))
-        nksu_modules_run_post_fs_data_hooks();
-
-    /*
-     * service.d and the modules' service.sh run detached, like Magisk's
-     * late_start stage: a service script may keep a foreground daemon, so
-     * waiting for it would stall every module after it.
-     */
-    nksu_run_scripts_dir(NKSU_SERVICE_DIR, NKSU_SPAWN_NOWAIT);
-
-    nksu_modules_foreach(NKSU_MODULE_SERVICE, true, NKSU_SPAWN_NOWAIT);
-    nksu_modules_foreach(NKSU_MODULE_SERVICE, false, NKSU_SPAWN_NOWAIT);
-}
-
-static int nksu_modload_thread_fn(void *data)
-{
-    while (!kthread_should_stop()) {
-        wait_event_interruptible(modload_wq, READ_ONCE(post_fs_data_pending) || READ_ONCE(service_pending) ||
-                                                 kthread_should_stop());
-        if (kthread_should_stop())
-            break;
-
-        if (READ_ONCE(post_fs_data_pending)) {
-            WRITE_ONCE(post_fs_data_pending, false);
-            nksu_modules_do_post_fs_data();
-        }
-
-        if (READ_ONCE(service_pending)) {
-            WRITE_ONCE(service_pending, false);
-            nksu_modules_do_service();
-        }
-    }
-
-    return 0;
-}
-
-static int nksu_modload_ensure(void)
-{
-    if (modload_thread)
-        return 0;
-
-    modload_thread = kthread_run(nksu_modload_thread_fn, NULL, "nksu-modload");
-    if (IS_ERR(modload_thread)) {
-        int ret = PTR_ERR(modload_thread);
-
-        modload_thread = NULL;
-        return ret;
-    }
-
-    return 0;
-}
-
-/*
- * post-fs-data stage: called when the first zygote execs, i.e. once /data is
- * mounted and decrypted (and from the late-load path).  Idempotent so the
- * boot watcher may announce the stage more than once, and non-blocking: the
- * work is queued to the module loader and this returns at once.
- *
- * Order matches KernelSU-Next: post-fs-data.d scripts, the metamodule's own
- * post-fs-data.sh, then regular modules', and only then the metamodule's
- * metamount.sh mounts everything.  With no metamodule nothing is mounted.
- */
-void nksu_modules_post_fs_data(void)
-{
-    if (atomic_xchg(&post_fs_data_done, 1))
-        return;
-
-    if (nksu_modload_ensure()) {
-        pr_err("nksu: failed to start module loader\n");
-        atomic_set(&post_fs_data_done, 0);
-        return;
-    }
-
-    WRITE_ONCE(post_fs_data_pending, true);
-    wake_up_interruptible(&modload_wq);
-}
-
-/* late_start stage: called from the init.rc marker (or the feature stage). */
-int nksu_modules_service(void)
-{
-    if (atomic_xchg(&service_done, 1))
-        return 0;
-
-    if (nksu_modload_ensure()) {
-        atomic_set(&service_done, 0);
-        return -ENOMEM;
-    }
-
-    WRITE_ONCE(service_pending, true);
-    wake_up_interruptible(&modload_wq);
-    return 0;
-}
+/* ---- teardown ---- */
 
 void nksu_modules_exit(void)
 {
-    if (modload_thread) {
-        kthread_stop(modload_thread);
-        modload_thread = NULL;
-    }
-
     if (nksu_module_cred) {
         put_cred(nksu_module_cred);
         nksu_module_cred = NULL;
     }
+
+    nksu_sepolicy_sink_exit();
 }
 
 /* ---- module list JSON (the kernel-side module interface) ---- */

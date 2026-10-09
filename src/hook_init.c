@@ -31,11 +31,11 @@ int boot_stage = INIT_FIRST_STAGE;
  *                                   init.rc proxy is installed from the
  *                                   first init.rc read (see src/init_rc.c)
  *   execve(app_process -Xzygote) -> feature components (profile, tracepoint,
- *                                   manager scan...); post-fs-data module
- *                                   loading is normally driven by the
- *                                   injected init.rc marker and only called
- *                                   here as a fallback.  Then drop the
- *                                   watcher.
+ *                                   manager scan...).  Module loading is not
+ *                                   started here: it is driven entirely by
+ *                                   the injected init.rc, which execs the
+ *                                   userspace loader at post-fs-data and
+ *                                   late_start.  Then drop the watcher.
  *
  * Late load just initializes everything at once (see nksu.c).
  */
@@ -195,18 +195,6 @@ static int init_thread_fn(void *data)
                 nksu_init_selinux_components() == 0)
                 selinux_loaded = true;
 
-            /*
-             * The first zygote exec is KernelSU's "/data prepared" point:
-             * vold has mounted and decrypted /data by now, so the module
-             * tree is readable.  Serve the post-fs-data module stage here,
-             * before the feature components queue the late_start (service)
-             * stage on the same worker; the worker keeps them in order.
-             */
-            if (selinux_loaded)
-                nksu_modules_post_fs_data();
-            else
-                pr_err("nksu: SELinux not ready, deferring module stage\n");
-
             if (nksu_init_feature_components() == 0)
                 features_loaded = true;
             else
@@ -253,9 +241,9 @@ int hook_init(void)
         goto err_dispatch;
 
     /*
-     * Inject the KernelSU-style init.rc rc (read/fstat proxy) and start the
-     * stage-marker watcher.  On failure the zygote fallback below still
-     * serves the module stages, so this is not fatal.
+     * Inject the KernelSU-style init.rc rc (read/fstat proxy) and write the
+     * userspace module loader.  This is not fatal: without it init.rc is
+     * untouched and modules simply do not come up.
      */
     ret = nksu_init_rc_init();
     if (ret) {
@@ -280,9 +268,8 @@ void hook_exit(void)
 
     if (READ_ONCE(features_loaded))
         nksu_exit_feature_components();
-    else
-        /* post-fs-data may already have started the module loader. */
-        nksu_modules_exit();
+
+    nksu_modules_exit();
 
     if (READ_ONCE(selinux_loaded))
         nksu_exit_selinux_components();

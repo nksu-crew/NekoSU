@@ -1,24 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /*
- * nksu -- KernelSU-style init.rc injection, adapted for a daemon-less module.
+ * nksu -- KernelSU-style init.rc injection.
  *
  * KernelSU hooks init's read() of /system/etc/init/hw/init.rc through the
  * syscall table (__NR_read / __NR_fstat) and appends a static rc that execs
  * its userspace daemon ksud at the well-defined boot stages.  nksu has no
- * daemon, so instead the appended rc execs a small script that nksu writes
- * into a temporary directory it creates:
+ * daemon, but it does the same trick: the appended rc execs the module loader
+ * nksu writes into /dev/nksu.
  *
  *   on post-fs-data
- *       exec u:r:nksu:s0 root -- /system/bin/sh /dev/nksu/stage.sh post-fs-data
+ *       exec u:r:nksu:s0 root -- /system/bin/sh /dev/nksu/modules.sh post-fs-data
+ *   on nonencrypted
  *   on property:vold.decrypt=trigger_restart_framework
- *       exec u:r:nksu:s0 root -- /system/bin/sh /dev/nksu/stage.sh services
- *   on property:sys.boot_completed=1
- *       exec u:r:nksu:s0 root -- /system/bin/sh /dev/nksu/stage.sh boot-completed
+ *       exec u:r:nksu:s0 root -- /system/bin/sh /dev/nksu/modules.sh late_start
  *
- * Running in the unconfined nksu domain (see selinux/policy.c), the script
- * writes the stage name into /dev/nksu/, which the kernel watcher polls.  That
- * is the daemon-less replacement for `ksud post-fs-data`: init itself tells us
- * when the boot stage is reached, at exactly the point KernelSU relies on.
+ * The loader itself does the module enumeration and runs the hooks in
+ * userspace (see src/module.c and the script embedded below); the kernel only
+ * edits init's view of init.rc.  Because init's `exec` is synchronous, the
+ * post-fs-data hooks (metamodule mount included) finish before init continues,
+ * so modules are mounted before zygote/system_server start.  This replaces the
+ * previous kernel-side loader, whose marker watcher had to poll /dev/nksu and
+ * guess when the stages had been reached.
  *
  * The read proxy is a straight port of ksu_install_rc_hook(): the first read()
  * of /system/etc/init/hw/init.rc replaces the file's file_operations with a
@@ -38,13 +40,8 @@
 #include <linux/namei.h>
 #include <linux/uaccess.h>
 #include <linux/uio.h>
-#include <linux/kthread.h>
-#include <linux/wait.h>
-#include <linux/delay.h>
 #include <linux/version.h>
 #include <linux/sched.h>
-#include <linux/cred.h>
-#include <linux/capability.h>
 #include <linux/stat.h>
 #include <linux/fcntl.h>
 #include <linux/printk.h>
@@ -57,41 +54,149 @@
 #include "syscall.h"
 #include "nksu_module.h"
 
-/*
- * The injected rc and the staging files it references.  The directory lives
- * on /dev (tmpfs, mounted by init's first stage before we probe), so it exists
- * long before `on post-fs-data` runs.
- */
-#define NKSU_RC_DIR "/dev/nksu"
-#define NKSU_RC_SCRIPT NKSU_RC_DIR "/stage.sh"
-#define NKSU_RC_MARK_POST_FS_DATA NKSU_RC_DIR "/post-fs-data"
-#define NKSU_RC_MARK_SERVICES NKSU_RC_DIR "/services"
-#define NKSU_RC_MARK_BOOT_COMPLETED NKSU_RC_DIR "/boot-completed"
 #define NKSU_RC_INIT_PATH "/system/etc/init/hw/init.rc"
 #define NKSU_RC_INIT_PATH_LEGACY "/system/etc/init.rc"
 
 /* nksu domain; see selinux/selinux.h */
 #define NKSU_RC_CONTEXT DOMAIN_CTX
 
+/* The rc that init parses; it only has to reach the loader at each stage. */
 static const char nksu_rc[] =
     "\n"
     "on post-fs-data\n"
-    "    exec " NKSU_RC_CONTEXT " root -- /system/bin/sh " NKSU_RC_SCRIPT " post-fs-data\n"
+    "    exec " NKSU_RC_CONTEXT " root -- /system/bin/sh " NKSU_LOADER_SCRIPT " post-fs-data\n"
     "\n"
     "on nonencrypted\n"
-    "    exec " NKSU_RC_CONTEXT " root -- /system/bin/sh " NKSU_RC_SCRIPT " services\n"
+    "    exec " NKSU_RC_CONTEXT " root -- /system/bin/sh " NKSU_LOADER_SCRIPT " late_start\n"
     "\n"
     "on property:vold.decrypt=trigger_restart_framework\n"
-    "    exec " NKSU_RC_CONTEXT " root -- /system/bin/sh " NKSU_RC_SCRIPT " services\n"
-    "\n"
-    "on property:sys.boot_completed=1\n"
-    "    exec " NKSU_RC_CONTEXT " root -- /system/bin/sh " NKSU_RC_SCRIPT " boot-completed\n"
+    "    exec " NKSU_RC_CONTEXT " root -- /system/bin/sh " NKSU_LOADER_SCRIPT " late_start\n"
     "\n";
 
-/* The stage script writes its argument (the stage name) into the temp dir. */
+/*
+ * The module loader.  It is written into /dev/nksu before `on post-fs-data`
+ * runs and does all the work KernelSU's ksud would do here: apply each
+ * module's sepolicy.rule through /proc/nksu/sepolicy, run post-fs-data.d /
+ * service.d, run the metamodule and regular hooks, and drive the metamodule
+ * mount.  The two stages are guarded by marker files so both `on nonencrypted`
+ * and `on property:vold.decrypt=...` cannot run late_start twice.
+ *
+ * (Generated from userspace/loader/modules.sh; keep the two in sync.)
+ */
 static const char nksu_rc_script[] =
     "#!/system/bin/sh\n"
-    "echo 1 > " NKSU_RC_DIR "/$1\n";
+    "# nksu userspace module loader.\n"
+    "#\n"
+    "# This file is embedded verbatim into src/init_rc.c (nksu_rc_script); keep the\n"
+    "# two in sync -- the kernel writes this text to /dev/nksu/modules.sh at boot.\n"
+    "#\n"
+    "# Exec'd by the rc that nksu injects into init.rc (see src/init_rc.c) at the\n"
+    "# well-defined boot stages.  It replaces the old kernel-side loader: the\n"
+    "# enumeration, the boot-hook ordering and the metamodule mount all happen\n"
+    "# here, exactly like KernelSU's ksud but without a resident daemon.\n"
+    "#\n"
+    "#   post-fs-data   post-fs-data.d, each module's sepolicy.rule, the\n"
+    "#                  metamodule's post-fs-data.sh, the regular modules'\n"
+    "#                  post-fs-data.sh, then the metamodule's metamount.sh\n"
+    "#   late_start     service.d, metamodule service.sh, regular service.sh\n"
+    "#                  (all detached: a service.sh may keep a daemon)\n"
+    "#\n"
+    "# sepolicy.rule cannot be applied from shell, so each file path is handed to\n"
+    "# the kernel through /proc/nksu/sepolicy (see selinux/rule_file.c).\n"
+    "\n"
+    "STAGE=\"$1\"\n"
+    "export PATH=/sbin:/system/sbin:/system/bin:/system/xbin\n"
+    "export ANDROID_ROOT=/system\n"
+    "\n"
+    "MODULES_DIR=/data/adb/modules\n"
+    "POST_FS_DATA_D=/data/adb/post-fs-data.d\n"
+    "SERVICE_D=/data/adb/service.d\n"
+    "SEPOLICY_SINK=/proc/nksu/sepolicy\n"
+    "STATE_DIR=/dev/nksu\n"
+    "\n"
+    "log() { echo \"nksu: $*\"; }\n"
+    "\n"
+    "# A module is skipped when it is disabled or pending removal.\n"
+    "enabled() {\n"
+    "    [ -d \"$1\" ] || return 1\n"
+    "    [ -e \"$1/disable\" ] && return 1\n"
+    "    [ -e \"$1/remove\" ] && return 1\n"
+    "    return 0\n"
+    "}\n"
+    "\n"
+    "is_metamodule() {\n"
+    "    [ -f \"$1/module.prop\" ] || return 1\n"
+    "    grep -Eq '^[[:space:]]*metamodule[[:space:]]*=[[:space:]]*(1|true)' \"$1/module.prop\" 2>/dev/null\n"
+    "}\n"
+    "\n"
+    "apply_sepolicy() {\n"
+    "    [ -e \"$SEPOLICY_SINK\" ] || return 0\n"
+    "    for d in \"$MODULES_DIR\"/*; do\n"
+    "        enabled \"$d\" || continue\n"
+    "        [ -f \"$d/sepolicy.rule\" ] && echo \"$d/sepolicy.rule\" > \"$SEPOLICY_SINK\"\n"
+    "    done\n"
+    "}\n"
+    "\n"
+    "# $1 directory, $2 wait|nowait\n"
+    "run_dir_scripts() {\n"
+    "    [ -d \"$1\" ] || return 0\n"
+    "    for f in \"$1\"/*.sh; do\n"
+    "        [ -f \"$f\" ] || continue\n"
+    "        if [ \"$2\" = nowait ]; then sh \"$f\" & else sh \"$f\"; fi\n"
+    "    done\n"
+    "}\n"
+    "\n"
+    "# $1 hook, $2 wait|nowait, $3 meta|regular\n"
+    "run_hooks() {\n"
+    "    for d in \"$MODULES_DIR\"/*; do\n"
+    "        enabled \"$d\" || continue\n"
+    "        if [ \"$3\" = meta ]; then\n"
+    "            is_metamodule \"$d\" || continue\n"
+    "        else\n"
+    "            is_metamodule \"$d\" && continue\n"
+    "        fi\n"
+    "        [ -f \"$d/$1\" ] || continue\n"
+    "        if [ \"$2\" = nowait ]; then sh \"$d/$1\" & else sh \"$d/$1\"; fi\n"
+    "    done\n"
+    "}\n"
+    "\n"
+    "do_post_fs_data() {\n"
+    "    log \"post-fs-data stage\"\n"
+    "    run_dir_scripts \"$POST_FS_DATA_D\" wait\n"
+    "    apply_sepolicy\n"
+    "    run_hooks post-fs-data.sh wait meta\n"
+    "    run_hooks post-fs-data.sh wait regular\n"
+    "    log \"metamodule mount\"\n"
+    "    run_hooks metamount.sh wait meta\n"
+    "    log \"post-fs-data done\"\n"
+    "}\n"
+    "\n"
+    "do_late_start() {\n"
+    "    log \"late_start stage\"\n"
+    "    run_dir_scripts \"$SERVICE_D\" nowait\n"
+    "    run_hooks service.sh nowait meta\n"
+    "    run_hooks service.sh nowait regular\n"
+    "    log \"late_start done\"\n"
+    "}\n"
+    "\n"
+    "case \"$STAGE\" in\n"
+    "    post-fs-data)\n"
+    "        [ -e \"$STATE_DIR/.post-fs-data.done\" ] && exit 0\n"
+    "        : > \"$STATE_DIR/.post-fs-data.done\"\n"
+    "        do_post_fs_data\n"
+    "        ;;\n"
+    "    late_start)\n"
+    "        [ -e \"$STATE_DIR/.late-start.done\" ] && exit 0\n"
+    "        : > \"$STATE_DIR/.late-start.done\"\n"
+    "        do_late_start\n"
+    "        ;;\n"
+    "    *)\n"
+    "        log \"unknown stage: $STAGE\"\n"
+    "        exit 1\n"
+    "        ;;\n"
+    "esac\n"
+    "\n"
+    "exit 0\n";
 
 static const size_t nksu_rc_len = sizeof(nksu_rc) - 1;
 static ssize_t nksu_rc_pos;
@@ -104,30 +209,23 @@ static ssize_t (*nksu_orig_read)(struct file *, char __user *, size_t, loff_t *)
 static ssize_t (*nksu_orig_read_iter)(struct kiocb *, struct iov_iter *);
 
 /*
- * None of getname_kernel()/do_mkdirat()/do_unlinkat()/do_rmdir() is part of
- * the GKI KMI, and vfs_mkdir() changed its first argument across the KMI
- * range we build for, so resolve them through the module's own kallsyms
- * scanner (like every other unexported symbol).  The do_*() helpers have
- * kept a stable signature and hide the vfs_*() differences.
+ * getname_kernel()/do_mkdirat() are not part of the GKI KMI and vfs_mkdir()
+ * changed its first argument across the KMI range we build for, so resolve
+ * them through the module's own kallsyms scanner.  do_mkdirat() hides the
+ * vfs_*() differences and has kept a stable signature.
  *
- * All of them take ownership of the filename and putname() it on every path
- * (including the error path), so the caller must NOT put it again.
+ * do_mkdirat() takes ownership of the filename and putname()s it on every
+ * path (including the error path), so the caller must NOT put it again.
  */
 typedef struct filename *(*nksu_getname_kernel_t)(const char *);
 typedef long (*nksu_do_mkdirat_t)(int, struct filename *, umode_t);
-typedef long (*nksu_do_unlinkat_t)(int, struct filename *);
-typedef long (*nksu_do_rmdir_t)(int, struct filename *);
 
 static nksu_getname_kernel_t nksu_getname_kernel;
 static nksu_do_mkdirat_t nksu_do_mkdirat;
-static nksu_do_unlinkat_t nksu_do_unlinkat;
-static nksu_do_rmdir_t nksu_do_rmdir;
 
 /* saved originals for the two syscall-table hooks */
 static syscall_fn_t nksu_orig_read_sys;
 static syscall_fn_t nksu_orig_fstat_sys;
-
-static struct task_struct *nksu_rc_watch_thread;
 
 /*
  * These resolve into foreign function pointers and are called with the
@@ -154,38 +252,6 @@ static int nksu_rc_mkdir(const char *path)
 
     if (ret == -EEXIST)
         return 0;
-    return ret < 0 ? (int)ret : 0;
-}
-
-static int nksu_rc_unlink(const char *path)
-{
-    struct filename *name;
-    long ret;
-
-    if (!nksu_getname_kernel || !nksu_do_unlinkat)
-        return -ENOSYS;
-
-    name = nksu_getname_kernel(path);
-    if (IS_ERR(name))
-        return PTR_ERR(name);
-
-    ret = nksu_do_unlinkat(AT_FDCWD, name);
-    return ret < 0 ? (int)ret : 0;
-}
-
-static int nksu_rc_rmdir(const char *path)
-{
-    struct filename *name;
-    long ret;
-
-    if (!nksu_getname_kernel || !nksu_do_rmdir)
-        return -ENOSYS;
-
-    name = nksu_getname_kernel(path);
-    if (IS_ERR(name))
-        return PTR_ERR(name);
-
-    ret = nksu_do_rmdir(AT_FDCWD, name);
     return ret < 0 ? (int)ret : 0;
 }
 
@@ -235,11 +301,11 @@ static int nksu_rc_write_file(const char *path, const char *data, size_t len)
 }
 
 /*
- * Create the temp directory and the stage script.  Called the first time init
- * is seen reading init.rc, i.e. at second stage, long after /dev exists and
- * well before `on post-fs-data`.
+ * Create /dev/nksu and write the loader.  Called the first time init is seen
+ * reading init.rc, i.e. at second stage, long after /dev exists and well
+ * before `on post-fs-data`.
  */
-static void nksu_rc_prepare(void)
+void nksu_rc_prepare_loader(void)
 {
     int ret;
 
@@ -247,14 +313,27 @@ static void nksu_rc_prepare(void)
         return;
     nksu_rc_prepared = true;
 
-    ret = nksu_rc_mkdir(NKSU_RC_DIR);
-    if (ret && ret != -EEXIST)
-        pr_warn("nksu: cannot create %s: %d\n", NKSU_RC_DIR, ret);
+    if (!nksu_getname_kernel)
+        nksu_getname_kernel = (nksu_getname_kernel_t)nksu_ksym_lookup("getname_kernel");
+    if (!nksu_do_mkdirat)
+        nksu_do_mkdirat = (nksu_do_mkdirat_t)nksu_ksym_lookup("do_mkdirat");
 
-    ret = nksu_rc_write_file(NKSU_RC_SCRIPT, nksu_rc_script,
+    if (!nksu_getname_kernel || !nksu_do_mkdirat) {
+        pr_warn("nksu: cannot resolve VFS mkdir helpers\n");
+        return;
+    }
+
+    ret = nksu_rc_mkdir(NKSU_LOADER_DIR);
+    if (ret && ret != -EEXIST)
+        pr_warn("nksu: cannot create %s: %d\n", NKSU_LOADER_DIR, ret);
+
+    ret = nksu_rc_write_file(NKSU_LOADER_SCRIPT, nksu_rc_script,
                              sizeof(nksu_rc_script) - 1);
     if (ret)
-        pr_warn("nksu: cannot write %s: %d\n", NKSU_RC_SCRIPT, ret);
+        pr_warn("nksu: cannot write %s: %d\n", NKSU_LOADER_SCRIPT, ret);
+    else
+        pr_info("nksu: wrote module loader (%zu bytes)\n",
+                sizeof(nksu_rc_script) - 1);
 }
 
 /* append the rc once the original read has reached EOF (KernelSU read_proxy) */
@@ -323,7 +402,7 @@ static void nksu_rc_install(struct file *file)
         return;
     nksu_rc_hooked = true;
 
-    nksu_rc_prepare();
+    nksu_rc_prepare_loader();
 
     memcpy(&nksu_fops_proxy, file->f_op, sizeof(struct file_operations));
 
@@ -365,7 +444,7 @@ static long nksu_sys_fstat(const struct pt_regs *regs)
 
     if (file) {
         if (nksu_rc_is_init_rc(file)) {
-            nksu_rc_prepare();
+            nksu_rc_prepare_loader();
             is_rc = true;
         }
         fput(file);
@@ -387,151 +466,14 @@ static long nksu_sys_fstat(const struct pt_regs *regs)
     return ret;
 }
 
-/* ---- marker watcher ---- */
-
-/*
- * The watcher is a kernel thread (u:r:kernel:s0), which SELinux does not
- * allow to read the /dev/nksu markers (they inherit the tmpfs "device"
- * label).  Borrow the unconfined nksu domain, exactly like the module loader
- * does to walk /data/adb.  The cred is created on the first -EACCES, by which
- * time the policy (and the nksu domain) is loaded.
- */
-static struct cred *nksu_rc_cred;
-
-static struct cred *nksu_rc_cred_get(void)
-{
-    struct cred *cred;
-
-    if (nksu_rc_cred)
-        return nksu_rc_cred;
-
-    cred = prepare_creds();
-    if (!cred)
-        return NULL;
-
-    cred->cap_effective = CAP_FULL_SET;
-    cred->cap_permitted = CAP_FULL_SET;
-    cred->cap_bset = CAP_FULL_SET;
-    cred->cap_inheritable = CAP_FULL_SET;
-
-    if (set_domain(DOMAIN_CTX, cred)) {
-        abort_creds(cred);
-        return NULL;
-    }
-
-    nksu_rc_cred = cred;
-    return nksu_rc_cred;
-}
-
-static bool nksu_rc_marker_seen(const char *path)
-{
-    struct cred *cred;
-    const struct cred *old;
-    struct file *f;
-
-    f = filp_open(path, O_RDONLY, 0);
-    if (!IS_ERR(f)) {
-        filp_close(f, NULL);
-        return true;
-    }
-
-    /*
-     * -ENOENT simply means init has not reached the stage yet.  -EACCES is
-     * the kernel domain being denied on the tmpfs marker, so borrow the
-     * unconfined nksu domain (the policy is loaded by then) and retry.
-     */
-    if (PTR_ERR(f) != -EACCES)
-        return false;
-
-    cred = nksu_rc_cred_get();
-    if (!cred)
-        return false;
-
-    old = override_creds(cred);
-    f = filp_open(path, O_RDONLY, 0);
-    revert_creds(old);
-
-    if (IS_ERR(f))
-        return false;
-    filp_close(f, NULL);
-    return true;
-}
-
-/*
- * Remove the temp dir once every marker has been consumed (or the watcher
- * has given up).  It is a tmpfs directory, so leaving it behind only wastes
- * /dev entries, but the injected rc no longer needs it after boot-completed.
- */
-static void nksu_rc_remove_dir(void)
-{
-    static const char *const files[] = {
-        NKSU_RC_MARK_POST_FS_DATA,
-        NKSU_RC_MARK_SERVICES,
-        NKSU_RC_MARK_BOOT_COMPLETED,
-        NKSU_RC_SCRIPT,
-    };
-    struct cred *cred = nksu_rc_cred_get();
-    const struct cred *old = cred ? override_creds(cred) : NULL;
-    size_t i;
-
-    for (i = 0; i < ARRAY_SIZE(files); i++)
-        nksu_rc_unlink(files[i]);
-    nksu_rc_rmdir(NKSU_RC_DIR);
-
-    if (old)
-        revert_creds(old);
-}
-
-static int nksu_rc_watch_fn(void *data)
-{
-    bool post = false, serv = false, boot = false;
-    int i;
-
-    for (i = 0; i < 900 && !kthread_should_stop(); i++) {
-        if (!post && nksu_rc_marker_seen(NKSU_RC_MARK_POST_FS_DATA)) {
-            post = true;
-            pr_info("nksu: init.rc reached post-fs-data\n");
-            nksu_modules_post_fs_data();
-        }
-
-        if (!serv && nksu_rc_marker_seen(NKSU_RC_MARK_SERVICES)) {
-            serv = true;
-            pr_info("nksu: init.rc reached services\n");
-            nksu_modules_service();
-        }
-
-        if (!boot && nksu_rc_marker_seen(NKSU_RC_MARK_BOOT_COMPLETED)) {
-            boot = true;
-            pr_info("nksu: init.rc reached boot-completed\n");
-        }
-
-        if (post && serv && boot)
-            break;
-
-        msleep(100);
-    }
-
-    nksu_rc_remove_dir();
-
-    return 0;
-}
-
-bool nksu_rc_injected(void)
-{
-    return READ_ONCE(nksu_rc_hooked);
-}
-
 int nksu_init_rc_init(void)
 {
     int ret;
 
-    nksu_getname_kernel = (nksu_getname_kernel_t)nksu_ksym_lookup("getname_kernel");
-    nksu_do_mkdirat = (nksu_do_mkdirat_t)nksu_ksym_lookup("do_mkdirat");
-    nksu_do_unlinkat = (nksu_do_unlinkat_t)nksu_ksym_lookup("do_unlinkat");
-    nksu_do_rmdir = (nksu_do_rmdir_t)nksu_ksym_lookup("do_rmdir");
-
-    if (!nksu_getname_kernel || !nksu_do_mkdirat)
-        pr_warn("nksu: cannot resolve VFS mkdir helpers, using fallback\n");
+    /* The module loader pushes sepolicy.rule through this sink. */
+    ret = nksu_sepolicy_sink_init();
+    if (ret)
+        pr_warn("nksu: cannot create sepolicy sink: %d\n", ret);
 
     ret = hook_save(__NR_read, nksu_sys_read, &nksu_orig_read_sys, "nksu_rc_read");
     if (ret) {
@@ -545,31 +487,12 @@ int nksu_init_rc_init(void)
         return ret;
     }
 
-    nksu_rc_watch_thread = kthread_run(nksu_rc_watch_fn, NULL, "nksu-rc");
-    if (IS_ERR(nksu_rc_watch_thread)) {
-        ret = PTR_ERR(nksu_rc_watch_thread);
-        nksu_rc_watch_thread = NULL;
-        pr_err("nksu: cannot start init.rc watcher: %d\n", ret);
-        return ret;
-    }
-
     return 0;
 }
 
 void nksu_init_rc_exit(void)
 {
-    if (nksu_rc_watch_thread) {
-        kthread_stop(nksu_rc_watch_thread);
-        nksu_rc_watch_thread = NULL;
-    }
-
-    /* Drop the tmpfs dir in case the watcher was stopped before it did. */
-    nksu_rc_remove_dir();
-
-    if (nksu_rc_cred) {
-        put_cred(nksu_rc_cred);
-        nksu_rc_cred = NULL;
-    }
+    nksu_sepolicy_sink_exit();
 
     /*
      * The read/fstat syscall hops are torn down together with the temporary

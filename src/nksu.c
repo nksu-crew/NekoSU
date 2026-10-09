@@ -67,11 +67,6 @@ static const module_component_t feature_components[] = {
         .init = appscan_init,
         .exit = appscan_exit,
     },
-    {
-        .name = "module service",
-        .init = nksu_modules_service,
-        .exit = nksu_modules_exit,
-    },
 #ifdef CONFIG_NKSU_SYSCALL
     {
         .name = "syscall dispatch",
@@ -175,12 +170,6 @@ static int nekosu_init_all_components(void)
     if (ret)
         return ret;
 
-    /*
-     * A late load missed the post-fs-data stage; serve it before the
-     * feature (late_start) components, which include the module service.
-     */
-    nksu_modules_post_fs_data();
-
     ret = nksu_init_feature_components();
     if (ret)
         nksu_exit_selinux_components();
@@ -191,6 +180,7 @@ static int nekosu_init_all_components(void)
 static void nekosu_cleanup_all_components(void)
 {
     nksu_exit_feature_components();
+    nksu_modules_exit();
     nksu_exit_selinux_components();
 }
 

@@ -36,6 +36,11 @@
 #include <linux/string.h>
 #include <linux/errno.h>
 #include <linux/printk.h>
+#include <linux/fs.h>
+#include <linux/file.h>
+#include <linux/proc_fs.h>
+#include <linux/uaccess.h>
+#include <linux/limits.h>
 
 #include <fmac.h>
 
@@ -458,4 +463,124 @@ int sepolicy_apply_rule_text(const char *text)
 			applied, skipped);
 
 	return applied;
+}
+
+/*
+ * Write-only sink that lets the userspace module loader apply a module's
+ * sepolicy.rule.  The loader cannot call the manager-gated ioctl, so it
+ * echoes the rule *path* here and the kernel reads and applies the file in
+ * the loader's (unconfined nksu) context:
+ *
+ *     echo /data/adb/modules/<id>/sepolicy.rule > /proc/nksu/sepolicy
+ */
+#define NKSU_SEPOLICY_TEXT_MAX (128 * 1024)
+
+struct proc_dir_entry *fmac_proc_dir;
+static struct proc_dir_entry *nksu_sepolicy_pde;
+
+static ssize_t nksu_sepolicy_write(struct file *file, const char __user *ubuf,
+				   size_t count, loff_t *ppos)
+{
+	char *path, *p, *text;
+	struct file *f;
+	loff_t pos = 0;
+	ssize_t n;
+	int applied;
+
+	(void)file;
+	(void)ppos;
+
+	if (!count || count > PATH_MAX)
+		return -EINVAL;
+
+	path = kvmalloc(count + 1, GFP_KERNEL);
+	if (!path)
+		return -ENOMEM;
+
+	if (copy_from_user(path, ubuf, count)) {
+		kvfree(path);
+		return -EFAULT;
+	}
+	path[count] = '\0';
+	p = strim(path); /* an `echo` leaves a trailing newline */
+
+	if (!p[0]) {
+		kvfree(path);
+		return count;
+	}
+
+	text = kvmalloc(NKSU_SEPOLICY_TEXT_MAX, GFP_KERNEL);
+	if (!text) {
+		kvfree(path);
+		return -ENOMEM;
+	}
+
+	f = filp_open(p, O_RDONLY, 0);
+	if (IS_ERR(f)) {
+		pr_warn("[selinux]: sepolicy sink: cannot open %s: %ld\n",
+			p, PTR_ERR(f));
+		kvfree(text);
+		kvfree(path);
+		return PTR_ERR(f);
+	}
+
+	n = kernel_read(f, text, NKSU_SEPOLICY_TEXT_MAX - 1, &pos);
+	filp_close(f, NULL);
+	if (n < 0) {
+		pr_warn("[selinux]: sepolicy sink: cannot read %s: %zd\n",
+			p, n);
+		kvfree(text);
+		kvfree(path);
+		return n;
+	}
+	text[n] = '\0';
+
+	applied = sepolicy_apply_rule_text(text);
+	if (applied < 0)
+		pr_warn("[selinux]: sepolicy sink: %s failed: %d\n",
+			p, applied);
+	else
+		pr_info("[selinux]: sepolicy sink: %s: %d statement(s)\n",
+			p, applied);
+
+	kvfree(text);
+	kvfree(path);
+	return (ssize_t)count;
+}
+
+static const struct proc_ops nksu_sepolicy_proc_ops = {
+	.proc_write = nksu_sepolicy_write,
+};
+
+int nksu_sepolicy_sink_init(void)
+{
+	if (nksu_sepolicy_pde)
+		return 0;
+
+	if (!fmac_proc_dir)
+		fmac_proc_dir = proc_mkdir("nksu", NULL);
+	if (!fmac_proc_dir)
+		return -ENOMEM;
+
+	nksu_sepolicy_pde = proc_create("sepolicy", 0200, fmac_proc_dir,
+					&nksu_sepolicy_proc_ops);
+	if (!nksu_sepolicy_pde)
+		return -ENOMEM;
+
+	pr_info("[selinux]: sepolicy sink at /proc/nksu/sepolicy\n");
+	return 0;
+}
+
+void nksu_sepolicy_sink_exit(void)
+{
+	if (!nksu_sepolicy_pde)
+		return;
+
+	remove_proc_entry("sepolicy", fmac_proc_dir);
+	nksu_sepolicy_pde = NULL;
+
+	if (fmac_proc_dir) {
+		remove_proc_entry("nksu", NULL);
+		fmac_proc_dir = NULL;
+	}
 }
