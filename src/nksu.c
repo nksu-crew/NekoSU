@@ -12,6 +12,7 @@
 #include <fmac.h>
 #include "symbol_compat.h"
 #include "nksu.h"
+#include "nksu_module.h"
 
 #ifndef NKSU_GIT_COMMIT
 #define NKSU_GIT_COMMIT "unknown"
@@ -65,6 +66,11 @@ static const module_component_t feature_components[] = {
         .name = "manager scan",
         .init = appscan_init,
         .exit = appscan_exit,
+    },
+    {
+        .name = "module loader",
+        .init = nksu_modules_init,
+        .exit = nksu_modules_exit,
     },
 #ifdef CONFIG_NKSU_SYSCALL
     {
