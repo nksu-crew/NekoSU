@@ -53,6 +53,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/mm.h>
 #include <linux/string.h>
 #include <linux/errno.h>
 #include <linux/fs.h>
@@ -73,7 +74,7 @@
 #define NKSU_MODULE_METAMOUNT "metamount.sh"
 
 /* module paths are bounded; keep the stack frames small */
-#define NKSU_MODULE_PATH_MAX 512
+#define NKSU_MODULE_PATH_MAX 320
 #define NKSU_MODULE_PROP_MAX 4096
 
 /* minimal environment so the shell and scripts have a usable PATH */
@@ -374,15 +375,23 @@ static bool nksu_prop_has_metamodule(const char *text)
 static bool nksu_module_is_metamodule(const char *moddir)
 {
     char path[NKSU_MODULE_PATH_MAX];
-    char buf[NKSU_MODULE_PROP_MAX];
+    char *buf;
+    bool is_meta;
 
     if (nksu_path_join(path, sizeof(path), moddir, NKSU_MODULE_PROP))
         return false;
 
-    if (nksu_read_text(path, buf, sizeof(buf)))
+    buf = kvmalloc(NKSU_MODULE_PROP_MAX, GFP_KERNEL);
+    if (!buf)
         return false;
 
-    return nksu_prop_has_metamodule(buf);
+    if (nksu_read_text(path, buf, NKSU_MODULE_PROP_MAX))
+        is_meta = false;
+    else
+        is_meta = nksu_prop_has_metamodule(buf);
+
+    kvfree(buf);
+    return is_meta;
 }
 
 /*
@@ -558,6 +567,7 @@ size_t nksu_modules_emit_json(char *buf, size_t size)
     struct nksu_module_dir dirs;
     struct nksu_json j = { .buf = buf, .cap = size, .len = 0 };
     const struct cred *old;
+    char *text;
     size_t i;
     size_t ret;
     bool first = true;
@@ -576,12 +586,20 @@ size_t nksu_modules_emit_json(char *buf, size_t size)
         return ret;
     }
 
+    text = kvmalloc(NKSU_MODULE_PROP_MAX, GFP_KERNEL);
+    if (!text) {
+        nksu_json_puts(&j, "[]");
+        ret = j.len < size ? j.len : size - 1;
+        j.buf[ret] = '\0';
+        nksu_module_creds_end(old);
+        return ret;
+    }
+
     nksu_json_putc(&j, '[');
 
     for (i = 0; i < dirs.count; i++) {
         char moddir[NKSU_MODULE_PATH_MAX];
         char proppath[NKSU_MODULE_PATH_MAX];
-        char text[NKSU_MODULE_PROP_MAX];
         char id[64] = { 0 };
         char value[256];
         const char *name = dirs.names[i];
@@ -592,7 +610,7 @@ size_t nksu_modules_emit_json(char *buf, size_t size)
             continue;
 
         if (nksu_path_join(proppath, sizeof(proppath), moddir, NKSU_MODULE_PROP) == 0 &&
-            nksu_read_text(proppath, text, sizeof(text)) == 0) {
+            nksu_read_text(proppath, text, NKSU_MODULE_PROP_MAX) == 0) {
             /* text holds module.prop */
         } else {
             text[0] = '\0';
@@ -645,6 +663,7 @@ size_t nksu_modules_emit_json(char *buf, size_t size)
 
     nksu_json_putc(&j, ']');
 
+    kvfree(text);
     nksu_module_creds_end(old);
 
     if (j.len >= size)

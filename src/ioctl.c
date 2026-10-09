@@ -4,6 +4,7 @@
 #include <linux/version.h>
 #include <linux/capability.h>
 #include <linux/kernel.h>
+#include <linux/mm.h>
 #include <linux/slab.h>
 
 #include "fmac.h"
@@ -140,8 +141,8 @@ static long ioc_sel_add_rule(const void __user *data, unsigned int size)
     cls[63] = '\0';
     perm[63] = '\0';
 
-    return sepolicy_add_rule(src[0] ? src : NULL, tgt[0] ? tgt : NULL, cls[0] ? cls : NULL,
-                             perm[0] ? perm : NULL, effect, (bool)invert);
+    return sepolicy_add_rule(src[0] ? src : NULL, tgt[0] ? tgt : NULL, cls[0] ? cls : NULL, perm[0] ? perm : NULL,
+                             effect, (bool)invert);
 }
 
 static long ioc_set_profile(const void __user *data, unsigned int size)
