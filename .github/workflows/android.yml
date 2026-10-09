@@ -35,10 +35,6 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Clone ncore
-      run: |
-        git clone --recursive https://github.com/aqnya/ncore.git userspace/ncore
-
     - name: Set up JDK 25
       uses: actions/setup-java@v6
       with:
@@ -74,33 +70,56 @@ jobs:
         find lkm-artifacts -name '*_nksu.ko' -exec cp {} manager/app/src/main/assets/ \;
         ls -la manager/app/src/main/assets/
 
-    - name: Install bazelisk
+    - name: Download latest ncore CI artifact
       env:
-        BAZELISK_VERSION: 'v1.29.0'
+        # A token with read access to aqnya/ncore Actions is required: the
+        # workflow-scoped GITHUB_TOKEN cannot see another repository's
+        # artifacts.  Set the NCORE_TOKEN secret to a classic PAT with `repo`
+        # scope, or a fine-grained PAT with "Actions: read" on aqnya/ncore.
+        GH_TOKEN: ${{ secrets.NCORE_TOKEN }}
       run: |
-        set -euxo pipefail
-        case "$(uname -m)" in
-          x86_64|amd64)  arch=amd64 ;;
-          aarch64|arm64) arch=arm64 ;;
-          *) echo "no bazelisk release for $(uname -m)" >&2; exit 1 ;;
-        esac
-        url="https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/bazelisk-linux-${arch}"
-        install_dir="$HOME/.local/bin"
-        mkdir -p "$install_dir"
-        curl -fsSL --retry 3 --retry-connrefused --retry-delay 2 \
-          -o "$install_dir/bazelisk" "$url"
-        chmod 0755 "$install_dir/bazelisk"
-        ln -sf bazelisk "$install_dir/bazel"
-        echo "$install_dir" >> "$GITHUB_PATH"
+        set -euo pipefail
 
-    - name: Build ncore (arm64-v8a)
-      working-directory: userspace/ncore
-      run: |
-        bazel build //:ncore --config=android
+        if [ -z "${GH_TOKEN:-}" ]; then
+          echo "::error::NCORE_TOKEN secret is not set; a token with read access to aqnya/ncore Actions is required"
+          exit 1
+        fi
 
-        mkdir -p ../../manager/app/src/main/jniLibs/arm64-v8a
-        cp bazel-bin/ncore ../../manager/app/src/main/jniLibs/arm64-v8a/libncore.so
-        file ../../manager/app/src/main/jniLibs/arm64-v8a/libncore.so
+        repo="aqnya/ncore"
+        workflow="android-arm64.yml"
+        artifact="ncore-android-arm64"
+
+        echo "::group::Locating the latest successful ncore CI run"
+        run_id="$(gh run list \
+          --repo "$repo" \
+          --workflow "$workflow" \
+          --branch main \
+          --status success \
+          --limit 1 \
+          --json databaseId \
+          --jq '.[0].databaseId')"
+        if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
+          echo "::error::no successful '$workflow' run found in $repo"
+          exit 1
+        fi
+        echo "latest successful run: $run_id"
+        echo "::endgroup::"
+
+        rm -rf ncore-artifact
+        gh run download "$run_id" \
+          --repo "$repo" \
+          --name "$artifact" \
+          --dir ncore-artifact
+
+        src="$(find ncore-artifact -type f -name ncore | head -n1)"
+        if [ -z "$src" ]; then
+          echo "::error::artifact '$artifact' did not contain a 'ncore' binary"
+          exit 1
+        fi
+
+        mkdir -p manager/app/src/main/jniLibs/arm64-v8a
+        cp "$src" manager/app/src/main/jniLibs/arm64-v8a/libncore.so
+        file manager/app/src/main/jniLibs/arm64-v8a/libncore.so
 
     - name: Copy install script to assets
       run: |
