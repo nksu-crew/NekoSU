@@ -234,6 +234,8 @@ static long fmac_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
         return ioc_set_profile(data, ioc.size);
     case IOC_LIST_MODULES:
         return ioc_list_modules((void __user *)data, ioc.size);
+    case IOC_SET_SEPOLICY:
+        return sepolicy_apply_batch(data, ioc.size);
     default:
         return -ENOTTY;
     }

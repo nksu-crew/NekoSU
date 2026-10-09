@@ -18,7 +18,6 @@
 #include "selinux/selinux.h"
 #include "selinux/rule.h"
 #include "selinux/policy.h"
-#include "selinux/domain.h"
 
 #include "klog.h"
 #include "privilege.h"

@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * SELinux rule manipulation — add allow/deny/xperm rules,
- * type-attribute associations, and extended permissions (ioctls).
+ * SELinux rule manipulation — add allow/deny/xperm rules, type rules, type
+ * state and type-attribute associations to the running policy.
  *
  * Everything operates on the working copy installed by
- * sepolicy_dup_and_apply(), so the original policy stays untouched
- * and we can always restore it.
+ * sepolicy_dup_and_apply(), so the original policy stays untouched.  The rule
+ * semantics and coverage follow KernelSU's sepolicy engine (allow/deny,
+ * auditallow/dontaudit, ioctl xperms, type/attribute, permissive/enforce,
+ * type_transition/change/member and genfscon), reimplemented with NekoSU's
+ * helpers and naming.
  *
  * Locking matches security/selinux/ss/services.c:
  *   - public functions grab selinux_state.policy_mutex
@@ -14,11 +17,14 @@
  */
 
 #include <linux/string.h>
+#include <linux/stringhash.h>
 #include <linux/errno.h>
 #include <linux/version.h>
 #include <linux/slab.h>
+#include <linux/kernel.h>
 #include <linux/mutex.h>
 #include <linux/rcupdate.h>
+#include <linux/sort.h>
 #include <fmac.h>
 
 #include "ss/policydb.h"
@@ -27,6 +33,7 @@
 #include "ss/symtab.h"
 #include "ss/hashtab.h"
 #include "ss/constraint.h"
+#include "ss/ebitmap.h"
 #include "avc.h"
 #include "avc_ss.h"
 #include "xfrm.h"
@@ -81,429 +88,805 @@ void avc_reset(void)
 	selinux_xfrm_notify_policyload();
 }
 
-/* collect every concrete type (skip attributes) */
-static int collect_concrete_types(struct policydb *pdb,
-				  struct type_datum ***out)
+/* ---- low-level avtab helpers ---- */
+
+static struct avtab_node *rule_get_avtab_node(struct policydb *db,
+					      struct avtab_key *key,
+					      struct avtab_extended_perms *xperms)
 {
-	struct hashtab_node *node;
-	struct type_datum **arr;
-	int count = 0, i = 0;
+	struct avtab_node *node;
 
-	hashtab_for_each(pdb->p_types.table, node) {
-		struct type_datum *t = node->datum;
-		if (!t->attribute)
-			count++;
-	}
+	/* AVTAB_XPERMS entries are not necessarily unique */
+	if (key->specified & AVTAB_XPERMS) {
+		bool match = false;
 
-	if (!count) {
-		*out = NULL;
-		return 0;
-	}
-
-	arr = kmalloc_array(count, sizeof(*arr), GFP_KERNEL);
-	if (!arr)
-		return -ENOMEM;
-
-	hashtab_for_each(pdb->p_types.table, node) {
-		struct type_datum *t = node->datum;
-		if (!t->attribute && i < count)
-			arr[i++] = t;
-	}
-
-	*out = arr;
-	return i;
-}
-
-/* collect every class */
-static int collect_classes(struct policydb *pdb,
-			   struct class_datum ***out)
-{
-	struct hashtab_node *node;
-	struct class_datum **arr;
-	int count = 0, i = 0;
-
-	hashtab_for_each(pdb->p_classes.table, node)
-		count++;
-
-	if (!count) {
-		*out = NULL;
-		return 0;
-	}
-
-	arr = kmalloc_array(count, sizeof(*arr), GFP_KERNEL);
-	if (!arr)
-		return -ENOMEM;
-
-	hashtab_for_each(pdb->p_classes.table, node) {
-		if (i < count)
-			arr[i++] = node->datum;
-	}
-
-	*out = arr;
-	return i;
-}
-
-/* insert (or update) a single avtab entry */
-static void avtab_apply_one(struct policydb *pdb,
-			    struct type_datum *src,
-			    struct type_datum *tgt,
-			    struct class_datum *cls,
-			    int perm_value, int effect, bool invert)
-{
-	struct avtab_key key;
-	struct avtab_node *av_node;
-	struct avtab_datum datum;
-
-	key.source_type = src->value;
-	key.target_type = tgt->value;
-	key.target_class = cls->value;
-	key.specified = effect;
-
-	av_node = avtab_search_node(&pdb->te_avtab, &key);
-	if (!av_node) {
-		memset(&datum, 0, sizeof(datum));
-		datum.u.data = (effect == AVTAB_AUDITDENY) ? ~0U : 0U;
-		av_node = avtab_insert_nonunique(&pdb->te_avtab, &key, &datum);
-		if (av_node)
-			pdb->len += sizeof(struct avtab_key) +
-				    sizeof(struct avtab_datum);
-	}
-
-	if (av_node) {
-		if (perm_value) {
-			if (invert)
-				av_node->datum.u.data &=
-					~(1U << (perm_value - 1));
-			else
-				av_node->datum.u.data |=
-					(1U << (perm_value - 1));
-		} else {
-			av_node->datum.u.data = invert ? 0U : ~0U;
-		}
-	}
-}
-
-/*
- * Low-level rule writer.  NULL for src/tgt/cls means wildcard —
- * we expand it to every concrete type / every class.
- */
-static void __sepolicy_add_rule(struct policydb *pdb,
-				  struct type_datum *src,
-				  struct type_datum *tgt,
-				  struct class_datum *cls,
-				  int perm_value, int effect, bool invert)
-{
-	struct type_datum **types = NULL;
-	struct class_datum **classes = NULL;
-	int ntypes = 0, nclasses = 0;
-	int src_n, tgt_n, cls_n;
-	int i, j, k;
-
-	/* fast path: all three are specific */
-	if (src && tgt && cls) {
-		avtab_apply_one(pdb, src, tgt, cls, perm_value,
-				effect, invert);
-		return;
-	}
-
-	/* gather the sets we need to expand */
-	if (!src || !tgt) {
-		ntypes = collect_concrete_types(pdb, &types);
-		if (ntypes < 0)
-			return;
-	}
-	if (!cls) {
-		nclasses = collect_classes(pdb, &classes);
-		if (nclasses < 0) {
-			kfree(types);
-			return;
-		}
-	}
-
-	src_n = src ? 1 : ntypes;
-	tgt_n = tgt ? 1 : ntypes;
-	cls_n = cls ? 1 : nclasses;
-
-	for (i = 0; i < src_n; i++) {
-		struct type_datum *s = src ? src : types[i];
-		for (j = 0; j < tgt_n; j++) {
-			struct type_datum *t = tgt ? tgt : types[j];
-			if (cls) {
-				avtab_apply_one(pdb, s, t, cls,
-						perm_value, effect, invert);
-			} else {
-				for (k = 0; k < cls_n; k++)
-					avtab_apply_one(pdb, s, t,
-							classes[k],
-							perm_value, effect,
-							invert);
+		node = avtab_search_node(&db->te_avtab, key);
+		while (node) {
+			if (node->datum.u.xperms->specified == xperms->specified &&
+			    node->datum.u.xperms->driver == xperms->driver) {
+				match = true;
+				break;
 			}
+			node = avtab_search_node_next(node, key->specified);
 		}
+		if (!match)
+			node = NULL;
+	} else {
+		node = avtab_search_node(&db->te_avtab, key);
 	}
 
-	kfree(types);
-	kfree(classes);
-}
+	if (!node) {
+		struct avtab_datum datum = {};
 
-/* set a range of permission bits (for ioctl xperms) */
-static void xperms_set_range(u32 *perms, u32 low, u32 high, bool invert)
-{
-	u32 i;
-
-	if (low == 0 && high == 255 && !invert) {
-		memset(perms, 0xff, 8 * sizeof(u32));
-		return;
-	}
-	for (i = low; i <= high; i++) {
-		if (invert)
-			perms[i / 32] &= ~(1U << (i % 32));
+		if (key->specified & AVTAB_XPERMS)
+			datum.u.xperms = xperms;
 		else
-			perms[i / 32] |= (1U << (i % 32));
+			datum.u.data = key->specified == AVTAB_AUDITDENY ? ~0U : 0U;
+
+		node = avtab_insert_nonunique(&db->te_avtab, key, &datum);
+		if (!node)
+			return NULL;
+
+		db->len += sizeof(struct avtab_key) + sizeof(struct avtab_datum);
+		if (key->specified & AVTAB_XPERMS)
+			db->len += sizeof(xperms->specified) + sizeof(xperms->driver) +
+				   sizeof(xperms->perms.p);
 	}
+
+	return node;
 }
 
-/*
- * Write extended permissions (xperms).  Same wildcard expansion
- * as the regular rule writer — NULL src/tgt/cls means "all".
- */
-static void __sepolicy_add_xperm(struct policydb *db,
-				   struct type_datum *src,
-				   struct type_datum *tgt,
-				   struct class_datum *cls,
-				   u16 low, u16 high,
-				   int effect, bool invert)
+static bool rule_node_redundant(struct avtab_node *node)
 {
-	struct hashtab_node *node;
-	struct avtab_key key;
-	struct avtab_node *av_node;
-	struct avtab_extended_perms *x, *xp;
-	struct avtab_datum datum;
-	u8 d_low, d_high;
-
-	/* expand wildcards by recursing */
-	if (!src) {
-		hashtab_for_each(db->p_types.table, node) {
-			struct type_datum *t = (struct type_datum *)node->datum;
-			if (!t->attribute)
-				__sepolicy_add_xperm(db, t, tgt, cls,
-						       low, high, effect,
-						       invert);
-		}
-		return;
-	}
-	if (!tgt) {
-		hashtab_for_each(db->p_types.table, node) {
-			struct type_datum *t = (struct type_datum *)node->datum;
-			if (!t->attribute)
-				__sepolicy_add_xperm(db, src, t, cls,
-						       low, high, effect,
-						       invert);
-		}
-		return;
-	}
-	if (!cls) {
-		hashtab_for_each(db->p_classes.table, node) {
-			__sepolicy_add_xperm(db, src, tgt,
-					       (struct class_datum *)node->datum,
-					       low, high, effect, invert);
-		}
-		return;
-	}
-
-	d_low  = (u8)(low >> 8);
-	d_high = (u8)(high >> 8);
-
-	key.source_type = src->value;
-	key.target_type = tgt->value;
-	key.target_class = cls->value;
-	key.specified = effect;
-
-	av_node = avtab_search_node(&db->te_avtab, &key);
-	if (!av_node) {
-		/* no existing entry, allocate a new one */
-		xp = kzalloc(sizeof(*xp), GFP_KERNEL);
-		if (!xp)
-			return;
-
-		if (d_low != d_high) {
-			xp->specified = AVTAB_XPERMS_IOCTLDRIVER;
-			xp->driver = 0;
-			xperms_set_range(xp->perms.p, d_low, d_high, invert);
-		} else {
-			xp->specified = AVTAB_XPERMS_IOCTLFUNCTION;
-			xp->driver = d_low;
-			xperms_set_range(xp->perms.p,
-					 (u8)(low & 0xFF),
-					 (u8)(high & 0xFF), invert);
-		}
-
-		memset(&datum, 0, sizeof(datum));
-		datum.u.xperms = xp;
-		av_node = avtab_insert_nonunique(&db->te_avtab, &key, &datum);
-		if (!av_node) {
-			kfree(xp);
-			return;
-		}
-		db->len += sizeof(struct avtab_key) +
-			   sizeof(struct avtab_datum) +
-			   sizeof(u8) + sizeof(u8) + sizeof(u32) * 8;
-		return;
-	}
-
-	/* merge into existing node */
-	x = av_node->datum.u.xperms;
-	if (!x)
-		return;
-
-	if (x->specified == AVTAB_XPERMS_IOCTLDRIVER) {
-		xperms_set_range(x->perms.p, d_low, d_high, invert);
-	} else if (x->specified == AVTAB_XPERMS_IOCTLFUNCTION) {
-		if (x->driver == d_low) {
-			xperms_set_range(x->perms.p,
-					 (u8)(low & 0xFF),
-					 (u8)(high & 0xFF), invert);
-		} else {
-			/*
-			 * We already had a single-driver entry, now we're
-			 * adding a different driver — promote to multi-driver.
-			 */
-			struct avtab_extended_perms *xnew;
-
-			xnew = kzalloc(sizeof(*xnew), GFP_KERNEL);
-			if (!xnew)
-				return;
-
-			xnew->specified = AVTAB_XPERMS_IOCTLDRIVER;
-			xnew->driver = 0;
-			xnew->perms.p[x->driver / 32] |=
-				(1U << (x->driver % 32));
-			xperms_set_range(xnew->perms.p, d_low, d_high, invert);
-
-			kfree(x);
-			av_node->datum.u.xperms = xnew;
-		}
-	}
+	if (node->key.specified & AVTAB_XPERMS)
+		return node->datum.u.xperms == NULL;
+	if (!(node->key.specified & AVTAB_AV))
+		return false;
+	if (node->key.specified & AVTAB_AUDITDENY)
+		return node->datum.u.data == ~0U;
+	return node->datum.u.data == 0U;
 }
 
-/* Public API */
-
-int sepolicy_add_rule(const char *sname, const char *tname,
-		      const char *cname, const char *pname,
-		      int effect, bool invert)
+static bool rule_remove_avtab_node(struct policydb *db, struct avtab_node *node)
 {
-	struct policydb *pdb;
+	int shrink = sizeof(node->key.source_type) + sizeof(node->key.target_type) +
+		     sizeof(node->key.target_class) + sizeof(node->key.specified);
+	struct avtab removed = {};
+	struct avtab_node *n, *prev;
+	int i;
+
+	if (avtab_alloc(&removed, 1) < 0)
+		return false;
+
+	for (i = 0; i < db->te_avtab.nslot; i++) {
+		prev = NULL;
+		for (n = db->te_avtab.htable[i]; n; prev = n, n = n->next) {
+			if (n != node)
+				continue;
+
+			if (prev)
+				prev->next = n->next;
+			else
+				db->te_avtab.htable[i] = n->next;
+
+			if (db->te_avtab.nel > 0)
+				db->te_avtab.nel--;
+
+			if (n->key.specified & AVTAB_XPERMS)
+				shrink += sizeof(n->datum.u.xperms->specified) +
+					  sizeof(n->datum.u.xperms->driver) +
+					  sizeof(n->datum.u.xperms->perms.p);
+			else
+				shrink += sizeof(n->datum.u.data);
+
+			n->next = NULL;
+			removed.htable[0] = n;
+			removed.nel = 1;
+			avtab_destroy(&removed);
+			if (db->len >= (unsigned)shrink)
+				db->len -= shrink;
+			return true;
+		}
+	}
+
+	avtab_destroy(&removed);
+	return false;
+}
+
+/* invert is adding rules for auditdeny; in other cases it removes rules */
+#define rule_strip_av(effect, invert) ((effect == AVTAB_AUDITDENY) == !(invert))
+
+#define for_each_htable(htab, cur)                       \
+	for (int _i = 0; _i < (htab).size; _i++)         \
+		for (cur = (htab).htable[_i]; cur; cur = cur->next)
+
+static bool rule_add_raw(struct policydb *db, struct type_datum *src,
+			 struct type_datum *tgt, struct class_datum *cls,
+			 struct perm_datum *perm, int effect, bool invert)
+{
+	bool success = true;
+
+	if (src == NULL) {
+		struct hashtab_node *node;
+
+		for_each_htable(db->p_types.table, node) {
+			struct type_datum *type = node->datum;
+
+			if (!rule_strip_av(effect, invert) && !type->attribute)
+				continue;
+			success &= rule_add_raw(db, type, tgt, cls, perm, effect, invert);
+		}
+	} else if (tgt == NULL) {
+		struct hashtab_node *node;
+
+		for_each_htable(db->p_types.table, node) {
+			struct type_datum *type = node->datum;
+
+			if (!rule_strip_av(effect, invert) && !type->attribute)
+				continue;
+			success &= rule_add_raw(db, src, type, cls, perm, effect, invert);
+		}
+	} else if (cls == NULL) {
+		struct hashtab_node *node;
+
+		for_each_htable(db->p_classes.table, node) {
+			success &= rule_add_raw(db, src, tgt, node->datum, perm, effect, invert);
+		}
+	} else {
+		struct avtab_key key;
+		struct avtab_node *node;
+
+		key.source_type = src->value;
+		key.target_type = tgt->value;
+		key.target_class = cls->value;
+		key.specified = effect;
+
+		if (invert && effect != AVTAB_AUDITDENY) {
+			node = avtab_search_node(&db->te_avtab, &key);
+			if (!node)
+				return true;
+		} else {
+			node = rule_get_avtab_node(db, &key, NULL);
+			if (!node)
+				return false;
+		}
+
+		if (invert) {
+			if (perm)
+				node->datum.u.data &= ~(1U << (perm->value - 1));
+			else
+				node->datum.u.data = 0U;
+		} else {
+			if (perm)
+				node->datum.u.data |= 1U << (perm->value - 1);
+			else
+				node->datum.u.data = ~0U;
+		}
+
+		if (rule_node_redundant(node))
+			return rule_remove_avtab_node(db, node);
+	}
+
+	return success;
+}
+
+static bool rule_add(struct policydb *db, const char *s, const char *t,
+		     const char *c, const char *p, int effect, bool invert)
+{
 	struct type_datum *src = NULL, *tgt = NULL;
 	struct class_datum *cls = NULL;
 	struct perm_datum *perm = NULL;
-	int ret = 0;
 
-	mutex_lock(&selinux_state.policy_mutex);
-
-	pdb = fmac_get_pdb();
-	if (!pdb) {
-		ret = -ENOENT;
-		goto out;
+	if (s && !(src = symtab_search(&db->p_types, s))) {
+		pr_info("[selinux]: source type '%s' not found\n", s);
+		return false;
 	}
-
-	if (sname && *sname) {
-		src = symtab_search(&pdb->symtab[SYM_TYPES], sname);
-		if (!src) {
-			pr_warn("[selinux]: source type '%s' not found\n",
-				sname);
-			ret = -ENOENT;
-			goto out;
-		}
+	if (t && !(tgt = symtab_search(&db->p_types, t))) {
+		pr_info("[selinux]: target type '%s' not found\n", t);
+		return false;
 	}
-
-	if (tname && *tname) {
-		tgt = symtab_search(&pdb->symtab[SYM_TYPES], tname);
-		if (!tgt) {
-			pr_warn("[selinux]: target type '%s' not found\n",
-				tname);
-			ret = -ENOENT;
-			goto out;
-		}
+	if (c && !(cls = symtab_search(&db->p_classes, c))) {
+		pr_info("[selinux]: class '%s' not found\n", c);
+		return false;
 	}
-
-	if (cname && *cname) {
-		cls = symtab_search(&pdb->symtab[SYM_CLASSES], cname);
-		if (!cls) {
-			pr_warn("[selinux]: class '%s' not found\n", cname);
-			ret = -ENOENT;
-			goto out;
-		}
-	}
-
-	if (pname && *pname) {
-		if (!cls) {
-			pr_warn("[selinux]: perm specified without class\n");
-			ret = -EINVAL;
-			goto out;
-		}
-		perm = symtab_search(&cls->permissions, pname);
+	if (p) {
+		if (!cls)
+			return false;
+		perm = symtab_search(&cls->permissions, p);
 		if (!perm && cls->comdatum)
-			perm = symtab_search(&cls->comdatum->permissions,
-					     pname);
+			perm = symtab_search(&cls->comdatum->permissions, p);
 		if (!perm) {
-			pr_warn("[selinux]: perm '%s' not found in class '%s'\n",
-				pname, cname);
-			ret = -ENOENT;
-			goto out;
+			pr_info("[selinux]: perm '%s' not found in class '%s'\n", p, c);
+			return false;
 		}
 	}
 
-	__sepolicy_add_rule(pdb, src, tgt, cls,
-			      perm ? (int)perm->value : 0,
-			      effect, invert);
-out:
-	mutex_unlock(&selinux_state.policy_mutex);
-	if (ret == 0)
+	return rule_add_raw(db, src, tgt, cls, perm, effect, invert);
+}
+
+/* ---- xperms ---- */
+
+#define ioctl_driver(x) ((x) >> 8 & 0xFF)
+#define ioctl_func(x) ((x) & 0xFF)
+#define xperm_set(x, p) ((p)[(x) >> 5] |= (1 << ((x) & 0x1f)))
+#define xperm_clear(x, p) ((p)[(x) >> 5] &= ~(1 << ((x) & 0x1f)))
+
+static void rule_add_xperm_raw(struct policydb *db, struct type_datum *src,
+			       struct type_datum *tgt, struct class_datum *cls,
+			       u16 low, u16 high, int effect, bool invert)
+{
+	if (src == NULL) {
+		struct hashtab_node *node;
+
+		for_each_htable(db->p_types.table, node) {
+			struct type_datum *type = node->datum;
+
+			if (type->attribute)
+				rule_add_xperm_raw(db, type, tgt, cls, low, high, effect, invert);
+		}
+	} else if (tgt == NULL) {
+		struct hashtab_node *node;
+
+		for_each_htable(db->p_types.table, node) {
+			struct type_datum *type = node->datum;
+
+			if (type->attribute)
+				rule_add_xperm_raw(db, src, type, cls, low, high, effect, invert);
+		}
+	} else if (cls == NULL) {
+		struct hashtab_node *node;
+
+		for_each_htable(db->p_classes.table, node)
+			rule_add_xperm_raw(db, src, tgt, node->datum, low, high, effect, invert);
+	} else {
+		struct avtab_extended_perms xperms;
+		struct avtab_key key;
+		struct avtab_node *node;
+		int i;
+
+		key.source_type = src->value;
+		key.target_type = tgt->value;
+		key.target_class = cls->value;
+		key.specified = effect;
+
+		memset(&xperms, 0, sizeof(xperms));
+		if (ioctl_driver(low) != ioctl_driver(high)) {
+			xperms.specified = AVTAB_XPERMS_IOCTLDRIVER;
+			xperms.driver = 0;
+		} else {
+			xperms.specified = AVTAB_XPERMS_IOCTLFUNCTION;
+			xperms.driver = ioctl_driver(low);
+		}
+
+		if (xperms.specified == AVTAB_XPERMS_IOCTLDRIVER) {
+			for (i = ioctl_driver(low); i <= ioctl_driver(high); ++i) {
+				if (invert)
+					xperm_clear(i, xperms.perms.p);
+				else
+					xperm_set(i, xperms.perms.p);
+			}
+		} else {
+			for (i = ioctl_func(low); i <= ioctl_func(high); ++i) {
+				if (invert)
+					xperm_clear(i, xperms.perms.p);
+				else
+					xperm_set(i, xperms.perms.p);
+			}
+		}
+
+		node = rule_get_avtab_node(db, &key, &xperms);
+		if (!node) {
+			pr_warn("[selinux]: xperm node not found\n");
+			return;
+		}
+
+		for (i = 0; i < ARRAY_SIZE(xperms.perms.p); i++)
+			node->datum.u.xperms->perms.p[i] |= xperms.perms.p[i];
+	}
+}
+
+static bool rule_add_xperm(struct policydb *db, const char *s, const char *t,
+			   const char *c, const char *range, int effect, bool invert)
+{
+	struct type_datum *src = NULL, *tgt = NULL;
+	struct class_datum *cls = NULL;
+	u16 low, high;
+
+	if (s && !(src = symtab_search(&db->p_types, s))) {
+		pr_info("[selinux]: source type '%s' not found\n", s);
+		return false;
+	}
+	if (t && !(tgt = symtab_search(&db->p_types, t))) {
+		pr_info("[selinux]: target type '%s' not found\n", t);
+		return false;
+	}
+	if (c && !(cls = symtab_search(&db->p_classes, c))) {
+		pr_info("[selinux]: class '%s' not found\n", c);
+		return false;
+	}
+
+	if (range && *range) {
+		if (strchr(range, '-')) {
+			if (sscanf(range, "0x%hx-0x%hx", &low, &high) != 2 &&
+			    sscanf(range, "%hx-%hx", &low, &high) != 2)
+				return false;
+		} else {
+			if (sscanf(range, "0x%hx", &low) != 1 &&
+			    sscanf(range, "%hx", &low) != 1)
+				return false;
+			high = low;
+		}
+	} else {
+		low = 0;
+		high = 0xFFFF;
+	}
+
+	rule_add_xperm_raw(db, src, tgt, cls, low, high, effect, invert);
+	return true;
+}
+
+/* ---- type rules and filename transitions ---- */
+
+static bool rule_add_type(struct policydb *db, const char *s, const char *t,
+			  const char *c, const char *d, int effect)
+{
+	struct type_datum *src, *tgt, *def;
+	struct class_datum *cls;
+	struct avtab_key key;
+	struct avtab_node *node;
+
+	if (!(src = symtab_search(&db->p_types, s)))
+		return false;
+	if (!(tgt = symtab_search(&db->p_types, t)))
+		return false;
+	if (!(cls = symtab_search(&db->p_classes, c)))
+		return false;
+	if (!(def = symtab_search(&db->p_types, d)))
+		return false;
+
+	key.source_type = src->value;
+	key.target_type = tgt->value;
+	key.target_class = cls->value;
+	key.specified = effect;
+
+	node = rule_get_avtab_node(db, &key, NULL);
+	if (!node)
+		return false;
+	node->datum.u.data = def->value;
+	return true;
+}
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
+static u32 filenametr_hash(const void *k)
+{
+	const struct filename_trans_key *ft = k;
+	unsigned long hash = ft->ttype ^ ft->tclass;
+	unsigned int i = 0;
+	unsigned char focus;
+
+	while ((focus = ft->name[i++]))
+		hash = partial_name_hash(focus, hash);
+	return hash;
+}
+
+static int filenametr_cmp(const void *k1, const void *k2)
+{
+	const struct filename_trans_key *a = k1, *b = k2;
+	int v = a->ttype - b->ttype;
+
+	if (!v)
+		v = a->tclass - b->tclass;
+	if (!v)
+		v = strcmp(a->name, b->name);
+	return v;
+}
+
+static const struct hashtab_key_params filenametr_key_params = {
+	.hash = filenametr_hash,
+	.cmp = filenametr_cmp,
+};
+#endif
+
+static bool rule_add_filename_trans(struct policydb *db, const char *s,
+				    const char *t, const char *c, const char *d,
+				    const char *o)
+{
+	struct type_datum *src, *tgt, *def;
+	struct class_datum *cls;
+	struct filename_trans_key key;
+	struct filename_trans_key *new_key = NULL;
+	struct filename_trans_datum *last = NULL, *trans;
+	int rc;
+
+	if (!(src = symtab_search(&db->p_types, s)))
+		return false;
+	if (!(tgt = symtab_search(&db->p_types, t)))
+		return false;
+	if (!(cls = symtab_search(&db->p_classes, c)))
+		return false;
+	if (!(def = symtab_search(&db->p_types, d)))
+		return false;
+
+	key.ttype = tgt->value;
+	key.tclass = cls->value;
+	key.name = (char *)o;
+
+	trans = policydb_filenametr_search(db, &key);
+	while (trans) {
+		if (ebitmap_get_bit(&trans->stypes, src->value - 1)) {
+			trans->otype = def->value;
+			return true;
+		}
+		if (trans->otype == def->value)
+			break;
+		last = trans;
+		trans = trans->next;
+	}
+
+	if (trans == NULL) {
+		trans = kcalloc(1, sizeof(*trans), GFP_KERNEL);
+		if (!trans)
+			return false;
+
+		new_key = kzalloc(sizeof(*new_key), GFP_KERNEL);
+		if (!new_key)
+			goto free_trans;
+
+		*new_key = key;
+		new_key->name = kstrdup(key.name, GFP_KERNEL);
+		if (!new_key->name)
+			goto free_key;
+
+		trans->next = last;
+		trans->otype = def->value;
+		rc = hashtab_insert(&db->filename_trans, new_key, trans, filenametr_key_params);
+		if (rc)
+			goto free_name;
+	}
+
+	db->compat_filename_trans_count++;
+	return ebitmap_set_bit(&trans->stypes, src->value - 1, 1) == 0;
+
+free_name:
+	kfree(new_key->name);
+free_key:
+	kfree(new_key);
+free_trans:
+	kfree(trans);
+	return false;
+}
+
+/* NekoSU does not implement genfscon yet; keep the call a no-op. */
+static bool rule_add_genfscon(struct policydb *db, const char *fs_name,
+			      const char *path, const char *ctx)
+{
+	return false;
+}
+
+/* ---- type / attribute / type state ---- */
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+#define nksu_kvrealloc(p, new_size, _old_size) kvrealloc(p, new_size, GFP_KERNEL)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
+#define nksu_kvrealloc(p, new_size, old_size) kvrealloc(p, old_size, new_size, GFP_KERNEL)
+#else
+static void *nksu_kvrealloc_compat(const void *p, size_t oldsize, size_t newsize, gfp_t flags)
+{
+	void *newp;
+
+	if (oldsize >= newsize)
+		return (void *)p;
+	newp = kvmalloc(newsize, flags);
+	if (!newp)
+		return NULL;
+	memcpy(newp, p, oldsize);
+	kvfree(p);
+	return newp;
+}
+#define nksu_kvrealloc(p, new_size, old_size) nksu_kvrealloc_compat(p, old_size, new_size, GFP_KERNEL)
+#endif
+
+static bool rule_add_type_datum(struct policydb *db, const char *type_name, bool attr)
+{
+	struct type_datum *type = symtab_search(&db->p_types, type_name);
+	u32 value;
+	char *key;
+	int i;
+
+	if (type)
+		return true;
+
+	value = ++db->p_types.nprim;
+	type = kzalloc(sizeof(struct type_datum), GFP_KERNEL);
+	if (!type)
+		return false;
+
+	type->primary = 1;
+	type->value = value;
+	type->attribute = attr;
+
+	key = kstrdup(type_name, GFP_KERNEL);
+	if (!key) {
+		kfree(type);
+		return false;
+	}
+
+	if (symtab_insert(&db->p_types, key, type)) {
+		kfree(key);
+		kfree(type);
+		return false;
+	}
+
+	db->type_attr_map_array = nksu_kvrealloc(db->type_attr_map_array,
+						 value * sizeof(struct ebitmap),
+						 (value - 1) * sizeof(struct ebitmap));
+	db->type_val_to_struct = nksu_kvrealloc(db->type_val_to_struct,
+						sizeof(*db->type_val_to_struct) * value,
+						sizeof(*db->type_val_to_struct) * (value - 1));
+	db->sym_val_to_name[SYM_TYPES] = nksu_kvrealloc(db->sym_val_to_name[SYM_TYPES],
+							sizeof(char *) * value,
+							sizeof(char *) * (value - 1));
+	if (!db->type_attr_map_array || !db->type_val_to_struct ||
+	    !db->sym_val_to_name[SYM_TYPES])
+		return false;
+
+	ebitmap_init(&db->type_attr_map_array[value - 1]);
+	ebitmap_set_bit(&db->type_attr_map_array[value - 1], value - 1, 1);
+	db->type_val_to_struct[value - 1] = type;
+	db->sym_val_to_name[SYM_TYPES][value - 1] = key;
+
+	for (i = 0; i < db->p_roles.nprim; ++i)
+		ebitmap_set_bit(&db->role_val_to_struct[i]->types, value - 1, 1);
+
+	return true;
+}
+
+static bool rule_set_type_state(struct policydb *db, const char *type_name, bool permissive)
+{
+	struct type_datum *type;
+
+	if (type_name == NULL || !*type_name) {
+		struct hashtab_node *node;
+
+		for_each_htable(db->p_types.table, node) {
+			type = node->datum;
+			ebitmap_set_bit(&db->permissive_map, type->value, permissive);
+		}
+		return true;
+	}
+
+	type = symtab_search(&db->p_types, type_name);
+	if (!type) {
+		pr_info("[selinux]: type '%s' not found\n", type_name);
+		return false;
+	}
+	return ebitmap_set_bit(&db->permissive_map, type->value, permissive) == 0;
+}
+
+static void rule_add_typeattribute_raw(struct policydb *db, struct type_datum *type,
+				       struct type_datum *attr)
+{
+	struct ebitmap *sattr = &db->type_attr_map_array[type->value - 1];
+	struct hashtab_node *node;
+	struct constraint_node *n;
+	struct constraint_expr *e;
+
+	ebitmap_set_bit(sattr, attr->value - 1, 1);
+
+	for_each_htable(db->p_classes.table, node) {
+		struct class_datum *cls = node->datum;
+
+		for (n = cls->constraints; n; n = n->next) {
+			for (e = n->expr; e; e = e->next) {
+				if (e->expr_type == CEXPR_NAMES &&
+				    ebitmap_get_bit(&e->type_names->types, attr->value - 1))
+					ebitmap_set_bit(&e->names, type->value - 1, 1);
+			}
+		}
+	}
+}
+
+static bool rule_add_typeattribute(struct policydb *db, const char *type,
+				   const char *attr)
+{
+	struct type_datum *type_d, *attr_d;
+
+	if (!type || !attr)
+		return false;
+
+	type_d = symtab_search(&db->p_types, type);
+	if (!type_d) {
+		pr_info("[selinux]: type '%s' not found\n", type);
+		return false;
+	}
+	if (type_d->attribute) {
+		pr_info("[selinux]: '%s' is an attribute, not a type\n", type);
+		return false;
+	}
+
+	attr_d = symtab_search(&db->p_types, attr);
+	if (!attr_d) {
+		pr_info("[selinux]: attribute '%s' not found\n", attr);
+		return false;
+	}
+	if (!attr_d->attribute) {
+		pr_info("[selinux]: '%s' is not an attribute\n", attr);
+		return false;
+	}
+
+	rule_add_typeattribute_raw(db, type_d, attr_d);
+	return true;
+}
+
+/* ---- public API (locks internally) ---- */
+
+#define RULE_LOCK_GET(db)                                    \
+	struct policydb *db;                                 \
+	mutex_lock(&selinux_state.policy_mutex);             \
+	db = fmac_get_pdb();                                 \
+	if (!db) {                                           \
+		mutex_unlock(&selinux_state.policy_mutex);   \
+		return -ENOENT;                              \
+	}
+
+#define RULE_UNLOCK(ret)                                     \
+	mutex_unlock(&selinux_state.policy_mutex);           \
+	if ((ret) == 0)                                      \
 		avc_reset();
+
+int sepolicy_add_rule(const char *sname, const char *tname, const char *cname,
+		      const char *pname, int effect, bool invert)
+{
+	int ret;
+	RULE_LOCK_GET(db);
+
+	ret = rule_add(db, sname, tname, cname, pname, effect, invert) ? 0 : -ENOENT;
+	RULE_UNLOCK(ret);
+	return ret;
+}
+
+int sepolicy_add_xperm(const char *s, const char *t, const char *c,
+		       const char *range, int effect, bool invert)
+{
+	int ret;
+	RULE_LOCK_GET(db);
+
+	ret = rule_add_xperm(db, s, t, c, range, effect, invert) ? 0 : -EINVAL;
+	RULE_UNLOCK(ret);
+	return ret;
+}
+
+int sepolicy_add_type(const char *name)
+{
+	int ret;
+	RULE_LOCK_GET(db);
+
+	ret = rule_add_type_datum(db, name, false) ? 0 : -EINVAL;
+	RULE_UNLOCK(ret);
+	return ret;
+}
+
+int sepolicy_add_attribute(const char *name)
+{
+	int ret;
+	RULE_LOCK_GET(db);
+
+	ret = rule_add_type_datum(db, name, true) ? 0 : -EINVAL;
+	RULE_UNLOCK(ret);
+	return ret;
+}
+
+int sepolicy_add_typeattribute(const char *type_name, const char *attr_name)
+{
+	int ret;
+	RULE_LOCK_GET(db);
+
+	ret = rule_add_typeattribute(db, type_name, attr_name) ? 0 : -EINVAL;
+	RULE_UNLOCK(ret);
+	return ret;
+}
+
+int sepolicy_set_permissive(const char *type_name)
+{
+	int ret;
+	RULE_LOCK_GET(db);
+
+	ret = rule_set_type_state(db, type_name, true) ? 0 : -EINVAL;
+	RULE_UNLOCK(ret);
+	return ret;
+}
+
+int sepolicy_set_enforce(const char *type_name)
+{
+	int ret;
+	RULE_LOCK_GET(db);
+
+	ret = rule_set_type_state(db, type_name, false) ? 0 : -EINVAL;
+	RULE_UNLOCK(ret);
+	return ret;
+}
+
+int sepolicy_type_exists(const char *type_name)
+{
+	int ret;
+	RULE_LOCK_GET(db);
+
+	ret = symtab_search(&db->p_types, type_name) ? 1 : 0;
+	mutex_unlock(&selinux_state.policy_mutex);
+	return ret;
+}
+
+int sepolicy_add_type_transition(const char *s, const char *t, const char *c,
+				 const char *d, const char *obj)
+{
+	int ret;
+	RULE_LOCK_GET(db);
+
+	if (obj)
+		ret = rule_add_filename_trans(db, s, t, c, d, obj) ? 0 : -EINVAL;
+	else
+		ret = rule_add_type(db, s, t, c, d, AVTAB_TRANSITION) ? 0 : -EINVAL;
+	RULE_UNLOCK(ret);
+	return ret;
+}
+
+int sepolicy_add_type_change(const char *s, const char *t, const char *c, const char *d)
+{
+	int ret;
+	RULE_LOCK_GET(db);
+
+	ret = rule_add_type(db, s, t, c, d, AVTAB_CHANGE) ? 0 : -EINVAL;
+	RULE_UNLOCK(ret);
+	return ret;
+}
+
+int sepolicy_add_type_member(const char *s, const char *t, const char *c, const char *d)
+{
+	int ret;
+	RULE_LOCK_GET(db);
+
+	ret = rule_add_type(db, s, t, c, d, AVTAB_MEMBER) ? 0 : -EINVAL;
+	RULE_UNLOCK(ret);
+	return ret;
+}
+
+int sepolicy_add_genfscon(const char *fs_name, const char *path, const char *ctx)
+{
+	int ret;
+	RULE_LOCK_GET(db);
+
+	ret = rule_add_genfscon(db, fs_name, path, ctx) ? 0 : -EOPNOTSUPP;
+	RULE_UNLOCK(ret);
 	return ret;
 }
 
 /* give sname all perms to all types, scoped to a single class */
 int sepolicy_allow_all_types(const char *sname, const char *cname)
 {
-	struct policydb *pdb;
+	struct policydb *db;
 	struct type_datum *src = NULL;
 	struct class_datum *cls = NULL;
 	int ret = 0;
 
 	mutex_lock(&selinux_state.policy_mutex);
 
-	pdb = fmac_get_pdb();
-	if (!pdb) {
+	db = fmac_get_pdb();
+	if (!db) {
 		ret = -ENOENT;
 		goto out;
 	}
 
-	if (sname && *sname) {
-		src = symtab_search(&pdb->symtab[SYM_TYPES], sname);
-		if (!src) {
-			pr_warn("[selinux]: source type '%s' not found\n",
-				sname);
-			ret = -ENOENT;
-			goto out;
-		}
+	if (sname && *sname && !(src = symtab_search(&db->p_types, sname))) {
+		ret = -ENOENT;
+		goto out;
+	}
+	if (cname && *cname && !(cls = symtab_search(&db->p_classes, cname))) {
+		ret = -ENOENT;
+		goto out;
 	}
 
-	if (cname && *cname) {
-		cls = symtab_search(&pdb->symtab[SYM_CLASSES], cname);
-		if (!cls) {
-			pr_warn("[selinux]: class '%s' not found\n", cname);
-			ret = -ENOENT;
-			goto out;
-		}
-	}
-
-	__sepolicy_add_rule(pdb, src, NULL, cls, 0,
-			      AVTAB_ALLOWED, false);
-	__sepolicy_add_rule(pdb, src, NULL, cls, 0,
-			      AVTAB_AUDITDENY, true);
-
-	pr_info("[selinux]: granted '%s' all perms to all types over class '%s'\n",
-		sname ? sname : "*", cname ? cname : "*");
+	rule_add_raw(db, src, NULL, cls, NULL, AVTAB_ALLOWED, false);
+	rule_add_raw(db, src, NULL, cls, NULL, AVTAB_AUDITDENY, true);
 out:
 	mutex_unlock(&selinux_state.policy_mutex);
 	if (ret == 0)
@@ -514,35 +897,25 @@ out:
 /* give sname every perm on every class to every type — basically unconfined */
 int sepolicy_allow_any_any(const char *sname)
 {
-	struct policydb *pdb;
+	struct policydb *db;
 	struct type_datum *src = NULL;
 	int ret = 0;
 
 	mutex_lock(&selinux_state.policy_mutex);
 
-	pdb = fmac_get_pdb();
-	if (!pdb) {
+	db = fmac_get_pdb();
+	if (!db) {
 		ret = -ENOENT;
 		goto out;
 	}
 
-	if (sname && *sname) {
-		src = symtab_search(&pdb->symtab[SYM_TYPES], sname);
-		if (!src) {
-			pr_warn("[selinux]: source type '%s' not found\n",
-				sname);
-			ret = -ENOENT;
-			goto out;
-		}
+	if (sname && *sname && !(src = symtab_search(&db->p_types, sname))) {
+		ret = -ENOENT;
+		goto out;
 	}
 
-	__sepolicy_add_rule(pdb, src, NULL, NULL, 0,
-			      AVTAB_ALLOWED, false);
-	__sepolicy_add_rule(pdb, src, NULL, NULL, 0,
-			      AVTAB_AUDITDENY, true);
-
-	pr_info("[selinux]: '%s' elevated to any-any allow\n",
-		sname ? sname : "*");
+	rule_add_raw(db, src, NULL, NULL, NULL, AVTAB_ALLOWED, false);
+	rule_add_raw(db, src, NULL, NULL, NULL, AVTAB_AUDITDENY, true);
 out:
 	mutex_unlock(&selinux_state.policy_mutex);
 	if (ret == 0)
@@ -550,195 +923,41 @@ out:
 	return ret;
 }
 
-/*
- * Attach an attribute to a type.
- *
- * Besides flipping the bit in type_attr_map_array, we also have to
- * push the concrete type into every constraint expression that
- * references the attribute's type_set.  This mirrors the logic in
- * policydb_read() that builds type_attr_map from the loaded policy.
- */
-static void __sepolicy_add_typeattribute(struct policydb *pdb,
-					   struct type_datum *type_dat,
-					   struct type_datum *attr_dat)
+int sepolicy_add_domain(const char *name)
 {
-	struct hashtab_node *node;
-	struct constraint_node *n;
-	struct constraint_expr *e;
+	int ret;
 
-	ebitmap_set_bit(&pdb->type_attr_map_array[type_dat->value - 1],
-			attr_dat->value - 1, 1);
-
-	/* propagate the type into every constraint that mentions this attr */
-	hashtab_for_each(pdb->p_classes.table, node) {
-		struct class_datum *cls = (struct class_datum *)node->datum;
-
-		for (n = cls->constraints; n; n = n->next) {
-			for (e = n->expr; e; e = e->next) {
-				if (e->expr_type == CEXPR_NAMES &&
-				    e->type_names &&
-				    ebitmap_get_bit(&e->type_names->types,
-						    attr_dat->value - 1)) {
-					ebitmap_set_bit(&e->names,
-							type_dat->value - 1,
-							1);
-				}
-			}
-		}
-	}
-}
-
-int sepolicy_add_typeattribute(const char *type_name, const char *attr_name)
-{
-	struct policydb *pdb;
-	struct type_datum *type_dat = NULL;
-	struct type_datum *attr_dat = NULL;
-	int ret = 0;
-
-	if (!type_name || !attr_name)
-		return -EINVAL;
-
-	mutex_lock(&selinux_state.policy_mutex);
-
-	pdb = fmac_get_pdb();
-	if (!pdb) {
-		ret = -ENOENT;
-		goto out;
-	}
-
-	type_dat = symtab_search(&pdb->symtab[SYM_TYPES], type_name);
-	if (!type_dat) {
-		pr_warn("[selinux]: type '%s' not found\n", type_name);
-		ret = -ENOENT;
-		goto out;
-	}
-
-	attr_dat = symtab_search(&pdb->symtab[SYM_TYPES], attr_name);
-	if (!attr_dat) {
-		pr_warn("[selinux]: attribute '%s' not found\n", attr_name);
-		ret = -ENOENT;
-		goto out;
-	}
-
-	if (type_dat->attribute) {
-		pr_warn("[selinux]: '%s' is an attribute, not a type\n",
-			type_name);
-		ret = -EINVAL;
-		goto out;
-	}
-	if (!attr_dat->attribute) {
-		pr_warn("[selinux]: '%s' is a type, not an attribute\n",
-			attr_name);
-		ret = -EINVAL;
-		goto out;
-	}
-
-	__sepolicy_add_typeattribute(pdb, type_dat, attr_dat);
-	pr_info("[selinux]: added attribute '%s' to type '%s'\n",
-		attr_name, type_name);
-out:
-	mutex_unlock(&selinux_state.policy_mutex);
-	if (ret == 0)
-		avc_reset();
-	return ret;
-}
-
-int sepolicy_add_xperm(const char *s, const char *t, const char *c,
-		       const char *range, int effect, bool invert)
-{
-	struct policydb *pdb;
-	struct type_datum *src = NULL, *tgt = NULL;
-	struct class_datum *cls = NULL;
-	u16 low = 0, high = 0;
-	int ret = 0;
-
-	/* parse range: empty = 0..0xFFFF, single value = low==high */
-	if (!range || !*range) {
-		low = 0;
-		high = 0xFFFF;
-	} else if (strchr(range, '-')) {
-		if (sscanf(range, "0x%hx-0x%hx", &low, &high) != 2 &&
-		    sscanf(range, "%hx-%hx", &low, &high) != 2)
-			return -EINVAL;
-	} else {
-		if (sscanf(range, "0x%hx", &low) != 1 &&
-		    sscanf(range, "%hx", &low) != 1)
-			return -EINVAL;
-		high = low;
-	}
-
-	if (low > high)
-		return -EINVAL;
-
-	mutex_lock(&selinux_state.policy_mutex);
-
-	pdb = fmac_get_pdb();
-	if (!pdb) {
-		ret = -ENOENT;
-		goto out;
-	}
-
-	if (s && *s) {
-		src = symtab_search(&pdb->symtab[SYM_TYPES], s);
-		if (!src) {
-			pr_warn("[selinux]: source type '%s' not found\n", s);
-			ret = -ENOENT;
-			goto out;
-		}
-	}
-	if (t && *t) {
-		tgt = symtab_search(&pdb->symtab[SYM_TYPES], t);
-		if (!tgt) {
-			pr_warn("[selinux]: target type '%s' not found\n", t);
-			ret = -ENOENT;
-			goto out;
-		}
-	}
-	if (c && *c) {
-		cls = symtab_search(&pdb->symtab[SYM_CLASSES], c);
-		if (!cls) {
-			pr_warn("[selinux]: class '%s' not found\n", c);
-			ret = -ENOENT;
-			goto out;
-		}
-	}
-
-	__sepolicy_add_xperm(pdb, src, tgt, cls, low, high, effect, invert);
-out:
-	mutex_unlock(&selinux_state.policy_mutex);
-	if (ret == 0)
-		avc_reset();
-	return ret;
+	ret = sepolicy_add_type(name);
+	if (ret)
+		return ret;
+	return sepolicy_add_typeattribute(name, "domain");
 }
 
 #ifdef CONFIG_NKSU_DEBUG
 /*
- * Debug helper: flip all AUDITDENY rule data to ~0 so every denial
- * gets audited, even the ones the policy marked dontaudit.
+ * Debug helper: flip all AUDITDENY rule data to ~0 so every denial gets
+ * audited, even the ones the policy marked dontaudit.
  */
 int sepolicy_make_audit(void)
 {
-	struct policydb *pdb;
+	struct policydb *db;
 	struct avtab_node *node;
 	int i, ret = 0;
 
 	mutex_lock(&selinux_state.policy_mutex);
 
-	pdb = fmac_get_pdb();
-	if (!pdb) {
+	db = fmac_get_pdb();
+	if (!db) {
 		ret = -ENOENT;
 		goto out;
 	}
 
-	for (i = 0; i < pdb->te_avtab.nslot; i++) {
-		for (node = pdb->te_avtab.htable[i]; node; node = node->next) {
+	for (i = 0; i < db->te_avtab.nslot; i++) {
+		for (node = db->te_avtab.htable[i]; node; node = node->next) {
 			if (node->key.specified & AVTAB_AUDITDENY)
 				node->datum.u.data = ~0U;
 		}
 	}
-
-	pr_info("[selinux]: Disabled all dontaudit rules (auditing all denials)\n");
-
 out:
 	mutex_unlock(&selinux_state.policy_mutex);
 	if (ret == 0)

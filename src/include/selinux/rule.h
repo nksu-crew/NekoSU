@@ -5,51 +5,59 @@
 #include <linux/types.h>
 
 /*
- * avc_reset – invalidate all cached access vectors after a
- * policy modification.  Must be called after every successful
- * rule/type change on the live policy.
+ * Rule manipulation on the working policy copy.  The semantics follow
+ * KernelSU's sepolicy engine; the names are NekoSU's.
+ *
+ *   avc_reset                    invalidate cached access vectors
+ *   sepolicy_add_rule            allow/deny/auditallow/dontaudit (effect+invert)
+ *   sepolicy_add_xperm           ioctl extended permissions
+ *   sepolicy_add_type            new concrete type
+ *   sepolicy_add_attribute       new attribute
+ *   sepolicy_add_typeattribute   attach an attribute to a type
+ *   sepolicy_set_permissive      mark a type permissive
+ *   sepolicy_set_enforce         mark a type enforcing
+ *   sepolicy_type_exists         type lookup
+ *   sepolicy_add_type_transition type_transition (obj = filename or NULL)
+ *   sepolicy_add_type_change     type_change
+ *   sepolicy_add_type_member     type_member
+ *   sepolicy_add_genfscon        genfscon (currently a no-op)
+ *   sepolicy_add_domain          new domain type (type + domain attribute)
  */
+
 void avc_reset(void);
 
-/* ── Rule insertion ─────────────────────────────────────── */
-
-int sepolicy_add_rule(const char *sname, const char *tname,
-		      const char *cname, const char *pname,
-		      int effect, bool invert);
+int sepolicy_add_rule(const char *sname, const char *tname, const char *cname,
+		      const char *pname, int effect, bool invert);
+int sepolicy_add_xperm(const char *s, const char *t, const char *c,
+		       const char *range, int effect, bool invert);
+int sepolicy_add_type(const char *name);
+int sepolicy_add_attribute(const char *name);
+int sepolicy_add_typeattribute(const char *type_name, const char *attr_name);
+int sepolicy_set_permissive(const char *type_name);
+int sepolicy_set_enforce(const char *type_name);
+int sepolicy_type_exists(const char *type_name);
+int sepolicy_add_type_transition(const char *s, const char *t, const char *c,
+				 const char *d, const char *obj);
+int sepolicy_add_type_change(const char *s, const char *t, const char *c, const char *d);
+int sepolicy_add_type_member(const char *s, const char *t, const char *c, const char *d);
+int sepolicy_add_genfscon(const char *fs_name, const char *path, const char *ctx);
 
 int sepolicy_allow_any_any(const char *sname);
 int sepolicy_allow_all_types(const char *sname, const char *cname);
-
-/* ── Type-attribute association ──────────────────────────── */
-
-int sepolicy_add_typeattribute(const char *type_name,
-			       const char *attr_name);
-
-/* ── Extended permissions (ioctl ranges etc.) ────────────── */
-
-int sepolicy_add_xperm(const char *s, const char *t, const char *c,
-		       const char *range, int effect, bool invert);
-
-/* ── Module rule files (/data/adb/modules/<id>/sepolicy.rule) ─ */
+int sepolicy_add_domain(const char *name);
 
 /*
- * Parse a KernelSU-style sepolicy rule file body and apply every statement
- * to the live policy.  Returns the number of statements applied, or a
- * negative errno when @text is missing / memory is exhausted.  Unsupported
- * or unknown statements are logged and skipped, never fatal.
+ * Decode and apply a KernelSU-format sepolicy batch (src/selinux/rule_file.c).
+ * Returns the number of commands applied, or a negative errno.
  */
-int sepolicy_apply_rule_text(const char *text);
+int sepolicy_apply_batch(const void __user *data, size_t len);
 
 /*
- * Write-only /proc/nksu/sepolicy sink: writing a path to a module's
- * sepolicy.rule applies that file to the live policy.  This is how the
- * userspace module loader (which cannot issue the manager-gated ioctl)
- * installs module rules.  Idempotent; returns 0 on success.
+ * Write-only /proc/nksu/sepolicy sink: writing a KernelSU-format sepolicy
+ * batch applies it.  Used by the daemon when it cannot reach the ioctl.
  */
 int nksu_sepolicy_sink_init(void);
 void nksu_sepolicy_sink_exit(void);
-
-/* ── Debug audit (CONFIG_NKSU_DEBUG only) ────────────────── */
 
 #ifdef CONFIG_NKSU_DEBUG
 int sepolicy_make_audit(void);

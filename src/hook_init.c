@@ -1,9 +1,11 @@
 #include <linux/kthread.h>
 #include <linux/wait.h>
 #include <linux/delay.h>
+#include <linux/cred.h>
 #include "syscall.h"
 #include "dispatch.h"
 #include "tools.h"
+#include "ioctl.h"
 #include "selinux/selinux.h"
 #include "nksu.h"
 #include "nksu_module.h"
@@ -113,6 +115,33 @@ static long handle__NR_execveat(struct pt_regs *regs)
     return 0;
 }
 
+/*
+ * Daemon control fd: the boot-time ncore runs as root and cannot call the
+ * manager-gated prctl 203, so grant it the [fmac_ctl] fd here.  The temporary
+ * watcher dispatches unconditionally, so this reaches the daemon even though
+ * it is not in the profile.
+ */
+static long handle__NR_prctl_daemon(struct pt_regs *regs)
+{
+#if defined(__aarch64__)
+    unsigned long option = regs->regs[0];
+#elif defined(__x86_64__)
+    unsigned long option = regs->di;
+#else
+    unsigned long option = 0;
+#endif
+
+    if (option != NKSU_PRCTL_GET_DRIVER_FD)
+        return 0;
+
+    if (!uid_eq(current_uid(), GLOBAL_ROOT_UID) &&
+        !uid_eq(current_euid(), GLOBAL_ROOT_UID))
+        return 0;
+
+    fmac_ctlfd_get();
+    return 1;
+}
+
 struct syscall_hook {
     int nr;
     long (*handler)(struct pt_regs *);
@@ -121,6 +150,7 @@ struct syscall_hook {
 static const struct syscall_hook syscall_hooks[] = {
     { __NR_execve, handle__NR_execve },
     { __NR_execveat, handle__NR_execveat },
+    { __NR_prctl, handle__NR_prctl_daemon },
 };
 
 int load_temp_syscall(void)

@@ -21,6 +21,7 @@ enum fmac_flag {
                        invert[4] */
   IOC_SET_PROFILE,  /* data[80]  = uid[4] caps[8] domain[64] namespace[4] */
   IOC_LIST_MODULES, /* data = JSON buffer (out), size = capacity */
+  IOC_SET_SEPOLICY, /* data = KernelSU-format sepolicy batch, size = length */
 };
 
 struct fmac_ioc {

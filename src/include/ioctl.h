@@ -28,6 +28,7 @@ enum {
     IOC_SEL_ADD_RULE,  /* data[264] = src[64] tgt[64] cls[64] perm[64] effect[4] invert[4] */
     IOC_SET_PROFILE,   /* data[80]  = uid[4] caps[8] domain[64] namespace[4] */
     IOC_LIST_MODULES,  /* data = JSON buffer (out), size = 容量; 返回写入长度 */
+    IOC_SET_SEPOLICY,  /* data = KernelSU-format sepolicy batch, size = 长度 */
 };
 
 struct fmac_ioc {
@@ -44,6 +45,13 @@ struct fmac_ioc {
 #define FMAC_DATA_SELRULE   264
 #define FMAC_DATA_PROFILE   80
 #define FMAC_DATA_MODULES_MAX (256 * 1024)
+
+/*
+ * prctl opcodes.  201-203 are reserved for the manager (is_manager-gated);
+ * 204 lets the boot-time daemon obtain the control fd (root-gated) so it can
+ * send IOC_SET_SEPOLICY.
+ */
+#define NKSU_PRCTL_GET_DRIVER_FD 204
 
 #define FMAC_OFF_UID     0
 #define FMAC_OFF_CAPS    4
