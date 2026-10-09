@@ -58,6 +58,8 @@
 #include <linux/fs.h>
 #include <linux/file.h>
 #include <linux/dcache.h>
+#include <linux/cred.h>
+#include <linux/capability.h>
 
 #include <fmac.h>
 
@@ -83,6 +85,42 @@ static const char *const nksu_module_envp[] = {
 
 /* set once the post-fs-data stage has been served */
 static bool post_fs_data_done;
+
+/*
+ * Enumeration touches /data/adb from a kthread (kernel domain) or from the
+ * manager's ioctl context, neither of which the policy may allow to read
+ * there.  Borrow an unconfined nksu-domain cred while walking the tree.
+ */
+static struct cred *nksu_module_cred;
+
+static const struct cred *nksu_module_creds_begin(void)
+{
+    if (!nksu_module_cred) {
+        struct cred *cred = prepare_creds();
+
+        if (!cred)
+            return NULL;
+
+        cred->cap_effective = CAP_FULL_SET;
+        cred->cap_permitted = CAP_FULL_SET;
+        cred->cap_bset = CAP_FULL_SET;
+        cred->cap_inheritable = CAP_FULL_SET;
+
+        if (set_domain(DOMAIN_CTX, cred)) {
+            abort_creds(cred);
+            return NULL;
+        }
+        nksu_module_cred = cred;
+    }
+
+    return override_creds(nksu_module_cred);
+}
+
+static void nksu_module_creds_end(const struct cred *old)
+{
+    if (old)
+        revert_creds(old);
+}
 
 struct nksu_module_dir {
     char **names;
@@ -272,11 +310,14 @@ static bool nksu_module_is_enabled(const char *moddir, const char *name)
     return true;
 }
 
-/* Find "<key>=<value>" in a module.prop body, values "1" and "true". */
-static bool nksu_prop_has_metamodule(const char *text)
+/* Extract "<key>=<value>" from a module.prop body into @out (trimmed). */
+static bool nksu_prop_get(const char *text, const char *key, char *out, size_t outsz)
 {
-    static const char key[] = "metamodule";
+    size_t klen = strlen(key);
     const char *p = text;
+
+    if (out && outsz)
+        out[0] = '\0';
 
     while (*p) {
         const char *eol = strchrnul(p, '\n');
@@ -295,13 +336,16 @@ static bool nksu_prop_has_metamodule(const char *text)
             while (vend > v && (vend[-1] == ' ' || vend[-1] == '\t' || vend[-1] == '\r'))
                 vend--;
 
-            if ((size_t)(kend - k) == sizeof(key) - 1 && memcmp(k, key, sizeof(key) - 1) == 0) {
+            if ((size_t)(kend - k) == klen && memcmp(k, key, klen) == 0) {
                 size_t vlen = (size_t)(vend - v);
 
-                if (vlen == 1 && v[0] == '1')
-                    return true;
-                if (vlen == 4 && strncasecmp(v, "true", 4) == 0)
-                    return true;
+                if (out && outsz) {
+                    if (vlen >= outsz)
+                        vlen = outsz - 1;
+                    memcpy(out, v, vlen);
+                    out[vlen] = '\0';
+                }
+                return true;
             }
         }
 
@@ -309,6 +353,17 @@ static bool nksu_prop_has_metamodule(const char *text)
     }
 
     return false;
+}
+
+/* module.prop "metamodule=1" (or =true) marks a metamodule. */
+static bool nksu_prop_has_metamodule(const char *text)
+{
+    char v[16];
+
+    if (!nksu_prop_get(text, "metamodule", v, sizeof(v)))
+        return false;
+
+    return strcmp(v, "1") == 0 || strcasecmp(v, "true") == 0;
 }
 
 /*
@@ -337,11 +392,16 @@ static bool nksu_module_is_metamodule(const char *moddir)
 static void nksu_modules_foreach(const char *hook, bool want_meta)
 {
     struct nksu_module_dir dirs;
+    const struct cred *old;
     size_t i;
 
+    old = nksu_module_creds_begin();
+
     memset(&dirs, 0, sizeof(dirs));
-    if (nksu_read_module_dirs(NKSU_MODULES_DIR, &dirs))
+    if (nksu_read_module_dirs(NKSU_MODULES_DIR, &dirs)) {
+        nksu_module_creds_end(old);
         return;
+    }
 
     for (i = 0; i < dirs.count; i++) {
         char moddir[NKSU_MODULE_PATH_MAX];
@@ -358,6 +418,7 @@ static void nksu_modules_foreach(const char *hook, bool want_meta)
     }
 
     nksu_module_dir_free(&dirs);
+    nksu_module_creds_end(old);
 }
 
 /*
@@ -397,5 +458,197 @@ int nksu_modules_service(void)
 
 void nksu_modules_exit(void)
 {
-    /* Hooks are waited for and no state is retained. */
+    if (nksu_module_cred) {
+        put_cred(nksu_module_cred);
+        nksu_module_cred = NULL;
+    }
+}
+
+/* ---- module list JSON (the kernel-side module interface) ---- */
+
+static bool nksu_module_has_flag(const char *moddir, const char *flag)
+{
+    char path[NKSU_MODULE_PATH_MAX];
+
+    if (nksu_path_join(path, sizeof(path), moddir, flag))
+        return false;
+    return nksu_file_exists(path);
+}
+
+static bool nksu_module_has_system(const char *moddir)
+{
+    char path[NKSU_MODULE_PATH_MAX];
+
+    if (nksu_path_join(path, sizeof(path), moddir, "system"))
+        return false;
+    return nksu_is_dir(path);
+}
+
+struct nksu_json {
+    char *buf;
+    size_t cap;
+    size_t len;
+};
+
+static void nksu_json_putc(struct nksu_json *j, char c)
+{
+    if (j->len + 1 < j->cap)
+        j->buf[j->len] = c;
+    j->len++;
+}
+
+static void nksu_json_puts(struct nksu_json *j, const char *s)
+{
+    while (*s)
+        nksu_json_putc(j, *s++);
+}
+
+static void nksu_json_str(struct nksu_json *j, const char *s)
+{
+    nksu_json_putc(j, '"');
+    for (; s && *s; s++) {
+        unsigned char c = (unsigned char)*s;
+
+        switch (c) {
+        case '"':
+            nksu_json_puts(j, "\\\"");
+            break;
+        case '\\':
+            nksu_json_puts(j, "\\\\");
+            break;
+        case '\n':
+            nksu_json_puts(j, "\\n");
+            break;
+        case '\r':
+            nksu_json_puts(j, "\\r");
+            break;
+        case '\t':
+            nksu_json_puts(j, "\\t");
+            break;
+        default:
+            if (c < 0x20) {
+                char esc[8];
+
+                snprintf(esc, sizeof(esc), "\\u%04x", c);
+                nksu_json_puts(j, esc);
+            } else {
+                nksu_json_putc(j, (char)c);
+            }
+        }
+    }
+    nksu_json_putc(j, '"');
+}
+
+static void nksu_json_field(struct nksu_json *j, const char *key, const char *val)
+{
+    nksu_json_str(j, key);
+    nksu_json_putc(j, ':');
+    nksu_json_str(j, val ? val : "");
+}
+
+static void nksu_json_bool(struct nksu_json *j, const char *key, bool val)
+{
+    nksu_json_str(j, key);
+    nksu_json_putc(j, ':');
+    nksu_json_puts(j, val ? "true" : "false");
+}
+
+size_t nksu_modules_emit_json(char *buf, size_t size)
+{
+    struct nksu_module_dir dirs;
+    struct nksu_json j = { .buf = buf, .cap = size, .len = 0 };
+    const struct cred *old;
+    size_t i;
+    size_t ret;
+    bool first = true;
+
+    if (!buf || size < 3)
+        return 0;
+
+    old = nksu_module_creds_begin();
+
+    memset(&dirs, 0, sizeof(dirs));
+    if (nksu_read_module_dirs(NKSU_MODULES_DIR, &dirs)) {
+        nksu_json_puts(&j, "[]");
+        ret = j.len < size ? j.len : size - 1;
+        j.buf[ret] = '\0';
+        nksu_module_creds_end(old);
+        return ret;
+    }
+
+    nksu_json_putc(&j, '[');
+
+    for (i = 0; i < dirs.count; i++) {
+        char moddir[NKSU_MODULE_PATH_MAX];
+        char proppath[NKSU_MODULE_PATH_MAX];
+        char text[NKSU_MODULE_PROP_MAX];
+        char id[64] = { 0 };
+        char value[256];
+        const char *name = dirs.names[i];
+
+        if (nksu_path_join(moddir, sizeof(moddir), NKSU_MODULES_DIR, name))
+            continue;
+        if (!nksu_is_dir(moddir))
+            continue;
+
+        if (nksu_path_join(proppath, sizeof(proppath), moddir, NKSU_MODULE_PROP) == 0 &&
+            nksu_read_text(proppath, text, sizeof(text)) == 0) {
+            /* text holds module.prop */
+        } else {
+            text[0] = '\0';
+        }
+
+        if (!nksu_prop_get(text, "id", id, sizeof(id)) || !id[0])
+            strscpy(id, name, sizeof(id));
+
+        if (!first)
+            nksu_json_putc(&j, ',');
+        first = false;
+
+        nksu_json_putc(&j, '{');
+        nksu_json_field(&j, "id", id);
+        nksu_json_putc(&j, ',');
+
+        nksu_prop_get(text, "name", value, sizeof(value));
+        nksu_json_field(&j, "name", value);
+        nksu_json_putc(&j, ',');
+
+        nksu_prop_get(text, "version", value, sizeof(value));
+        nksu_json_field(&j, "version", value);
+        nksu_json_putc(&j, ',');
+
+        nksu_prop_get(text, "versionCode", value, sizeof(value));
+        nksu_json_field(&j, "versionCode", value);
+        nksu_json_putc(&j, ',');
+
+        nksu_prop_get(text, "author", value, sizeof(value));
+        nksu_json_field(&j, "author", value);
+        nksu_json_putc(&j, ',');
+
+        nksu_prop_get(text, "description", value, sizeof(value));
+        nksu_json_field(&j, "description", value);
+        nksu_json_putc(&j, ',');
+
+        nksu_json_bool(&j, "enabled", !nksu_module_has_flag(moddir, NKSU_MODULE_DISABLE));
+        nksu_json_putc(&j, ',');
+        nksu_json_bool(&j, "metamodule", nksu_prop_has_metamodule(text));
+        nksu_json_putc(&j, ',');
+        nksu_json_bool(&j, "update", nksu_module_has_flag(moddir, "update"));
+        nksu_json_putc(&j, ',');
+        nksu_json_bool(&j, "remove", nksu_module_has_flag(moddir, NKSU_MODULE_REMOVE));
+        nksu_json_putc(&j, ',');
+        nksu_json_bool(&j, "skipMount", nksu_module_has_flag(moddir, "skip_mount"));
+        nksu_json_putc(&j, ',');
+        nksu_json_bool(&j, "hasSystem", nksu_module_has_system(moddir));
+        nksu_json_putc(&j, '}');
+    }
+
+    nksu_json_putc(&j, ']');
+
+    nksu_module_creds_end(old);
+
+    if (j.len >= size)
+        j.len = size - 1;
+    j.buf[j.len] = '\0';
+    return j.len;
 }

@@ -36,6 +36,10 @@ object ncore {
 
     external fun delRule(path: String): Int
 
+    external fun listModules(): String?
+
+    external fun execRoot(cmd: String): String?
+
     external fun setCap(
         uid: Int,
         caps: Long,

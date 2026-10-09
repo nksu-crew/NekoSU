@@ -27,6 +27,7 @@ enum {
     IOC_DEL_CAP,       /* data[12]  = uint32_t uid */
     IOC_SEL_ADD_RULE,  /* data[264] = src[64] tgt[64] cls[64] perm[64] effect[4] invert[4] */
     IOC_SET_PROFILE,   /* data[80]  = uid[4] caps[8] domain[64] namespace[4] */
+    IOC_LIST_MODULES,  /* data = JSON buffer (out), size = 容量; 返回写入长度 */
 };
 
 struct fmac_ioc {
@@ -42,6 +43,7 @@ struct fmac_ioc {
 #define FMAC_DATA_CAP       12
 #define FMAC_DATA_SELRULE   264
 #define FMAC_DATA_PROFILE   80
+#define FMAC_DATA_MODULES_MAX (256 * 1024)
 
 #define FMAC_OFF_UID     0
 #define FMAC_OFF_CAPS    4

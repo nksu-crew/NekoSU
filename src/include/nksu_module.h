@@ -2,6 +2,8 @@
 #ifndef NKSU_MODULE_H
 #define NKSU_MODULE_H
 
+#include <linux/types.h>
+
 /*
  * Magisk/KernelSU-style module loading, driven from the kernel.
  *
@@ -17,9 +19,22 @@
  *
  * Mounting is delegated to the metamodule (module.prop "metamodule=1"): its
  * lifecycle scripts run first and its metamount.sh performs the mount.
+ *
+ * Since there is no userspace daemon, the manager gets the module list from
+ * the kernel: nksu_modules_emit_json() renders it as a JSON array that
+ * IOC_LIST_MODULES hands to userspace.
  */
+#define NKSU_MODULES_JSON_MAX (256 * 1024)
+
 void nksu_modules_post_fs_data(void);
 int nksu_modules_service(void);
 void nksu_modules_exit(void);
+
+/*
+ * Write a JSON array describing every module under /data/adb/modules into
+ * @buf (NUL-terminated, always within @size).  Returns the number of bytes
+ * written excluding the terminator.
+ */
+size_t nksu_modules_emit_json(char *buf, size_t size);
 
 #endif /* NKSU_MODULE_H */

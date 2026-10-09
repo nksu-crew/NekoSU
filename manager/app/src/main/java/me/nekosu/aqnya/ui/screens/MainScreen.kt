@@ -42,6 +42,7 @@ import me.nekosu.aqnya.ui.animation.AnimatedBottomNavBar
 import me.nekosu.aqnya.ui.animation.PageTransitions
 import me.nekosu.aqnya.ui.animation.ScrollAnimations
 import me.nekosu.aqnya.ui.screens.install.InstallScreen
+import me.nekosu.aqnya.ui.screens.modules.ModuleScreen
 import me.nekosu.aqnya.util.AppPermission
 import me.nekosu.aqnya.util.BottomNavItem
 import me.nekosu.aqnya.util.DebugPreferences
@@ -225,6 +226,14 @@ fun MainScreen() {
                         navController = navController,
                         extraBottomPadding = 12.dp,
                     )
+                }
+
+                composable(
+                    route = BottomNavItem.Modules.route,
+                    enterTransition = tabTransitionEnter(navItems),
+                    exitTransition = tabTransitionExit(navItems),
+                ) {
+                    ModuleScreen()
                 }
 
                 composable(

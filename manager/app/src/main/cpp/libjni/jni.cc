@@ -15,7 +15,11 @@
 #include <sys/poll.h>
 #include <sys/prctl.h>
 #include <sys/utsname.h>
+#include <sys/wait.h>
 #include <unistd.h>
+
+#include <string>
+#include <vector>
 
 #include "ioctl.h"
 #include "log.h"
@@ -227,6 +231,29 @@ int AddSelinuxRule(int fd, const char *src, const char *tgt, const char *cls,
 int ScanDriverFd(void) { return scan_fd_by_link("[fmac_shm]"); }
 
 int ScanCtlFd(void) { return scan_fd_by_link("[fmac_ctl]"); }
+
+/* ioc_call() is capped at a stack-sized data area; this one is for the
+ * potentially large module-list JSON buffer. */
+static int ioc_call_large(int fd, unsigned int flag, void *data, size_t size) {
+  if (size == 0 || size > FMAC_DATA_MODULES_MAX) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  std::vector<uint8_t> raw(sizeof(struct fmac_ioc) + size);
+  auto *msg = reinterpret_cast<struct fmac_ioc *>(raw.data());
+  msg->flag = flag;
+  msg->size = static_cast<uint32_t>(size);
+
+  int ret = ioctl(fd, IOC_CMD, raw.data());
+  if (ret >= 0 && size)
+    memcpy(data, msg->data, size);
+  return ret;
+}
+
+int ListModules(int fd, char *out, size_t size) {
+  return ioc_call_large(fd, IOC_LIST_MODULES, out, size);
+}
 
 static int parse_gki_info(char *out_version, size_t out_size) {
   struct utsname uts;
@@ -473,6 +500,102 @@ static jint delRule(JNIEnv *env, jobject thiz, jstring pathStr) {
   return 0;
 }
 
+/*
+ * Module list as a JSON array, produced by the kernel (IOC_LIST_MODULES).
+ * Returns null when the kernel interface is unavailable.
+ */
+static jstring listModules(JNIEnv *env, jobject thiz) {
+  (void)thiz;
+
+  if (ctlfd < 0) {
+    int f = ScanCtlFd();
+    if (f >= 0)
+      ctlfd = f;
+  }
+  if (ctlfd < 0) {
+    LOG_ERR("listModules: no ctl fd");
+    return nullptr;
+  }
+
+  char *buf = static_cast<char *>(malloc(FMAC_DATA_MODULES_MAX));
+  if (!buf)
+    return nullptr;
+
+  int ret = ListModules(ctlfd, buf, FMAC_DATA_MODULES_MAX);
+  if (ret < 0) {
+    LOG_ERR("listModules: ioctl failed");
+    free(buf);
+    return nullptr;
+  }
+  buf[FMAC_DATA_MODULES_MAX - 1] = '\0';
+
+  jstring out = env->NewStringUTF(buf);
+  free(buf);
+  return out;
+}
+
+/*
+ * Run a shell command as root.  The kernel interface (prctl OP_GET_ROOT)
+ * grants the child root; it then execs /system/bin/sh.  Output (stdout +
+ * stderr) is returned with a trailing "[exit N]" line.
+ */
+static jstring execRoot(JNIEnv *env, jobject thiz, jstring cmdStr) {
+  (void)thiz;
+
+  JniUtfString cmd(env, cmdStr);
+  if (!cmd)
+    return nullptr;
+
+  int pfd[2];
+  if (pipe(pfd) != 0)
+    return nullptr;
+
+  pid_t pid = fork();
+  if (pid < 0) {
+    close(pfd[0]);
+    close(pfd[1]);
+    return nullptr;
+  }
+
+  if (pid == 0) {
+    close(pfd[0]);
+
+    /* Ask the kernel for root before exec'ing the shell. */
+    if (prctl(OP_GET_ROOT, 0, 0, 0, 0) < 0)
+      _exit(126);
+
+    if (dup2(pfd[1], STDOUT_FILENO) < 0 || dup2(pfd[1], STDERR_FILENO) < 0)
+      _exit(126);
+    close(pfd[1]);
+
+    char *argv[] = {const_cast<char *>("/system/bin/sh"), const_cast<char *>("-c"),
+                    const_cast<char *>(cmd.c_str()), nullptr};
+    char *envp[] = {const_cast<char *>("PATH=/sbin:/system/sbin:/system/bin:/system/xbin"),
+                    const_cast<char *>("ANDROID_ROOT=/system"), nullptr};
+    execve("/system/bin/sh", argv, envp);
+    _exit(127);
+  }
+
+  close(pfd[1]);
+
+  std::string out;
+  char tmp[4096];
+  ssize_t n;
+  while ((n = read(pfd[0], tmp, sizeof(tmp))) > 0)
+    out.append(tmp, static_cast<size_t>(n));
+  close(pfd[0]);
+
+  int status = 0;
+  waitpid(pid, &status, 0);
+
+  char tail[48];
+  int code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+  snprintf(tail, sizeof(tail), "\n[exit %d]", code);
+  out += tail;
+
+  return env->NewStringUTF(out.c_str());
+}
+
 static void helloLog(JNIEnv *env, jobject thiz) {
   (void)env;
   (void)thiz;
@@ -513,6 +636,8 @@ const JNINativeMethod gMethods[] = {
      (void *)ncore::addSelinuxRule},
     {"addRule", "(Ljava/lang/String;J)I", (void *)ncore::addRule},
     {"delRule", "(Ljava/lang/String;)I", (void *)ncore::delRule},
+    {"listModules", "()Ljava/lang/String;", (void *)ncore::listModules},
+    {"execRoot", "(Ljava/lang/String;)Ljava/lang/String;", (void *)ncore::execRoot},
     {"helloLog", "()V", (void *)ncore::helloLog},
     {"isGki", "()Z", (void *)ncore::isGki},
     {"kernelVersion", "()Ljava/lang/String;", (void *)ncore::kernelVersion},
