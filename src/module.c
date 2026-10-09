@@ -27,10 +27,12 @@
  * regular modules' scripts, and its mount handler runs after all
  * post-fs-data scripts:
  *
- *   post-fs-data   metamodule/post-fs-data.sh
+ *   post-fs-data   post-fs-data.d/*.sh
+ *                  metamodule/post-fs-data.sh
  *                  <regular modules>/post-fs-data.sh
  *                  metamodule/metamount.sh        <- mounts the modules
- *   late_start     metamodule/service.sh
+ *   late_start     service.d/*.sh
+ *                  metamodule/service.sh
  *                  <regular modules>/service.sh
  *
  * Per-module layout handled here:
@@ -48,10 +50,19 @@
  *
  * with root credentials in the "nksu" SELinux domain (unconfined), and its
  * exit status is waited on so hooks run in order.
+ *
+ * The two stages are dispatched to a dedicated "nksu-modload" kthread and
+ * this file's public entry points return as soon as the work is queued, so
+ * a slow module script can never stall init, the boot watcher, the zygote
+ * feature stage or a late insmod.  The worker still runs each stage's hooks
+ * one at a time, preserving the ordering above (metamodule before regular
+ * modules, metamount.sh last).
  */
 
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/kthread.h>
+#include <linux/wait.h>
 #include <linux/slab.h>
 #include <linux/mm.h>
 #include <linux/string.h>
@@ -65,6 +76,8 @@
 #include <fmac.h>
 
 #define NKSU_MODULES_DIR "/data/adb/modules"
+#define NKSU_POST_FS_DATA_DIR "/data/adb/post-fs-data.d"
+#define NKSU_SERVICE_DIR "/data/adb/service.d"
 #define NKSU_MODULE_PROP "module.prop"
 #define NKSU_MODULE_DISABLE "disable"
 #define NKSU_MODULE_REMOVE "remove"
@@ -72,6 +85,7 @@
 #define NKSU_MODULE_POST_FS_DATA "post-fs-data.sh"
 #define NKSU_MODULE_SERVICE "service.sh"
 #define NKSU_MODULE_METAMOUNT "metamount.sh"
+#define NKSU_SCRIPT_SUFFIX ".sh"
 
 /* module paths are bounded; keep the stack frames small */
 #define NKSU_MODULE_PATH_MAX 320
@@ -132,6 +146,7 @@ struct nksu_module_dir {
 struct nksu_dir_ctx {
     struct dir_context ctx;
     struct nksu_module_dir dir;
+    bool files_only;
 };
 
 static int nksu_path_join(char *buf, size_t size, const char *dir, const char *name)
@@ -248,16 +263,24 @@ static nksu_filldir_ret_t nksu_filldir(struct dir_context *ctx, const char *name
         return NKSU_FILLDIR_CONTINUE;
     if (namlen == 2 && name[0] == '.' && name[1] == '.')
         return NKSU_FILLDIR_CONTINUE;
-    if (d_type != DT_DIR && d_type != DT_UNKNOWN)
-        return NKSU_FILLDIR_CONTINUE;
+
+    if (dctx->files_only) {
+        /* *.d directories: keep plain files, drop subdirectories. */
+        if (d_type == DT_DIR)
+            return NKSU_FILLDIR_CONTINUE;
+    } else {
+        if (d_type != DT_DIR && d_type != DT_UNKNOWN)
+            return NKSU_FILLDIR_CONTINUE;
+    }
 
     return nksu_module_dir_add(&dctx->dir, name, namlen) == 0 ? NKSU_FILLDIR_CONTINUE : NKSU_FILLDIR_STOP;
 }
 
-static int nksu_read_module_dirs(const char *path, struct nksu_module_dir *out)
+static int nksu_read_dir_entries(const char *path, struct nksu_module_dir *out, bool files_only)
 {
     struct nksu_dir_ctx dctx = {
         .ctx.actor = nksu_filldir,
+        .files_only = files_only,
     };
     struct file *f;
     int ret;
@@ -277,20 +300,16 @@ static int nksu_read_module_dirs(const char *path, struct nksu_module_dir *out)
     return ret;
 }
 
-static void nksu_module_run_hook(const char *moddir, const char *hook)
+static void nksu_spawn_script(const char *script)
 {
-    char script[NKSU_MODULE_PATH_MAX];
     char *argv[3];
     struct nksu_spawn_args args;
-
-    if (nksu_path_join(script, sizeof(script), moddir, hook))
-        return;
 
     if (!nksu_file_exists(script))
         return;
 
     argv[0] = (char *)NKSU_MODULE_SHELL;
-    argv[1] = script;
+    argv[1] = (char *)script;
     argv[2] = NULL;
 
     memset(&args, 0, sizeof(args));
@@ -302,6 +321,57 @@ static void nksu_module_run_hook(const char *moddir, const char *hook)
 
     pr_info("nksu: running module hook %s\n", script);
     nksu_spawn(&args);
+}
+
+static void nksu_module_run_hook(const char *moddir, const char *hook)
+{
+    char script[NKSU_MODULE_PATH_MAX];
+
+    if (nksu_path_join(script, sizeof(script), moddir, hook))
+        return;
+
+    nksu_spawn_script(script);
+}
+
+static bool nksu_has_suffix(const char *name, const char *suffix)
+{
+    size_t n = strlen(name);
+    size_t s = strlen(suffix);
+
+    return n >= s && strcmp(name + n - s, suffix) == 0;
+}
+
+/*
+ * Run every "*.sh" in a Magisk-style script directory (post-fs-data.d,
+ * service.d).  The directory is optional; a missing one is not an error.
+ */
+static void nksu_run_scripts_dir(const char *dir)
+{
+    struct nksu_module_dir files;
+    const struct cred *old;
+    size_t i;
+
+    old = nksu_module_creds_begin();
+
+    memset(&files, 0, sizeof(files));
+    if (nksu_read_dir_entries(dir, &files, true)) {
+        nksu_module_creds_end(old);
+        return;
+    }
+
+    for (i = 0; i < files.count; i++) {
+        char script[NKSU_MODULE_PATH_MAX];
+
+        if (!nksu_has_suffix(files.names[i], NKSU_SCRIPT_SUFFIX))
+            continue;
+        if (nksu_path_join(script, sizeof(script), dir, files.names[i]))
+            continue;
+
+        nksu_spawn_script(script);
+    }
+
+    nksu_module_dir_free(&files);
+    nksu_module_creds_end(old);
 }
 
 /* A module participates in a stage unless it is disabled or being removed. */
@@ -421,7 +491,7 @@ static void nksu_modules_foreach(const char *hook, bool want_meta)
     old = nksu_module_creds_begin();
 
     memset(&dirs, 0, sizeof(dirs));
-    if (nksu_read_module_dirs(NKSU_MODULES_DIR, &dirs)) {
+    if (nksu_read_dir_entries(NKSU_MODULES_DIR, &dirs, false)) {
         nksu_module_creds_end(old);
         return;
     }
@@ -444,22 +514,25 @@ static void nksu_modules_foreach(const char *hook, bool want_meta)
     nksu_module_creds_end(old);
 }
 
-/*
- * post-fs-data stage: called from the boot watcher once init reaches
- * second_stage (and from the late-load path).  Idempotent so the boot
- * watcher may announce the stage more than once.
- *
- * Order matches KernelSU-Next: the metamodule's own post-fs-data.sh runs
- * first, then regular modules', and only then the metamodule's metamount.sh
- * mounts everything.  With no metamodule nothing is mounted.
- */
-void nksu_modules_post_fs_data(void)
-{
-    if (READ_ONCE(post_fs_data_done))
-        return;
-    WRITE_ONCE(post_fs_data_done, true);
+/* ---- staged module bring-up (non-blocking) ---- */
 
+/*
+ * Both stages run on this worker so the callers (boot watcher, feature stage,
+ * late insmod) never wait on a module script.  A stage is a single boolean
+ * request; the worker drains post-fs-data before service, which keeps the
+ * boot-time ordering intact even if the zygote stage arrives early.
+ */
+static struct task_struct *modload_thread;
+static DECLARE_WAIT_QUEUE_HEAD(modload_wq);
+static bool post_fs_data_pending;
+static bool service_pending;
+
+static void nksu_modules_do_post_fs_data(void)
+{
     pr_info("nksu: post-fs-data module stage\n");
+
+    /* Magisk-compatible extra scripts run before the modules. */
+    nksu_run_scripts_dir(NKSU_POST_FS_DATA_DIR);
 
     nksu_modules_foreach(NKSU_MODULE_POST_FS_DATA, true);
     nksu_modules_foreach(NKSU_MODULE_POST_FS_DATA, false);
@@ -468,19 +541,97 @@ void nksu_modules_post_fs_data(void)
     nksu_modules_foreach(NKSU_MODULE_METAMOUNT, true);
 }
 
-/* late_start stage: called from the feature-component stage. */
-int nksu_modules_service(void)
+static void nksu_modules_do_service(void)
 {
     pr_info("nksu: service module stage\n");
 
+    nksu_run_scripts_dir(NKSU_SERVICE_DIR);
+
     nksu_modules_foreach(NKSU_MODULE_SERVICE, true);
     nksu_modules_foreach(NKSU_MODULE_SERVICE, false);
+}
 
+static int nksu_modload_thread_fn(void *data)
+{
+    while (!kthread_should_stop()) {
+        wait_event_interruptible(modload_wq, READ_ONCE(post_fs_data_pending) || READ_ONCE(service_pending) ||
+                                                 kthread_should_stop());
+        if (kthread_should_stop())
+            break;
+
+        if (READ_ONCE(post_fs_data_pending)) {
+            WRITE_ONCE(post_fs_data_pending, false);
+            nksu_modules_do_post_fs_data();
+        }
+
+        if (READ_ONCE(service_pending)) {
+            WRITE_ONCE(service_pending, false);
+            nksu_modules_do_service();
+        }
+    }
+
+    return 0;
+}
+
+static int nksu_modload_ensure(void)
+{
+    if (modload_thread)
+        return 0;
+
+    modload_thread = kthread_run(nksu_modload_thread_fn, NULL, "nksu-modload");
+    if (IS_ERR(modload_thread)) {
+        int ret = PTR_ERR(modload_thread);
+
+        modload_thread = NULL;
+        return ret;
+    }
+
+    return 0;
+}
+
+/*
+ * post-fs-data stage: called from the boot watcher once init reaches
+ * second_stage (and from the late-load path).  Idempotent so the boot
+ * watcher may announce the stage more than once, and non-blocking: the work
+ * is queued to the module loader and this returns at once.
+ *
+ * Order matches KernelSU-Next: post-fs-data.d/*.sh, the metamodule's own
+ * post-fs-data.sh, then regular modules', and only then the metamodule's
+ * metamount.sh mounts everything.  With no metamodule nothing is mounted.
+ */
+void nksu_modules_post_fs_data(void)
+{
+    if (READ_ONCE(post_fs_data_done))
+        return;
+
+    if (nksu_modload_ensure()) {
+        pr_err("nksu: failed to start module loader\n");
+        return;
+    }
+
+    WRITE_ONCE(post_fs_data_done, true);
+    WRITE_ONCE(post_fs_data_pending, true);
+    wake_up_interruptible(&modload_wq);
+}
+
+/* late_start stage: called from the feature-component stage. */
+int nksu_modules_service(void)
+{
+    if (nksu_modload_ensure())
+        return -ENOMEM;
+
+    WRITE_ONCE(service_pending, true);
+    wake_up_interruptible(&modload_wq);
     return 0;
 }
 
 void nksu_modules_exit(void)
 {
+    if (modload_thread) {
+        kthread_stop(modload_thread);
+        modload_thread = NULL;
+    }
+
     if (nksu_module_cred) {
         put_cred(nksu_module_cred);
         nksu_module_cred = NULL;
@@ -592,7 +743,7 @@ size_t nksu_modules_emit_json(char *buf, size_t size)
     old = nksu_module_creds_begin();
 
     memset(&dirs, 0, sizeof(dirs));
-    if (nksu_read_module_dirs(NKSU_MODULES_DIR, &dirs)) {
+    if (nksu_read_dir_entries(NKSU_MODULES_DIR, &dirs, false)) {
         nksu_json_puts(&j, "[]");
         ret = j.len < size ? j.len : size - 1;
         j.buf[ret] = '\0';

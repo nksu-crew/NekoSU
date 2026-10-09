@@ -245,6 +245,9 @@ void hook_exit(void)
 
     if (READ_ONCE(features_loaded))
         nksu_exit_feature_components();
+    else
+        /* post-fs-data may already have started the module loader. */
+        nksu_modules_exit();
 
     if (READ_ONCE(selinux_loaded))
         nksu_exit_selinux_components();
