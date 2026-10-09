@@ -11,8 +11,12 @@
  *
  * The boot stages are kept apart:
  *   nksu_modules_post_fs_data()  post-fs-data.sh  (init second_stage)
+ *                                + metamodule metamount.sh
  *   nksu_modules_service()       service.sh       (late_start / zygote)
  * The late-load path serves post-fs-data before the feature stage.
+ *
+ * Mounting is delegated to the metamodule (module.prop "metamodule=1"): its
+ * lifecycle scripts run first and its metamount.sh performs the mount.
  */
 void nksu_modules_post_fs_data(void);
 int nksu_modules_service(void);

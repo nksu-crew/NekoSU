@@ -19,12 +19,28 @@
  * late-load path calls nksu_modules_post_fs_data() before the feature stage
  * so both hooks still run once, in order.
  *
+ * Metamodule
+ * ----------
+ * As in KernelSU-Next, mounting is delegated to a *metamodule*: a module
+ * whose module.prop carries "metamodule=1" (or "=true").  Without one,
+ * modules are never mounted.  The metamodule lifecycle scripts run before
+ * regular modules' scripts, and its mount handler runs after all
+ * post-fs-data scripts:
+ *
+ *   post-fs-data   metamodule/post-fs-data.sh
+ *                  <regular modules>/post-fs-data.sh
+ *                  metamodule/metamount.sh        <- mounts the modules
+ *   late_start     metamodule/service.sh
+ *                  <regular modules>/service.sh
+ *
  * Per-module layout handled here:
  *
+ *   module.prop      may declare "metamodule=1"
  *   disable          present => module is disabled, skipped
  *   remove           present => module is pending removal, skipped
  *   post-fs-data.sh  post-fs-data hook
  *   service.sh       late_start hook
+ *   metamount.sh     metamodule-only mount handler
  *
  * A hook is executed as
  *
@@ -46,14 +62,17 @@
 #include <fmac.h>
 
 #define NKSU_MODULES_DIR "/data/adb/modules"
+#define NKSU_MODULE_PROP "module.prop"
 #define NKSU_MODULE_DISABLE "disable"
 #define NKSU_MODULE_REMOVE "remove"
 #define NKSU_MODULE_SHELL "/system/bin/sh"
 #define NKSU_MODULE_POST_FS_DATA "post-fs-data.sh"
 #define NKSU_MODULE_SERVICE "service.sh"
+#define NKSU_MODULE_METAMOUNT "metamount.sh"
 
 /* module paths are bounded; keep the stack frames small */
 #define NKSU_MODULE_PATH_MAX 512
+#define NKSU_MODULE_PROP_MAX 4096
 
 /* minimal environment so the shell and scripts have a usable PATH */
 static const char *const nksu_module_envp[] = {
@@ -103,6 +122,30 @@ static bool nksu_is_dir(const char *path)
         return false;
     filp_close(f, NULL);
     return true;
+}
+
+/* Read a small text file into @buf (NUL-terminated); returns 0 on success. */
+static int nksu_read_text(const char *path, char *buf, size_t size)
+{
+    struct file *f;
+    loff_t pos = 0;
+    ssize_t n;
+
+    if (size == 0)
+        return -EINVAL;
+
+    f = filp_open(path, O_RDONLY, 0);
+    if (IS_ERR(f))
+        return PTR_ERR(f);
+
+    n = kernel_read(f, buf, size - 1, &pos);
+    filp_close(f, NULL);
+
+    if (n < 0)
+        return (int)n;
+
+    buf[n] = '\0';
+    return 0;
 }
 
 static int nksu_module_dir_add(struct nksu_module_dir *dir, const char *name, int namlen)
@@ -229,19 +272,76 @@ static bool nksu_module_is_enabled(const char *moddir, const char *name)
     return true;
 }
 
-/* Run a single hook for every enabled module, in directory order. */
-static void nksu_modules_run(const char *hook)
+/* Find "<key>=<value>" in a module.prop body, values "1" and "true". */
+static bool nksu_prop_has_metamodule(const char *text)
+{
+    static const char key[] = "metamodule";
+    const char *p = text;
+
+    while (*p) {
+        const char *eol = strchrnul(p, '\n');
+        const char *eq = memchr(p, '=', eol - p);
+
+        if (eq) {
+            const char *k = p, *kend = eq;
+            const char *v = eq + 1, *vend = eol;
+
+            while (k < kend && (*k == ' ' || *k == '\t'))
+                k++;
+            while (kend > k && (kend[-1] == ' ' || kend[-1] == '\t' || kend[-1] == '\r'))
+                kend--;
+            while (v < vend && (*v == ' ' || *v == '\t'))
+                v++;
+            while (vend > v && (vend[-1] == ' ' || vend[-1] == '\t' || vend[-1] == '\r'))
+                vend--;
+
+            if ((size_t)(kend - k) == sizeof(key) - 1 && memcmp(k, key, sizeof(key) - 1) == 0) {
+                size_t vlen = (size_t)(vend - v);
+
+                if (vlen == 1 && v[0] == '1')
+                    return true;
+                if (vlen == 4 && strncasecmp(v, "true", 4) == 0)
+                    return true;
+            }
+        }
+
+        p = *eol ? eol + 1 : eol;
+    }
+
+    return false;
+}
+
+/*
+ * A metamodule declares itself with "metamodule=1" in module.prop.  The
+ * /data/adb/metamodule symlink (created at install time) is only a cache of
+ * the same information, so scanning module.prop is enough to find it here.
+ */
+static bool nksu_module_is_metamodule(const char *moddir)
+{
+    char path[NKSU_MODULE_PATH_MAX];
+    char buf[NKSU_MODULE_PROP_MAX];
+
+    if (nksu_path_join(path, sizeof(path), moddir, NKSU_MODULE_PROP))
+        return false;
+
+    if (nksu_read_text(path, buf, sizeof(buf)))
+        return false;
+
+    return nksu_prop_has_metamodule(buf);
+}
+
+/*
+ * Run @hook for every enabled module of one kind, in directory order:
+ * want_meta=false runs regular modules, want_meta=true the metamodule.
+ */
+static void nksu_modules_foreach(const char *hook, bool want_meta)
 {
     struct nksu_module_dir dirs;
     size_t i;
 
     memset(&dirs, 0, sizeof(dirs));
-    if (nksu_read_module_dirs(NKSU_MODULES_DIR, &dirs)) {
-        pr_info("nksu: no module directory %s\n", NKSU_MODULES_DIR);
+    if (nksu_read_module_dirs(NKSU_MODULES_DIR, &dirs))
         return;
-    }
-
-    pr_info("nksu: %s stage: %zu module(s)\n", hook, dirs.count);
 
     for (i = 0; i < dirs.count; i++) {
         char moddir[NKSU_MODULE_PATH_MAX];
@@ -250,6 +350,8 @@ static void nksu_modules_run(const char *hook)
         if (nksu_path_join(moddir, sizeof(moddir), NKSU_MODULES_DIR, name))
             continue;
         if (!nksu_module_is_enabled(moddir, name))
+            continue;
+        if (nksu_module_is_metamodule(moddir) != want_meta)
             continue;
 
         nksu_module_run_hook(moddir, hook);
@@ -262,6 +364,10 @@ static void nksu_modules_run(const char *hook)
  * post-fs-data stage: called from the boot watcher once init reaches
  * second_stage (and from the late-load path).  Idempotent so the boot
  * watcher may announce the stage more than once.
+ *
+ * Order matches KernelSU-Next: the metamodule's own post-fs-data.sh runs
+ * first, then regular modules', and only then the metamodule's metamount.sh
+ * mounts everything.  With no metamodule nothing is mounted.
  */
 void nksu_modules_post_fs_data(void)
 {
@@ -269,13 +375,23 @@ void nksu_modules_post_fs_data(void)
         return;
     WRITE_ONCE(post_fs_data_done, true);
 
-    nksu_modules_run(NKSU_MODULE_POST_FS_DATA);
+    pr_info("nksu: post-fs-data module stage\n");
+
+    nksu_modules_foreach(NKSU_MODULE_POST_FS_DATA, true);
+    nksu_modules_foreach(NKSU_MODULE_POST_FS_DATA, false);
+
+    pr_info("nksu: metamodule mount stage\n");
+    nksu_modules_foreach(NKSU_MODULE_METAMOUNT, true);
 }
 
 /* late_start stage: called from the feature-component stage. */
 int nksu_modules_service(void)
 {
-    nksu_modules_run(NKSU_MODULE_SERVICE);
+    pr_info("nksu: service module stage\n");
+
+    nksu_modules_foreach(NKSU_MODULE_SERVICE, true);
+    nksu_modules_foreach(NKSU_MODULE_SERVICE, false);
+
     return 0;
 }
 
