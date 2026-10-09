@@ -63,6 +63,7 @@
 #include <linux/module.h>
 #include <linux/kthread.h>
 #include <linux/wait.h>
+#include <linux/delay.h>
 #include <linux/slab.h>
 #include <linux/mm.h>
 #include <linux/string.h>
@@ -76,6 +77,7 @@
 #include <fmac.h>
 
 #define NKSU_MODULES_DIR "/data/adb/modules"
+#define NKSU_ADB_DIR "/data/adb"
 #define NKSU_POST_FS_DATA_DIR "/data/adb/post-fs-data.d"
 #define NKSU_SERVICE_DIR "/data/adb/service.d"
 #define NKSU_MODULE_PROP "module.prop"
@@ -355,9 +357,11 @@ static void nksu_run_scripts_dir(const char *dir)
 
     memset(&files, 0, sizeof(files));
     if (nksu_read_dir_entries(dir, &files, true)) {
+        pr_info("nksu: cannot read %s (not present yet?)\n", dir);
         nksu_module_creds_end(old);
         return;
     }
+    pr_info("nksu: %s: %zu script(s)\n", dir, files.count);
 
     for (i = 0; i < files.count; i++) {
         char script[NKSU_MODULE_PATH_MAX];
@@ -492,9 +496,11 @@ static void nksu_modules_foreach(const char *hook, bool want_meta)
 
     memset(&dirs, 0, sizeof(dirs));
     if (nksu_read_dir_entries(NKSU_MODULES_DIR, &dirs, false)) {
+        pr_warn("nksu: cannot read %s\n", NKSU_MODULES_DIR);
         nksu_module_creds_end(old);
         return;
     }
+    pr_info("nksu: %s: scanning %zu module dir(s)\n", hook, dirs.count);
 
     for (i = 0; i < dirs.count; i++) {
         char moddir[NKSU_MODULE_PATH_MAX];
@@ -527,9 +533,43 @@ static DECLARE_WAIT_QUEUE_HEAD(modload_wq);
 static bool post_fs_data_pending;
 static bool service_pending;
 
+/*
+ * Poll until /data/adb exists (i.e. /data has been mounted).  The post-fs-data
+ * stage can fire before vold mounts /data, which made the kernel-side loader
+ * see no modules at all.  Bounded to ~10s.
+ */
+static bool nksu_wait_for_adb(void)
+{
+    int i;
+
+    for (i = 0; i < 100; i++) {
+        const struct cred *old = nksu_module_creds_begin();
+        bool ready = nksu_is_dir(NKSU_ADB_DIR);
+
+        nksu_module_creds_end(old);
+        if (ready)
+            return true;
+        if (kthread_should_stop())
+            return false;
+        msleep(100);
+    }
+
+    return false;
+}
+
 static void nksu_modules_do_post_fs_data(void)
 {
     pr_info("nksu: post-fs-data module stage\n");
+
+    /*
+     * This stage fires from init's second_stage, but on FBE devices vold
+     * mounts /data a moment later (observed ~0.6s on a real device), so
+     * /data/adb was still missing and every module looked absent.  Wait for
+     * the tree to show up first; cap the wait so a device without a modules
+     * directory does not hold the service stage back.
+     */
+    if (!nksu_wait_for_adb())
+        pr_warn("nksu: %s not ready, post-fs-data stage may be incomplete\n", NKSU_ADB_DIR);
 
     /* Magisk-compatible extra scripts run before the modules. */
     nksu_run_scripts_dir(NKSU_POST_FS_DATA_DIR);
