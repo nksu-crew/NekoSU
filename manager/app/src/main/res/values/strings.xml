@@ -244,7 +244,7 @@
     <string name="install_start">Start install</string>
     <string name="install_working">Installing…</string>
     <string name="install_progress">Progress</string>
-    <string name="install_success">Patched image written to Download/vendor_boot_nksu.img</string>
+    <string name="install_success">Patched image written to Download/nekosu_…_vendor_boot.img</string>
     <string name="install_failed">Install failed</string>
     <string name="install_no_su">Root (su) is required to install</string>
     <string name="install_pick_first">Please select a vendor_boot image first</string>

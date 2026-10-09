@@ -238,7 +238,7 @@
     <string name="install_start">开始安装</string>
     <string name="install_working">正在安装…</string>
     <string name="install_progress">进度</string>
-    <string name="install_success">已生成补丁镜像 Download/vendor_boot_nksu.img</string>
+    <string name="install_success">已生成补丁镜像 Download/nekosu_…_vendor_boot.img</string>
     <string name="install_failed">安装失败</string>
     <string name="install_no_su">安装需要 Root (su) 权限</string>
     <string name="install_pick_first">请先选择 vendor_boot 镜像</string>

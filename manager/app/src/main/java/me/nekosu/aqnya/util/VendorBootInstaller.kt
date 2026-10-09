@@ -10,6 +10,7 @@ import androidx.annotation.RequiresApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.random.Random
 
 object VendorBootInstaller {
 
@@ -17,7 +18,19 @@ object VendorBootInstaller {
 
     private const val NCORE_LIB_NAME = "libncore.so"
 
-    private const val PATCHED_IMAGE_NAME = "vendor_boot_nksu.img"
+    /** 安装输出文件名: nekosu_<随机串>_vendor_boot.img。 */
+    private const val OUTPUT_PREFIX = "nekosu_"
+    private const val OUTPUT_SUFFIX = "_vendor_boot.img"
+    private const val RANDOM_TOKEN_LENGTH = 8
+    private const val RANDOM_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+    private fun outputImageName(): String {
+        val token =
+            (1..RANDOM_TOKEN_LENGTH)
+                .map { RANDOM_ALPHABET[Random.nextInt(RANDOM_ALPHABET.length)] }
+                .joinToString("")
+        return "$OUTPUT_PREFIX${token}$OUTPUT_SUFFIX"
+    }
 
     fun installDir(context: Context): File =
         File(context.filesDir, "nksu-install").apply { mkdirs() }
@@ -107,12 +120,17 @@ object VendorBootInstaller {
                 if (koFile != null) add(koFile.absolutePath)
             }
 
+            // 每次安装生成随机文件名: nekosu_<随机串>_vendor_boot.img
+            val produced = File(dir, outputImageName())
+            produced.delete()
+
             val process =
                 ProcessBuilder(cmd)
                     .directory(dir)
                     .redirectErrorStream(true)
                     .apply {
                         environment()["NKSU_NCORE"] = ncore.absolutePath
+                        environment()["NKSU_OUT"] = produced.absolutePath
                     }
                     .start()
 
@@ -122,7 +140,6 @@ object VendorBootInstaller {
 
             val exit = process.waitFor()
             if (exit == 0) {
-                val produced = File(dir, PATCHED_IMAGE_NAME)
                 if (produced.exists()) {
                     runCatching { exportToDownload(context, produced) }
                         .onSuccess { onOutput("[nksu] 已导出到: ${it.absolutePath}") }
@@ -138,7 +155,7 @@ object VendorBootInstaller {
      * 把生成的补丁镜像导出到 /sdcard/Download。
      *
      * - Android 10 以下、或已授予「所有文件访问」时直接写入公共目录,
-     *   这样文件名保持稳定 (Download/vendor_boot_nksu.img)。
+     *   导出后保持生成的名称 (Download/nekosu_<随机串>_vendor_boot.img)。
      * - 否则走 MediaStore.Downloads, 无需存储权限即可发布文件。
      *
      * 返回导出后的目标文件。
