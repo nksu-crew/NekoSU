@@ -24,6 +24,9 @@ object VendorBootInstaller {
     private const val RANDOM_TOKEN_LENGTH = 8
     private const val RANDOM_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
+    /** root 工作目录：root 无法写 app 私有目录，中间文件都放这里。 */
+    private const val ROOT_WORK_DIR = "/data/local/tmp/nksu-install"
+
     private fun outputImageName(): String = "$OUTPUT_PREFIX${randomToken()}$OUTPUT_SUFFIX"
 
     fun installDir(context: Context): File =
@@ -254,41 +257,62 @@ object VendorBootInstaller {
             }
 
             val part = partition
-            onOutput("[nksu] vendor_boot: ${part}")
+            onOutput("[nksu] vendor_boot: $part")
+
+            /*
+             * root 无法写入 app 私有目录 (app_data_file)，所以所有中间文件都放在
+             * /data/local/tmp 下，最终产物再由 root 复制到 Download——与 KernelSU
+             * 的 ksud boot-patch 直接输出到 Download 的做法一致。
+             */
+            val work = ROOT_WORK_DIR
+            val downloads =
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath
+            val dumpName = backupImageName()
+            val patchedName = outputImageName()
+            val dump = "$work/$dumpName"
+            val produced = "$work/$patchedName"
+            val stagedScript = "$work/vendor-boot.sh"
+            val stagedKo = "$work/$koName"
+
+            // 0) 准备 root 工作目录，并把脚本 / ko 复制进去。
+            val setupExit =
+                RootShell.execStreaming(
+                    "rm -rf ${quote(work)}; mkdir -p ${quote(work)}; " +
+                        "cp ${quote(script.absolutePath)} ${quote(stagedScript)} && " +
+                        "cp ${quote(koFile.absolutePath)} ${quote(stagedKo)}",
+                    onOutput,
+                )
+            val scriptPath = if (setupExit == 0) stagedScript else script.absolutePath
+            val koPath = if (setupExit == 0) stagedKo else koFile.absolutePath
 
             // 1) dump 当前分区作为源镜像，同时作为回滚备份。
-            val dump = File(dir, backupImageName())
-            dump.delete()
-            if (RootShell.execStreaming("dd if=${quote(part)} of=${quote(dump.absolutePath)} bs=4096", onOutput) != 0 ||
-                !dump.exists()
-            ) {
+            if (RootShell.execStreaming("dd if=${quote(part)} of=${quote(dump)} bs=4096", onOutput) != 0) {
                 onOutput("[nksu] ERROR: 读取 vendor_boot 失败")
                 return@withContext -1
             }
-            runCatching { exportToDownload(context, dump) }
-                .onSuccess { onOutput("[nksu] 原镜像备份已导出: ${it.absolutePath}") }
-                .onFailure { onOutput("[nksu] 备份导出失败: ${it.message}") }
+            copyToDownloads(dump, downloads, dumpName, onOutput)
 
             // 2) 打入 nksu.ko（复用 vendor-boot.sh）。
-            val produced = File(dir, outputImageName())
-            produced.delete()
             val patchCmd =
                 buildString {
                     append("NKSU_NCORE=${quote(ncore.absolutePath)} ")
-                    append("NKSU_OUT=${quote(produced.absolutePath)} ")
-                    append("NKSU_WORK=${quote(File(dir, "work").absolutePath)} ")
-                    append("sh ${quote(script.absolutePath)} ${quote(dump.absolutePath)} ${quote(koFile.absolutePath)}")
+                    append("NKSU_OUT=${quote(produced)} ")
+                    append("NKSU_WORK=${quote("$work/work")} ")
+                    append("sh ${quote(scriptPath)} ${quote(dump)} ${quote(koPath)}")
                 }
-            if (RootShell.execStreaming(patchCmd, onOutput) != 0 || !produced.exists()) {
+            if (RootShell.execStreaming(patchCmd, onOutput) != 0) {
                 onOutput("[nksu] ERROR: 补丁失败")
                 return@withContext -1
             }
-            runCatching { exportToDownload(context, produced) }
-                .onSuccess { onOutput("[nksu] 补丁镜像已导出: ${it.absolutePath}") }
-                .onFailure { onOutput("[nksu] 补丁镜像导出失败: ${it.message}") }
+
+            val size = RootShell.exec("stat -c %s ${quote(produced)}").output.trim().toLongOrNull() ?: 0L
+            if (size <= 0L) {
+                onOutput("[nksu] ERROR: 未生成补丁镜像")
+                return@withContext -1
+            }
+            copyToDownloads(produced, downloads, patchedName, onOutput)
 
             // 3) 写回分区并读回校验；不一致则回滚原镜像。
-            val size = produced.length()
             val blocks = (size + 4095) / 4096
 
             // 安全检查：补丁镜像不能超过分区容量。
@@ -299,26 +323,26 @@ object VendorBootInstaller {
                 return@withContext -1
             }
 
-            val readback = File(dir, "vendor_boot.readback.img")
-            val trimmed = File(dir, "vendor_boot.readback.trim")
+            val readback = "$work/readback.img"
+            val trimmed = "$work/readback.trim"
             val flashCmd =
                 buildString {
-                    append("dd if=${quote(produced.absolutePath)} of=${quote(part)} bs=4096 || exit 1\n")
+                    append("dd if=${quote(produced)} of=${quote(part)} bs=4096 || exit 1\n")
                     append("sync\n")
-                    append("dd if=${quote(part)} of=${quote(readback.absolutePath)} bs=4096 count=$blocks || exit 1\n")
-                    append("head -c $size ${quote(readback.absolutePath)} > ${quote(trimmed.absolutePath)} || exit 1\n")
-                    append("if cmp ${quote(produced.absolutePath)} ${quote(trimmed.absolutePath)} >/dev/null 2>&1; then\n")
+                    append("dd if=${quote(part)} of=${quote(readback)} bs=4096 count=$blocks || exit 1\n")
+                    append("head -c $size ${quote(readback)} > ${quote(trimmed)} || exit 1\n")
+                    append("if cmp ${quote(produced)} ${quote(trimmed)} >/dev/null 2>&1; then\n")
                     append("  echo '[nksu] 写入校验通过'\n")
                     append("else\n")
                     append("  echo '[nksu] 写入校验失败，正在回滚原镜像'\n")
-                    append("  dd if=${quote(dump.absolutePath)} of=${quote(part)} bs=4096\n")
+                    append("  dd if=${quote(dump)} of=${quote(part)} bs=4096\n")
                     append("  sync\n")
                     append("  exit 1\n")
                     append("fi")
                 }
             val flashExit = RootShell.execStreaming(flashCmd, onOutput)
-            readback.delete()
-            trimmed.delete()
+            RootShell.exec("rm -rf ${quote(work)}")
+
             if (flashExit != 0) {
                 onOutput("[nksu] ERROR: 刷入 vendor_boot 失败")
                 return@withContext -1
@@ -327,6 +351,26 @@ object VendorBootInstaller {
             onOutput("[nksu] 直接安装完成，重启后生效")
             0
         }
+
+    /** 用 root 把工作目录里的文件复制到 Download（root 可写，app 只读展示）。 */
+    private fun copyToDownloads(
+        source: String,
+        downloads: String,
+        name: String,
+        onOutput: (String) -> Unit,
+    ) {
+        val dest = "$downloads/$name"
+        val exit =
+            RootShell.execStreaming(
+                "mkdir -p ${quote(downloads)}; cp ${quote(source)} ${quote(dest)}; chmod 0644 ${quote(dest)}",
+                onOutput,
+            )
+        if (exit == 0) {
+            onOutput("[nksu] 已导出: $dest")
+        } else {
+            onOutput("[nksu] 导出到 Download 失败: $dest")
+        }
+    }
 
     /** 备份镜像文件名: nekosu_<随机串>_vendor_boot_orig.img。 */
     private fun backupImageName(): String = "$OUTPUT_PREFIX${randomToken()}_vendor_boot_orig.img"
