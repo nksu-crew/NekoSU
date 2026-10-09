@@ -26,9 +26,11 @@ int boot_stage = INIT_FIRST_STAGE;
  * components up at the right moment:
  *
  *   execve(id, "selinux_setup")  -> logged; the policy is loaded next
- *   execve(id, "second_stage")   -> SELinux Hook
- *   execve(app_process -Xzygote) -> feature components (profile, tracepoint,
- *                                   manager scan...), then drop the watcher
+ *   execve(id, "second_stage")   -> SELinux Hook (domain + rules)
+ *   execve(app_process -Xzygote) -> /data is prepared: post-fs-data module
+ *                                   stage, feature components (profile,
+ *                                   tracepoint, manager scan...), then drop
+ *                                   the watcher
  *
  * Late load just initializes everything at once (see nksu.c).
  */
@@ -160,19 +162,18 @@ static int init_thread_fn(void *data)
 
         WRITE_ONCE(stage_pending, false);
 
+        /*
+         * The policy is loaded during selinux_setup, so by second_stage we
+         * can inject the nksu domain and its rules.  Do NOT start the module
+         * stage here: on FBE devices init's second_stage runs *before* vold
+         * mounts and decrypts /data, so /data/adb/modules does not exist yet
+         * (this is what made every module look absent).
+         */
         if (READ_ONCE(boot_stage) == INIT_SECOND_STAGE && !selinux_loaded) {
-            if (nksu_init_selinux_components() == 0) {
+            if (nksu_init_selinux_components() == 0)
                 selinux_loaded = true;
-                /*
-                 * The nksu SELinux domain now exists.  /data is *not* mounted
-                 * yet on FBE devices (that happens during second_stage), so
-                 * the module loader waits for the tree itself before reading
-                 * it.
-                 */
-                nksu_modules_post_fs_data();
-            } else {
+            else
                 pr_err("nksu: SELinux hook init failed\n");
-            }
         }
 
         if (READ_ONCE(zygote_seen) && !features_loaded) {
@@ -188,6 +189,18 @@ static int init_thread_fn(void *data)
             if (!selinux_loaded &&
                 nksu_init_selinux_components() == 0)
                 selinux_loaded = true;
+
+            /*
+             * The first zygote exec is KernelSU's "/data prepared" point:
+             * vold has mounted and decrypted /data by now, so the module
+             * tree is readable.  Serve the post-fs-data module stage here,
+             * before the feature components queue the late_start (service)
+             * stage on the same worker; the worker keeps them in order.
+             */
+            if (selinux_loaded)
+                nksu_modules_post_fs_data();
+            else
+                pr_err("nksu: SELinux not ready, deferring module stage\n");
 
             if (nksu_init_feature_components() == 0)
                 features_loaded = true;

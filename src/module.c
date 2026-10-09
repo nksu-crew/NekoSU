@@ -11,10 +11,9 @@
  * The two stages are kept strictly apart, matching Magisk:
  *
  *   post-fs-data   nksu_modules_post_fs_data()  -> post-fs-data.sh
- *                  (init second_stage; waits for /data/adb/modules because
- *                   FBE mounts/decrypts /data only after second_stage)
+ *                  (first zygote exec: /data is mounted and decrypted)
  *   late_start     nksu_modules_service()       -> service.sh
- *                  (first zygote, i.e. the feature-component stage)
+ *                  (feature-component stage, same zygote event)
  *
  * A late load (insmod after boot) never saw the post-fs-data stage; the
  * late-load path calls nksu_modules_post_fs_data() before the feature stage
@@ -681,20 +680,18 @@ static void nksu_modules_do_post_fs_data(void)
     pr_info("nksu: post-fs-data module stage\n");
 
     /*
-     * This stage fires from init's second_stage, which on FBE devices runs
-     * *before* vold mounts and decrypts /data.  Wait for /data/adb first so
-     * the general scripts have somewhere to live.  Bounded, so a device
-     * without a modules directory does not hold the service stage back.
+     * The stage now starts at the first zygote exec, so /data is already
+     * mounted and decrypted.  Keep the waits as a safety net (they are
+     * normally instant) and so a device without a modules directory does
+     * not hold the service stage back.
      */
     if (!nksu_wait_for_adb())
         pr_warn("nksu: %s not ready, post-fs-data stage may be incomplete\n", NKSU_ADB_DIR);
 
     /*
-     * /data/adb shows up as soon as /data is mounted but its contents are
-     * only readable after vold finishes setting up FBE.  The module tree is
-     * the piece we care about, so use it as the readiness signal; reading it
-     * too early used to find zero modules and permanently skip every
-     * post-fs-data hook.  If it never shows up, the late_start stage retries.
+     * Reading /data/adb/modules too early used to find zero modules and
+     * permanently skip every post-fs-data hook.  If it still is not there,
+     * the late_start stage retries.
      */
     modules_ready = nksu_wait_for_modules();
 
@@ -765,10 +762,10 @@ static int nksu_modload_ensure(void)
 }
 
 /*
- * post-fs-data stage: called from the boot watcher once init reaches
- * second_stage (and from the late-load path).  Idempotent so the boot
- * watcher may announce the stage more than once, and non-blocking: the work
- * is queued to the module loader and this returns at once.
+ * post-fs-data stage: called when the first zygote execs, i.e. once /data is
+ * mounted and decrypted (and from the late-load path).  Idempotent so the
+ * boot watcher may announce the stage more than once, and non-blocking: the
+ * work is queued to the module loader and this returns at once.
  *
  * Order matches KernelSU-Next: post-fs-data.d scripts, the metamodule's own
  * post-fs-data.sh, then regular modules', and only then the metamodule's

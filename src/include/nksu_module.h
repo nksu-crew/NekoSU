@@ -16,7 +16,8 @@
  * The boot stages are kept apart:
  *   nksu_modules_post_fs_data()  post-fs-data.d scripts
  *                                + each module's sepolicy.rule
- *                                + post-fs-data.sh  (init second_stage)
+ *                                + post-fs-data.sh  (first zygote exec,
+ *                                  i.e. once /data is mounted/decrypted)
  *                                + metamodule metamount.sh
  *   nksu_modules_service()       service.d scripts
  *                                + service.sh       (late_start / zygote)
