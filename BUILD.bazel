@@ -1,0 +1,46 @@
+load("//bazel:nksu.bzl", "nksu_module")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "Kbuild",
+    "Kconfig",
+    "Makefile",
+])
+
+# Every input kbuild needs to build the out-of-tree module. The kernel tree
+# itself comes from the DDK (via $KDIR) and is intentionally not listed here.
+filegroup(
+    name = "nksu_srcs",
+    srcs = glob([
+        "src/**/*.c",
+        "src/**/*.h",
+    ]) + [
+        "Kbuild",
+        "Kconfig",
+        "Makefile",
+    ],
+)
+
+# Debug build, equivalent to `make CONFIG_NKSU=m CONFIG_NKSU_DEBUG=y`.
+nksu_module(
+    name = "nksu",
+    srcs = [":nksu_srcs"],
+    config = [
+        "CONFIG_NKSU=m",
+        "CONFIG_NKSU_DEBUG=y",
+    ],
+    module_name = "nksu",
+)
+
+# Release build without the debug instrumentation.
+nksu_module(
+    name = "nksu_release",
+    srcs = [":nksu_srcs"],
+    config = [
+        "CONFIG_NKSU=m",
+        "CONFIG_NKSU_DEBUG=n",
+    ],
+    module_name = "nksu",
+    out_dir = "release",
+)

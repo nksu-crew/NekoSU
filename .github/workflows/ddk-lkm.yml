@@ -24,14 +24,34 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
+    - name: Install bazelisk
+      env:
+        BAZELISK_VERSION: 'v1.29.0'
+      run: |
+        set -euxo pipefail
+        case "$(uname -m)" in
+          x86_64|amd64)  arch=amd64 ;;
+          aarch64|arm64) arch=arm64 ;;
+          *) echo "no bazelisk release for $(uname -m)" >&2; exit 1 ;;
+        esac
+        url="https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/bazelisk-linux-${arch}"
+        install_dir="$HOME/.local/bin"
+        mkdir -p "$install_dir"
+        curl -fsSL --retry 3 --retry-connrefused --retry-delay 2 \
+          -o "$install_dir/bazelisk" "$url"
+        chmod 0755 "$install_dir/bazelisk"
+        ln -sf bazelisk "$install_dir/bazel"
+        echo "$install_dir" >> "$GITHUB_PATH"
+
     - name: Build nksu.ko
       run: |
         git config --global --add safe.directory "*"
 
         echo "=== Building nksu for KMI: ${{ inputs.kmi }} ==="
 
-        make CONFIG_NKSU=m CONFIG_NKSU_DEBUG=y
-        
+        bazel build //:nksu \
+          --define=nksu_git_commit="$(git rev-parse --short=12 HEAD)"
+
         echo "=== Build completed ==="
 
         # Create output directory in GitHub workspace
@@ -39,7 +59,7 @@ jobs:
 
         # Copy with KMI-specific naming
         OUTPUT_NAME="${{ inputs.kmi }}_nksu.ko"
-        cp nksu.ko "/github/workspace/out/$OUTPUT_NAME"
+        cp bazel-bin/nksu.ko "/github/workspace/out/$OUTPUT_NAME"
         
         echo "Copied to: /github/workspace/out/$OUTPUT_NAME"
         ls -la "/github/workspace/out/$OUTPUT_NAME"

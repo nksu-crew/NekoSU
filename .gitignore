@@ -13,3 +13,6 @@ app/src/main/jniLibs/
 .kotlin/
 userspace/ncore/
 manager/app/src/main/assets/nksu/
+
+# Bazel convenience symlinks and output trees
+/bazel-*
