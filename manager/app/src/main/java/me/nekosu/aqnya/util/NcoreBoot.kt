@@ -3,34 +3,27 @@ package me.nekosu.aqnya.util
 import android.content.Context
 
 /**
- * 把随 APK 打包的 ncore 安装到固定路径 `/data/adb/nksu/ncore`。
+ * 让随 APK 打包的 ncore 就位到固定路径 `/data/adb/nksu/ncore`。
  *
  * 内核注入的 init.rc（见 `src/init_rc.c`）在 `post-fs-data` / `services` /
- * `boot-completed` 阶段 exec 这个路径，所以它必须在重启前就位。ncore 是内核
- * 无关的用户态模块运行时：枚举 `/data/adb/modules`、执行各阶段脚本、挂载
- * metamodule，并把每个模块的 `sepolicy.rule` 交给内核的 `/proc/nksu/sepolicy`。
+ * `boot-completed` 阶段 exec 这个路径。与 KernelSU 的 `ksud install` 一致，
+ * 这里不自己拷贝，而是以 root 运行 `ncore install`，由 ncore 把
+ * `/proc/self/exe`（即 APK 的 libncore.so）复制过去——这样它永远是当前
+ * 随 APK 打包的版本。
  *
  * 注意：vendor_boot 首次安装时应用通常还没有 root，此时无法写入 `/data/adb`。
- * 刷入并重启后 nksu 已生效，管理器启动时会通过 [RootShell] 再复制一次，之后
- * 的每次启动模块都能正常加载。
+ * 刷入并重启后 nksu 已生效，管理器启动时会再执行一次，之后的每次启动模块
+ * 都能正常加载。
  */
 object NcoreBoot {
     const val BOOT_PATH = "/data/adb/nksu/ncore"
 
-    /** 复制 ncore 到 [BOOT_PATH] 并赋可执行权限；成功返回 true。 */
+    /** 运行 `ncore install` 把它自己复制到 [BOOT_PATH]；成功返回 true。 */
     fun install(context: Context): Boolean {
-        val src = VendorBootInstaller.ncorePath(context)
-        if (!src.exists()) return false
+        val ncore = VendorBootInstaller.ncorePath(context)
+        if (!ncore.exists()) return false
 
-        val cmd =
-            buildString {
-                append("mkdir -p /data/adb/nksu && ")
-                append("cp -f ").append(quote(src.absolutePath)).append(' ')
-                append(quote(BOOT_PATH)).append(" && ")
-                append("chmod 0755 ").append(quote(BOOT_PATH)).append(" && ")
-                append("chown 0:0 ").append(quote(BOOT_PATH))
-            }
-        return RootShell.exec(cmd).code == 0
+        return RootShell.exec("${quote(ncore.absolutePath)} install").code == 0
     }
 
     private fun quote(s: String) = "'" + s.replace("'", "'\\''") + "'"
