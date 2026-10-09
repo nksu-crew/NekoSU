@@ -44,6 +44,7 @@
 #include <linux/version.h>
 #include <linux/sched.h>
 #include <linux/cred.h>
+#include <linux/capability.h>
 #include <linux/stat.h>
 #include <linux/fcntl.h>
 #include <linux/printk.h>
@@ -352,9 +353,67 @@ static long nksu_sys_fstat(const struct pt_regs *regs)
 
 /* ---- marker watcher ---- */
 
+/*
+ * The watcher is a kernel thread (u:r:kernel:s0), which SELinux does not
+ * allow to read the /dev/nksu markers (they inherit the tmpfs "device"
+ * label).  Borrow the unconfined nksu domain, exactly like the module loader
+ * does to walk /data/adb.  The cred is created on the first -EACCES, by which
+ * time the policy (and the nksu domain) is loaded.
+ */
+static struct cred *nksu_rc_cred;
+
+static struct cred *nksu_rc_cred_get(void)
+{
+    struct cred *cred;
+
+    if (nksu_rc_cred)
+        return nksu_rc_cred;
+
+    cred = prepare_creds();
+    if (!cred)
+        return NULL;
+
+    cred->cap_effective = CAP_FULL_SET;
+    cred->cap_permitted = CAP_FULL_SET;
+    cred->cap_bset = CAP_FULL_SET;
+    cred->cap_inheritable = CAP_FULL_SET;
+
+    if (set_domain(DOMAIN_CTX, cred)) {
+        abort_creds(cred);
+        return NULL;
+    }
+
+    nksu_rc_cred = cred;
+    return nksu_rc_cred;
+}
+
 static bool nksu_rc_marker_seen(const char *path)
 {
-    struct file *f = filp_open(path, O_RDONLY, 0);
+    struct cred *cred;
+    const struct cred *old;
+    struct file *f;
+
+    f = filp_open(path, O_RDONLY, 0);
+    if (!IS_ERR(f)) {
+        filp_close(f, NULL);
+        return true;
+    }
+
+    /*
+     * -ENOENT simply means init has not reached the stage yet.  -EACCES is
+     * the kernel domain being denied on the tmpfs marker, so borrow the
+     * unconfined nksu domain (the policy is loaded by then) and retry.
+     */
+    if (PTR_ERR(f) != -EACCES)
+        return false;
+
+    cred = nksu_rc_cred_get();
+    if (!cred)
+        return false;
+
+    old = override_creds(cred);
+    f = filp_open(path, O_RDONLY, 0);
+    revert_creds(old);
 
     if (IS_ERR(f))
         return false;
@@ -437,6 +496,11 @@ void nksu_init_rc_exit(void)
     if (nksu_rc_watch_thread) {
         kthread_stop(nksu_rc_watch_thread);
         nksu_rc_watch_thread = NULL;
+    }
+
+    if (nksu_rc_cred) {
+        put_cred(nksu_rc_cred);
+        nksu_rc_cred = NULL;
     }
 
     /*
