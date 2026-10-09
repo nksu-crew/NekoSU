@@ -11,7 +11,8 @@
  * The two stages are kept strictly apart, matching Magisk:
  *
  *   post-fs-data   nksu_modules_post_fs_data()  -> post-fs-data.sh
- *                  (init second_stage: /data mounted, before the zygote)
+ *                  (init second_stage; waits for /data/adb/modules because
+ *                   FBE mounts/decrypts /data only after second_stage)
  *   late_start     nksu_modules_service()       -> service.sh
  *                  (first zygote, i.e. the feature-component stage)
  *
@@ -603,6 +604,9 @@ static DECLARE_WAIT_QUEUE_HEAD(modload_wq);
 static bool post_fs_data_pending;
 static bool service_pending;
 
+/* set once the module hooks of the post-fs-data stage have actually run */
+static bool modules_post_fs_data_done;
+
 /*
  * Poll until /data/adb exists (i.e. /data has been mounted).  The post-fs-data
  * stage can fire before vold mounts /data, which made the kernel-side loader
@@ -627,23 +631,37 @@ static bool nksu_wait_for_adb(void)
     return false;
 }
 
-static void nksu_modules_do_post_fs_data(void)
+/*
+ * Poll until /data/adb/modules is actually readable.  /data/adb appears the
+ * instant /data is mounted, but on FBE devices the module tree only becomes
+ * readable a little later (after vold finishes enablefilecrypto/init_user0).
+ * Enumerating inside that window found zero modules and latched the stage as
+ * done, so no module's post-fs-data.sh or the metamodule's metamount.sh ever
+ * ran -- only late_start service.sh did.  Wait for the directory we are about
+ * to read; bounded to ~5s so a device without modules does not stall.
+ */
+static bool nksu_wait_for_modules(void)
 {
-    pr_info("nksu: post-fs-data module stage\n");
+    int i;
 
-    /*
-     * This stage fires from init's second_stage, but on FBE devices vold
-     * mounts /data a moment later (observed ~0.6s on a real device), so
-     * /data/adb was still missing and every module looked absent.  Wait for
-     * the tree to show up first; cap the wait so a device without a modules
-     * directory does not hold the service stage back.
-     */
-    if (!nksu_wait_for_adb())
-        pr_warn("nksu: %s not ready, post-fs-data stage may be incomplete\n", NKSU_ADB_DIR);
+    for (i = 0; i < 50; i++) {
+        const struct cred *old = nksu_module_creds_begin();
+        bool ready = nksu_is_dir(NKSU_MODULES_DIR);
 
-    /* Magisk-compatible extra scripts run before the modules. */
-    nksu_run_scripts_dir(NKSU_POST_FS_DATA_DIR);
+        nksu_module_creds_end(old);
+        if (ready)
+            return true;
+        if (kthread_should_stop())
+            return false;
+        msleep(100);
+    }
 
+    return false;
+}
+
+/* post-fs-data hooks that must run in order, once the module tree is there */
+static void nksu_modules_run_post_fs_data_hooks(void)
+{
     /* Each module's sepolicy.rule is applied before its boot scripts. */
     nksu_modules_apply_sepolicy();
 
@@ -652,11 +670,55 @@ static void nksu_modules_do_post_fs_data(void)
 
     pr_info("nksu: metamodule mount stage\n");
     nksu_modules_foreach(NKSU_MODULE_METAMOUNT, true);
+
+    WRITE_ONCE(modules_post_fs_data_done, true);
+}
+
+static void nksu_modules_do_post_fs_data(void)
+{
+    bool modules_ready;
+
+    pr_info("nksu: post-fs-data module stage\n");
+
+    /*
+     * This stage fires from init's second_stage, which on FBE devices runs
+     * *before* vold mounts and decrypts /data.  Wait for /data/adb first so
+     * the general scripts have somewhere to live.  Bounded, so a device
+     * without a modules directory does not hold the service stage back.
+     */
+    if (!nksu_wait_for_adb())
+        pr_warn("nksu: %s not ready, post-fs-data stage may be incomplete\n", NKSU_ADB_DIR);
+
+    /*
+     * /data/adb shows up as soon as /data is mounted but its contents are
+     * only readable after vold finishes setting up FBE.  The module tree is
+     * the piece we care about, so use it as the readiness signal; reading it
+     * too early used to find zero modules and permanently skip every
+     * post-fs-data hook.  If it never shows up, the late_start stage retries.
+     */
+    modules_ready = nksu_wait_for_modules();
+
+    /* Magisk-compatible extra scripts run before the modules. */
+    nksu_run_scripts_dir(NKSU_POST_FS_DATA_DIR);
+
+    if (modules_ready)
+        nksu_modules_run_post_fs_data_hooks();
+    else
+        pr_warn("nksu: %s not ready, deferring module stage to late_start\n",
+                NKSU_MODULES_DIR);
 }
 
 static void nksu_modules_do_service(void)
 {
     pr_info("nksu: service module stage\n");
+
+    /*
+     * If the module tree was not readable when the post-fs-data stage ran,
+     * serve its module hooks now, before the late_start hooks, so they are
+     * never lost.
+     */
+    if (!READ_ONCE(modules_post_fs_data_done))
+        nksu_modules_run_post_fs_data_hooks();
 
     nksu_run_scripts_dir(NKSU_SERVICE_DIR);
 

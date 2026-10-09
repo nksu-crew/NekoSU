@@ -164,8 +164,10 @@ static int init_thread_fn(void *data)
             if (nksu_init_selinux_components() == 0) {
                 selinux_loaded = true;
                 /*
-                 * /data is mounted and the nksu SELinux domain now exists:
-                 * this is the post-fs-data stage.
+                 * The nksu SELinux domain now exists.  /data is *not* mounted
+                 * yet on FBE devices (that happens during second_stage), so
+                 * the module loader waits for the tree itself before reading
+                 * it.
                  */
                 nksu_modules_post_fs_data();
             } else {
