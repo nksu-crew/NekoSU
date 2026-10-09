@@ -68,8 +68,8 @@ static const module_component_t feature_components[] = {
         .exit = appscan_exit,
     },
     {
-        .name = "module loader",
-        .init = nksu_modules_init,
+        .name = "module service",
+        .init = nksu_modules_service,
         .exit = nksu_modules_exit,
     },
 #ifdef CONFIG_NKSU_SYSCALL
@@ -174,6 +174,12 @@ static int nekosu_init_all_components(void)
 
     if (ret)
         return ret;
+
+    /*
+     * A late load missed the post-fs-data stage; serve it before the
+     * feature (late_start) components, which include the module service.
+     */
+    nksu_modules_post_fs_data();
 
     ret = nksu_init_feature_components();
     if (ret)

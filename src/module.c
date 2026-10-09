@@ -8,12 +8,23 @@
  * longer depends on a userspace daemon (ksud/ncore) enumerating the directory
  * and forking the scripts.
  *
+ * The two stages are kept strictly apart, matching Magisk:
+ *
+ *   post-fs-data   nksu_modules_post_fs_data()  -> post-fs-data.sh
+ *                  (init second_stage: /data mounted, before the zygote)
+ *   late_start     nksu_modules_service()       -> service.sh
+ *                  (first zygote, i.e. the feature-component stage)
+ *
+ * A late load (insmod after boot) never saw the post-fs-data stage; the
+ * late-load path calls nksu_modules_post_fs_data() before the feature stage
+ * so both hooks still run once, in order.
+ *
  * Per-module layout handled here:
  *
  *   disable          present => module is disabled, skipped
  *   remove           present => module is pending removal, skipped
- *   post-fs-data.sh  boot hook
- *   service.sh       boot hook
+ *   post-fs-data.sh  post-fs-data hook
+ *   service.sh       late_start hook
  *
  * A hook is executed as
  *
@@ -38,15 +49,11 @@
 #define NKSU_MODULE_DISABLE "disable"
 #define NKSU_MODULE_REMOVE "remove"
 #define NKSU_MODULE_SHELL "/system/bin/sh"
+#define NKSU_MODULE_POST_FS_DATA "post-fs-data.sh"
+#define NKSU_MODULE_SERVICE "service.sh"
 
 /* module paths are bounded; keep the stack frames small */
 #define NKSU_MODULE_PATH_MAX 512
-
-/* boot hooks, in execution order */
-static const char *const nksu_module_hooks[] = {
-    "post-fs-data.sh",
-    "service.sh",
-};
 
 /* minimal environment so the shell and scripts have a usable PATH */
 static const char *const nksu_module_envp[] = {
@@ -54,6 +61,9 @@ static const char *const nksu_module_envp[] = {
     "ANDROID_ROOT=/system",
     NULL,
 };
+
+/* set once the post-fs-data stage has been served */
+static bool post_fs_data_done;
 
 struct nksu_module_dir {
     char **names;
@@ -198,52 +208,74 @@ static void nksu_module_run_hook(const char *moddir, const char *hook)
     nksu_spawn(&args);
 }
 
-static void nksu_module_load_one(const char *name)
+/* A module participates in a stage unless it is disabled or being removed. */
+static bool nksu_module_is_enabled(const char *moddir, const char *name)
 {
-    char moddir[NKSU_MODULE_PATH_MAX];
     char flag[NKSU_MODULE_PATH_MAX];
-    size_t i;
-
-    if (nksu_path_join(moddir, sizeof(moddir), NKSU_MODULES_DIR, name))
-        return;
 
     if (!nksu_is_dir(moddir))
-        return;
+        return false;
 
     if (!nksu_path_join(flag, sizeof(flag), moddir, NKSU_MODULE_DISABLE) && nksu_file_exists(flag)) {
         pr_info("nksu: module '%s' is disabled, skipping\n", name);
-        return;
+        return false;
     }
 
     if (!nksu_path_join(flag, sizeof(flag), moddir, NKSU_MODULE_REMOVE) && nksu_file_exists(flag)) {
         pr_info("nksu: module '%s' is marked for removal, skipping\n", name);
-        return;
+        return false;
     }
 
-    pr_info("nksu: loading module '%s'\n", name);
-
-    for (i = 0; i < ARRAY_SIZE(nksu_module_hooks); i++)
-        nksu_module_run_hook(moddir, nksu_module_hooks[i]);
+    return true;
 }
 
-int nksu_modules_init(void)
+/* Run a single hook for every enabled module, in directory order. */
+static void nksu_modules_run(const char *hook)
 {
     struct nksu_module_dir dirs;
     size_t i;
 
     memset(&dirs, 0, sizeof(dirs));
-
     if (nksu_read_module_dirs(NKSU_MODULES_DIR, &dirs)) {
         pr_info("nksu: no module directory %s\n", NKSU_MODULES_DIR);
-        return 0;
+        return;
     }
 
-    pr_info("nksu: %zu module(s) found in %s\n", dirs.count, NKSU_MODULES_DIR);
+    pr_info("nksu: %s stage: %zu module(s)\n", hook, dirs.count);
 
-    for (i = 0; i < dirs.count; i++)
-        nksu_module_load_one(dirs.names[i]);
+    for (i = 0; i < dirs.count; i++) {
+        char moddir[NKSU_MODULE_PATH_MAX];
+        const char *name = dirs.names[i];
+
+        if (nksu_path_join(moddir, sizeof(moddir), NKSU_MODULES_DIR, name))
+            continue;
+        if (!nksu_module_is_enabled(moddir, name))
+            continue;
+
+        nksu_module_run_hook(moddir, hook);
+    }
 
     nksu_module_dir_free(&dirs);
+}
+
+/*
+ * post-fs-data stage: called from the boot watcher once init reaches
+ * second_stage (and from the late-load path).  Idempotent so the boot
+ * watcher may announce the stage more than once.
+ */
+void nksu_modules_post_fs_data(void)
+{
+    if (READ_ONCE(post_fs_data_done))
+        return;
+    WRITE_ONCE(post_fs_data_done, true);
+
+    nksu_modules_run(NKSU_MODULE_POST_FS_DATA);
+}
+
+/* late_start stage: called from the feature-component stage. */
+int nksu_modules_service(void)
+{
+    nksu_modules_run(NKSU_MODULE_SERVICE);
     return 0;
 }
 

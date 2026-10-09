@@ -6,6 +6,7 @@
 #include "tools.h"
 #include "selinux/selinux.h"
 #include "nksu.h"
+#include "nksu_module.h"
 #include "klog.h"
 
 enum init_boot_stage {
@@ -160,10 +161,16 @@ static int init_thread_fn(void *data)
         WRITE_ONCE(stage_pending, false);
 
         if (READ_ONCE(boot_stage) == INIT_SECOND_STAGE && !selinux_loaded) {
-            if (nksu_init_selinux_components() == 0)
+            if (nksu_init_selinux_components() == 0) {
                 selinux_loaded = true;
-            else
+                /*
+                 * /data is mounted and the nksu SELinux domain now exists:
+                 * this is the post-fs-data stage.
+                 */
+                nksu_modules_post_fs_data();
+            } else {
                 pr_err("nksu: SELinux hook init failed\n");
+            }
         }
 
         if (READ_ONCE(zygote_seen) && !features_loaded) {
