@@ -58,15 +58,8 @@ object ModuleRepository {
 
     /** 执行任意 root 命令，返回退出码与合并输出。 */
     fun exec(cmd: String): Result {
-        val out = ncore.execRoot(cmd) ?: return Result(-1, "root shell unavailable")
-        val marker = out.lastIndexOf("[exit ")
-        if (marker < 0) return Result(-1, out)
-        val code =
-            out.substring(marker + 6)
-                .takeWhile { it.isDigit() || it == '-' }
-                .toIntOrNull()
-                ?: -1
-        return Result(code, out.substring(0, marker).trimEnd())
+        val r = RootShell.ncoreExec(cmd)
+        return Result(r.code, r.output)
     }
 
     private fun quote(s: String) = "'" + s.replace("'", "'\\''") + "'"

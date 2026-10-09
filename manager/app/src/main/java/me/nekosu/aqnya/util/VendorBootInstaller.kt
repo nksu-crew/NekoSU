@@ -24,13 +24,7 @@ object VendorBootInstaller {
     private const val RANDOM_TOKEN_LENGTH = 8
     private const val RANDOM_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
-    private fun outputImageName(): String {
-        val token =
-            (1..RANDOM_TOKEN_LENGTH)
-                .map { RANDOM_ALPHABET[Random.nextInt(RANDOM_ALPHABET.length)] }
-                .joinToString("")
-        return "$OUTPUT_PREFIX${token}$OUTPUT_SUFFIX"
-    }
+    private fun outputImageName(): String = "$OUTPUT_PREFIX${randomToken()}$OUTPUT_SUFFIX"
 
     fun installDir(context: Context): File =
         File(context.filesDir, "nksu-install").apply { mkdirs() }
@@ -150,6 +144,156 @@ object VendorBootInstaller {
             }
             exit
         }
+
+    /**
+     * 定位本机 vendor_boot 分区。
+     *
+     * 依次尝试标准的 by-name 链接，并优先当前 slot 的 `vendor_boot<slot>`。
+     * 返回可直接 `dd` 的路径；找不到（如非 GKI 设备）返回 null。
+     */
+    fun detectVendorBootPartition(): String? {
+        val cmd =
+            """
+            SLOT=${'$'}(getprop ro.boot.slot_suffix 2>/dev/null)
+            for base in /dev/block/by-name /dev/block/bootdevice/by-name; do
+              for name in vendor_boot vendor_boot${'$'}SLOT; do
+                if [ -e "${'$'}base/${'$'}name" ]; then
+                  echo "${'$'}base/${'$'}name"
+                  exit 0
+                fi
+              done
+            done
+            exit 1
+            """.trimIndent()
+
+        val r = RootShell.exec(cmd)
+        return r.output
+            .lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.startsWith("/dev/") }
+    }
+
+    /**
+     * 直接安装：以 root 读取本机 vendor_boot，打入 nksu.ko 后写回分区，
+     * 不再需要用户手动 fastboot。
+     *
+     * 流程：检测分区 -> dump 原镜像并导出备份 -> patch -> 导出补丁镜像 ->
+     * 写回分区 -> 读回校验（失败则自动回滚原镜像）。
+     *
+     * 需要设备已具备 root（Magisk/KernelSU 等 su，或已装 nksu）。
+     */
+    suspend fun directInstall(
+        context: Context,
+        koName: String,
+        onOutput: (String) -> Unit,
+    ): Int =
+        withContext(Dispatchers.IO) {
+            val script = prepare(context, koName)
+            val dir = installDir(context)
+            val ncore = ncorePath(context)
+
+            if (!ncore.exists() || !ncore.canExecute()) {
+                onOutput("[nksu] ERROR: ncore 不可执行: ${ncore.absolutePath}")
+                return@withContext -1
+            }
+            val koFile = File(dir, koName)
+            if (!koFile.exists()) {
+                onOutput("[nksu] ERROR: assets/$koName 未找到或复制失败")
+                return@withContext -1
+            }
+            if (!RootShell.available()) {
+                onOutput("[nksu] ERROR: 未检测到 root（需要 Magisk/KernelSU 等 su，或已安装 nksu）")
+                return@withContext -1
+            }
+
+            val part = detectVendorBootPartition()
+            if (part == null) {
+                onOutput("[nksu] ERROR: 未找到 vendor_boot 分区")
+                return@withContext -1
+            }
+            onOutput("[nksu] vendor_boot: $part")
+
+            // 1) dump 当前分区作为源镜像，同时作为回滚备份。
+            val dump = File(dir, backupImageName())
+            dump.delete()
+            if (RootShell.execStreaming("dd if=${quote(part)} of=${quote(dump.absolutePath)} bs=4096", onOutput) != 0 ||
+                !dump.exists()
+            ) {
+                onOutput("[nksu] ERROR: 读取 vendor_boot 失败")
+                return@withContext -1
+            }
+            runCatching { exportToDownload(context, dump) }
+                .onSuccess { onOutput("[nksu] 原镜像备份已导出: ${it.absolutePath}") }
+                .onFailure { onOutput("[nksu] 备份导出失败: ${it.message}") }
+
+            // 2) 打入 nksu.ko（复用 vendor-boot.sh）。
+            val produced = File(dir, outputImageName())
+            produced.delete()
+            val patchCmd =
+                buildString {
+                    append("NKSU_NCORE=${quote(ncore.absolutePath)} ")
+                    append("NKSU_OUT=${quote(produced.absolutePath)} ")
+                    append("NKSU_WORK=${quote(File(dir, "work").absolutePath)} ")
+                    append("sh ${quote(script.absolutePath)} ${quote(dump.absolutePath)} ${quote(koFile.absolutePath)}")
+                }
+            if (RootShell.execStreaming(patchCmd, onOutput) != 0 || !produced.exists()) {
+                onOutput("[nksu] ERROR: 补丁失败")
+                return@withContext -1
+            }
+            runCatching { exportToDownload(context, produced) }
+                .onSuccess { onOutput("[nksu] 补丁镜像已导出: ${it.absolutePath}") }
+                .onFailure { onOutput("[nksu] 补丁镜像导出失败: ${it.message}") }
+
+            // 3) 写回分区并读回校验；不一致则回滚原镜像。
+            val size = produced.length()
+            val blocks = (size + 4095) / 4096
+
+            // 安全检查：补丁镜像不能超过分区容量。
+            val sizeCmd = "cat /sys/class/block/${'$'}(basename ${'$'}(readlink -f ${quote(part)}))/size"
+            val partSectors = RootShell.exec(sizeCmd).output.trim().toLongOrNull()
+            if (partSectors != null && size > partSectors * 512L) {
+                onOutput("[nksu] ERROR: 补丁镜像 ($size 字节) 超过 vendor_boot 分区容量 (${partSectors * 512L} 字节)")
+                return@withContext -1
+            }
+
+            val readback = File(dir, "vendor_boot.readback.img")
+            val trimmed = File(dir, "vendor_boot.readback.trim")
+            val flashCmd =
+                buildString {
+                    append("dd if=${quote(produced.absolutePath)} of=${quote(part)} bs=4096 || exit 1\n")
+                    append("sync\n")
+                    append("dd if=${quote(part)} of=${quote(readback.absolutePath)} bs=4096 count=$blocks || exit 1\n")
+                    append("head -c $size ${quote(readback.absolutePath)} > ${quote(trimmed.absolutePath)} || exit 1\n")
+                    append("if cmp ${quote(produced.absolutePath)} ${quote(trimmed.absolutePath)} >/dev/null 2>&1; then\n")
+                    append("  echo '[nksu] 写入校验通过'\n")
+                    append("else\n")
+                    append("  echo '[nksu] 写入校验失败，正在回滚原镜像'\n")
+                    append("  dd if=${quote(dump.absolutePath)} of=${quote(part)} bs=4096\n")
+                    append("  sync\n")
+                    append("  exit 1\n")
+                    append("fi")
+                }
+            val flashExit = RootShell.execStreaming(flashCmd, onOutput)
+            readback.delete()
+            trimmed.delete()
+            if (flashExit != 0) {
+                onOutput("[nksu] ERROR: 刷入 vendor_boot 失败")
+                return@withContext -1
+            }
+
+            onOutput("[nksu] 直接安装完成，重启后生效")
+            0
+        }
+
+    /** 备份镜像文件名: nekosu_<随机串>_vendor_boot_orig.img。 */
+    private fun backupImageName(): String = "$OUTPUT_PREFIX${randomToken()}_vendor_boot_orig.img"
+
+    private fun randomToken(): String =
+        (1..RANDOM_TOKEN_LENGTH)
+            .map { RANDOM_ALPHABET[Random.nextInt(RANDOM_ALPHABET.length)] }
+            .joinToString("")
+
+    private fun quote(s: String): String = "'" + s.replace("'", "'\\''") + "'"
 
     /**
      * 把生成的补丁镜像导出到 /sdcard/Download。

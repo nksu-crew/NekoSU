@@ -250,6 +250,16 @@
     <string name="install_pick_first">Please select a vendor_boot image first</string>
     <string name="install_ko_missing">No kernel module (nksu.ko) packaged in assets</string>
     <string name="install_done">Done</string>
+    <string name="install_method_direct">Direct install (root)</string>
+    <string name="install_method_direct_desc">Read this device\'s vendor_boot, patch it and flash it back automatically</string>
+    <string name="install_direct_checking">Checking root and vendor_boot partition…</string>
+    <string name="install_direct_no_root">Root not available. Install Magisk/KernelSU first.</string>
+    <string name="install_direct_no_part">vendor_boot partition not found on this device</string>
+    <string name="install_direct_retry">Retry</string>
+    <string name="install_direct_confirm_title">Flash vendor_boot directly?</string>
+    <string name="install_direct_confirm_message">The patched image will be written to\n%1$s\n\nThe original image is backed up to Download first, and the bootloader must be unlocked. Continue?</string>
+    <string name="install_direct_confirm_ok">Flash</string>
+    <string name="install_direct_success">Installed. Reboot to take effect.</string>
 
     <!-- Modules -->
     <string name="nav_modules">Modules</string>
