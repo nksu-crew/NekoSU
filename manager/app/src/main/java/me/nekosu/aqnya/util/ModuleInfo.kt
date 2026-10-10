@@ -21,6 +21,12 @@ data class ModuleInfo(
     val remove: Boolean = false,
     val skipMount: Boolean = false,
     val hasSystem: Boolean = false,
+    // The kernel interface does not report these yet; the UI falls back to "not available"
+    // until a WebUI / action script probe is wired up.
+    val hasWebUi: Boolean = false,
+    val hasActionScript: Boolean = false,
+    val actionIconPath: String? = null,
+    val webUiIconPath: String? = null,
 ) {
     val title: String get() = name.ifBlank { id }
 

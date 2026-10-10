@@ -284,4 +284,42 @@
     <string name="modules_install_failed">Install failed</string>
     <string name="modules_install_close">Done</string>
     <string name="cd_more">More</string>
+
+    <!-- Modules (Material 3 page) -->
+    <string name="module">Modules</string>
+    <string name="module_install">Install</string>
+    <string name="module_version">Version</string>
+    <string name="module_author">Author</string>
+    <string name="module_repos">Module repositories</string>
+    <string name="module_sort_action_first">Action modules first</string>
+    <string name="module_sort_enabled_first">Enabled modules first</string>
+    <string name="module_magisk_conflict">Magisk and NekoSU cannot be installed at the same time. Please uninstall Magisk first.</string>
+    <string name="reboot">Reboot</string>
+    <string name="reboot_soft">Soft reboot</string>
+    <string name="reboot_to_apply">Reboot to apply changes</string>
+    <string name="module_update">Update</string>
+    <string name="uninstall">Uninstall</string>
+    <string name="undo">Undo</string>
+    <string name="action">Action</string>
+    <string name="open">Open</string>
+    <string name="module_uninstall_confirm">Uninstall module %1$s?</string>
+    <string name="metamodule_uninstall_confirm">Uninstall metamodule %1$s? Modules depending on it may break.</string>
+    <string name="module_shortcut_title">Create shortcut</string>
+    <string name="module_shortcut_icon_pick">Choose icon</string>
+    <string name="module_shortcut_name_label">Name</string>
+    <string name="module_shortcut_delete">Delete shortcut</string>
+    <string name="module_shortcut_copy_scheme">Copy deep link</string>
+    <string name="module_shortcut_scheme_copied">Deep link copied</string>
+    <string name="module_toggle_failed_enable">Failed to enable %1$s</string>
+    <string name="module_toggle_failed_disable">Failed to disable %1$s</string>
+    <string name="module_uninstall_success">Uninstalled %1$s</string>
+    <string name="module_uninstall_failed">Failed to uninstall %1$s</string>
+    <string name="module_undo_uninstall_success">Cancelled removal of %1$s</string>
+    <string name="module_undo_uninstall_failed">Failed to cancel removal of %1$s</string>
+    <string name="module_install_success">Installed %1$s</string>
+    <string name="module_install_failed">Install failed: %1$s</string>
+    <string name="module_repo_unsupported">Module repository is not available in this build</string>
+    <string name="module_webui_unsupported">WebUI is not available in this build</string>
+    <string name="module_action_unsupported">Module action is not available in this build</string>
+    <string name="module_update_unsupported">Module update is not available in this build</string>
 </resources>

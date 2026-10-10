@@ -52,6 +52,8 @@ object ModuleRepository {
 
     fun markRemove(id: String): Result = exec("touch ${quote("/data/adb/modules/$id")}/remove")
 
+    fun undoRemove(id: String): Result = exec("rm -f ${quote("/data/adb/modules/$id")}/remove")
+
     fun uninstall(id: String): Result = exec("rm -rf ${quote("/data/adb/modules/$id")}")
 
     fun install(zipPath: String): Result = exec(installCommand(zipPath))

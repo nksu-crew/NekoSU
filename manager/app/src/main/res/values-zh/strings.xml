@@ -278,4 +278,42 @@
     <string name="modules_install_failed">安装失败</string>
     <string name="modules_install_close">完成</string>
     <string name="cd_more">更多</string>
+
+    <!-- 模块（Material 3 页面） -->
+    <string name="module">模块</string>
+    <string name="module_install">安装</string>
+    <string name="module_version">版本</string>
+    <string name="module_author">作者</string>
+    <string name="module_repos">模块仓库</string>
+    <string name="module_sort_action_first">可执行模块优先</string>
+    <string name="module_sort_enabled_first">已启用模块优先</string>
+    <string name="module_magisk_conflict">Magisk 与 NekoSU 不能同时安装，请先卸载 Magisk。</string>
+    <string name="reboot">重启</string>
+    <string name="reboot_soft">软重启</string>
+    <string name="reboot_to_apply">重启后生效</string>
+    <string name="module_update">更新</string>
+    <string name="uninstall">卸载</string>
+    <string name="undo">撤销</string>
+    <string name="action">执行</string>
+    <string name="open">打开</string>
+    <string name="module_uninstall_confirm">确定卸载模块 %1$s？</string>
+    <string name="metamodule_uninstall_confirm">确定卸载元模块 %1$s？依赖它的模块可能失效。</string>
+    <string name="module_shortcut_title">创建快捷方式</string>
+    <string name="module_shortcut_icon_pick">选择图标</string>
+    <string name="module_shortcut_name_label">名称</string>
+    <string name="module_shortcut_delete">删除快捷方式</string>
+    <string name="module_shortcut_copy_scheme">复制深链</string>
+    <string name="module_shortcut_scheme_copied">已复制深链</string>
+    <string name="module_toggle_failed_enable">启用 %1$s 失败</string>
+    <string name="module_toggle_failed_disable">禁用 %1$s 失败</string>
+    <string name="module_uninstall_success">已卸载 %1$s</string>
+    <string name="module_uninstall_failed">卸载 %1$s 失败</string>
+    <string name="module_undo_uninstall_success">已撤销移除 %1$s</string>
+    <string name="module_undo_uninstall_failed">撤销移除 %1$s 失败</string>
+    <string name="module_install_success">已安装 %1$s</string>
+    <string name="module_install_failed">安装失败：%1$s</string>
+    <string name="module_repo_unsupported">当前版本暂不支持模块仓库</string>
+    <string name="module_webui_unsupported">当前版本暂不支持 WebUI</string>
+    <string name="module_action_unsupported">当前版本暂不支持模块操作脚本</string>
+    <string name="module_update_unsupported">当前版本暂不支持模块更新</string>
 </resources>
