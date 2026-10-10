@@ -55,8 +55,10 @@ object RootShell {
      * `su -c cat`。常驻 shell 不可用时退回一次性 `su -c cat`。
      */
     fun readFileBytes(path: String): ByteArray? {
-        synchronized(shellLock) {
-            persistentRead(path)?.let { return it }
+        if (!shellDisabled) {
+            synchronized(shellLock) {
+                persistentRead(path)?.let { return it }
+            }
         }
         return oneShotRead(path)
     }
@@ -64,7 +66,10 @@ object RootShell {
     private const val B64_BEGIN = "__NKSU_B64_BEGIN__"
     private const val B64_END = "__NKSU_B64_END__"
     private const val SHELL_EOF = "__NKSU_SHELL_EOF__"
-    private const val SHELL_READ_TIMEOUT_MS = 5000L
+    private const val SHELL_READ_TIMEOUT_MS = 3000L
+
+    @Volatile
+    private var shellDisabled = false
 
     private val shellLock = Any()
     private var shellProcess: Process? = null
@@ -124,6 +129,8 @@ object RootShell {
             while (true) {
                 val line = queue.poll(SHELL_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
                 if (line == null || line == SHELL_EOF) {
+                    // 会话失效：本次及后续读取都退回一次性 su，避免每个资源都等超时。
+                    shellDisabled = true
                     killShell()
                     return null
                 }
@@ -139,6 +146,7 @@ object RootShell {
                 payload.append(line)
             }
         } catch (e: Exception) {
+            shellDisabled = true
             killShell()
             null
         }
