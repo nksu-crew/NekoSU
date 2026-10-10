@@ -1,5 +1,11 @@
 package me.nekosu.aqnya.util
 
+import android.util.Base64
+import java.io.BufferedReader
+import java.io.BufferedWriter
+import java.io.InputStreamReader
+import java.io.OutputStreamWriter
+import java.io.Writer
 import java.util.concurrent.TimeUnit
 
 /**
@@ -42,10 +48,78 @@ object RootShell {
     /**
      * 以 root 读取一个文件的原始字节（供模块 WebUI 提供静态资源）。
      *
-     * 用 `su -c cat` 拿到 stdout 的字节流；失败返回 null。注意不要走
-     * [exec]，那条路径会把输出按文本解码，二进制资源会被破坏。
+     * 优先走常驻 root shell：一次性 exec `/system/bin/su` 起一个交互 shell，之后
+     * 用 `base64` + 标记定界读取文件（二进制安全），避免每个资源都 fork 一次
+     * `su -c cat`。常驻 shell 不可用时退回一次性 `su -c cat`。
      */
-    fun readFileBytes(path: String): ByteArray? =
+    fun readFileBytes(path: String): ByteArray? {
+        synchronized(shellLock) {
+            persistentRead(path)?.let { return it }
+        }
+        return oneShotRead(path)
+    }
+
+    private const val B64_BEGIN = "__NKSU_B64_BEGIN__"
+    private const val B64_END = "__NKSU_B64_END__"
+
+    private val shellLock = Any()
+    private var shellProcess: Process? = null
+    private var shellWriter: Writer? = null
+    private var shellReader: BufferedReader? = null
+
+    private fun ensureShell(): Boolean {
+        val existing = shellProcess
+        if (existing != null && existing.isAlive) return true
+        return try {
+            val process = ProcessBuilder(SU_PATH).redirectErrorStream(true).start()
+            shellProcess = process
+            shellWriter = BufferedWriter(OutputStreamWriter(process.outputStream))
+            shellReader = BufferedReader(InputStreamReader(process.inputStream))
+            true
+        } catch (e: Exception) {
+            killShell()
+            false
+        }
+    }
+
+    private fun killShell() {
+        runCatching { shellProcess?.destroy() }
+        shellProcess = null
+        shellWriter = null
+        shellReader = null
+    }
+
+    private fun persistentRead(path: String): ByteArray? {
+        if (!ensureShell()) return null
+        val writer = shellWriter ?: return null
+        val reader = shellReader ?: return null
+        return try {
+            writer.write("echo $B64_BEGIN; base64 -w0 ${quote(path)} 2>/dev/null; __rc=\$?; echo; echo ${B64_END}\$__rc\n")
+            writer.flush()
+
+            val payload = StringBuilder()
+            var started = false
+            while (true) {
+                val line = reader.readLine() ?: return null
+                if (!started) {
+                    if (line == B64_BEGIN) started = true
+                    continue
+                }
+                if (line.startsWith(B64_END)) {
+                    val code = line.removePrefix(B64_END).trim().toIntOrNull() ?: return null
+                    if (code != 0) return null
+                    if (payload.isEmpty()) return ByteArray(0)
+                    return Base64.decode(payload.toString(), Base64.DEFAULT)
+                }
+                payload.append(line)
+            }
+        } catch (e: Exception) {
+            killShell()
+            null
+        }
+    }
+
+    private fun oneShotRead(path: String): ByteArray? =
         try {
             val process =
                 ProcessBuilder(SU_PATH, "-c", "cat ${quote(path)}")

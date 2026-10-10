@@ -1,22 +1,37 @@
 package me.nekosu.aqnya.ui.webui
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.net.Uri
+import android.webkit.JsPromptResult
+import android.webkit.JsResult
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
+import android.webkit.WebChromeClient.FileChooserParams
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -29,9 +44,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.graphics.drawable.toBitmap
 import androidx.webkit.WebViewAssetLoader
+import me.nekosu.aqnya.R
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -62,6 +79,22 @@ internal fun WebUIScreen(
     var currentWebView by remember { mutableStateOf<WebView?>(null) }
     val currentInsets = remember { mutableStateOf(Insets(0, 0, 0, 0)) }
     val insetsEnabled = remember { mutableStateOf(false) }
+    var pendingDialog by remember { mutableStateOf<JsDialog?>(null) }
+    var fileCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+
+    val fileLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val uris: Array<Uri>? =
+                if (result.resultCode == Activity.RESULT_OK) {
+                    val data = result.data
+                    data?.clipData?.let { clip -> Array(clip.itemCount) { i -> clip.getItemAt(i).uri } }
+                        ?: data?.data?.let { arrayOf(it) }
+                } else {
+                    null
+                }
+            fileCallback?.onReceiveValue(uris)
+            fileCallback = null
+        }
 
     MonetColorsProvider.UpdateCss()
 
@@ -150,6 +183,60 @@ internal fun WebUIScreen(
                             }
                         }
 
+                    webChromeClient =
+                        object : WebChromeClient() {
+                            override fun onJsAlert(
+                                view: WebView,
+                                url: String?,
+                                message: String?,
+                                result: JsResult?,
+                            ): Boolean {
+                                if (message == null || result == null) return false
+                                pendingDialog = JsDialog.Alert(message, result)
+                                return true
+                            }
+
+                            override fun onJsConfirm(
+                                view: WebView,
+                                url: String?,
+                                message: String?,
+                                result: JsResult?,
+                            ): Boolean {
+                                if (message == null || result == null) return false
+                                pendingDialog = JsDialog.Confirm(message, result)
+                                return true
+                            }
+
+                            override fun onJsPrompt(
+                                view: WebView,
+                                url: String?,
+                                message: String?,
+                                defaultValue: String?,
+                                result: JsPromptResult?,
+                            ): Boolean {
+                                if (message == null || defaultValue == null || result == null) return false
+                                pendingDialog = JsDialog.Prompt(message, defaultValue, result)
+                                return true
+                            }
+
+                            override fun onShowFileChooser(
+                                view: WebView,
+                                callback: ValueCallback<Array<Uri>>?,
+                                params: FileChooserParams?,
+                            ): Boolean {
+                                fileCallback?.onReceiveValue(null)
+                                fileCallback = callback
+                                val intent =
+                                    params?.createIntent()
+                                        ?: Intent(Intent.ACTION_GET_CONTENT).apply { type = "*/*" }
+                                if (params?.mode == FileChooserParams.MODE_OPEN_MULTIPLE) {
+                                    intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                                }
+                                fileLauncher.launch(intent)
+                                return true
+                            }
+                        }
+
                     addJavascriptInterface(
                         WebViewBridge(
                             context = context,
@@ -170,6 +257,118 @@ internal fun WebUIScreen(
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
+        }
+
+        pendingDialog?.let { dialog ->
+            JsDialogHost(dialog) { pendingDialog = null }
+        }
+    }
+}
+
+/** WebView 里 `alert` / `confirm` / `prompt` 的待处理状态。 */
+private sealed interface JsDialog {
+    val message: String
+
+    data class Alert(
+        override val message: String,
+        val result: JsResult,
+    ) : JsDialog
+
+    data class Confirm(
+        override val message: String,
+        val result: JsResult,
+    ) : JsDialog
+
+    data class Prompt(
+        override val message: String,
+        val defaultValue: String,
+        val result: JsPromptResult,
+    ) : JsDialog
+}
+
+/** 用 Material 弹窗承接 WebView 的 JS 对话框，代替系统默认样式。 */
+@Composable
+private fun JsDialogHost(
+    dialog: JsDialog,
+    onDismiss: () -> Unit,
+) {
+    when (dialog) {
+        is JsDialog.Alert -> {
+            AlertDialog(
+                onDismissRequest = {
+                    dialog.result.confirm()
+                    onDismiss()
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        dialog.result.confirm()
+                        onDismiss()
+                    }) {
+                        Text(stringResource(R.string.dialog_confirm))
+                    }
+                },
+                text = { Text(dialog.message) },
+            )
+        }
+
+        is JsDialog.Confirm -> {
+            AlertDialog(
+                onDismissRequest = {
+                    dialog.result.cancel()
+                    onDismiss()
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        dialog.result.confirm()
+                        onDismiss()
+                    }) {
+                        Text(stringResource(R.string.dialog_confirm))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        dialog.result.cancel()
+                        onDismiss()
+                    }) {
+                        Text(stringResource(R.string.dialog_cancel))
+                    }
+                },
+                text = { Text(dialog.message) },
+            )
+        }
+
+        is JsDialog.Prompt -> {
+            var value by remember(dialog) { mutableStateOf(dialog.defaultValue) }
+            AlertDialog(
+                onDismissRequest = {
+                    dialog.result.cancel()
+                    onDismiss()
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        dialog.result.confirm(value)
+                        onDismiss()
+                    }) {
+                        Text(stringResource(R.string.dialog_confirm))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        dialog.result.cancel()
+                        onDismiss()
+                    }) {
+                        Text(stringResource(R.string.dialog_cancel))
+                    }
+                },
+                text = {
+                    OutlinedTextField(
+                        value = value,
+                        onValueChange = { value = it },
+                        label = { Text(dialog.message) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                },
+            )
         }
     }
 }
