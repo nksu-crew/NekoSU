@@ -16,6 +16,7 @@
 #include <sys/prctl.h>
 #include <sys/utsname.h>
 #include <unistd.h>
+#include <vector>
 
 #include "ioctl.h"
 #include "log.h"
@@ -469,6 +470,48 @@ static jint delRule(JNIEnv *env, jobject thiz, jstring pathStr) {
   return 0;
 }
 
+/*
+ * Ask the kernel for the current profile table (IOC_GET_PROFILES) and return
+ * it as the same text the kernel persists to allow.profile.  The manager parses
+ * this instead of keeping its own copy, so the kernel is the single source of
+ * truth and no manager-side sync is needed.
+ */
+static jstring listProfiles(JNIEnv *env, jobject thiz) {
+  (void)thiz;
+
+  if (ctlfd < 0) {
+    // Best effort: acquire the manager-gated control fd if nobody did yet.
+    if (Ctl(OP_IOCTL) >= 0) {
+      const int f = ScanCtlFd();
+      if (f >= 0)
+        ctlfd = f;
+    }
+  }
+
+  if (ctlfd < 0) {
+    LOG_ERR("listProfiles: control fd unavailable");
+    return nullptr;
+  }
+
+  const uint32_t cap = 64 * 1024;
+  // Keep the fmac_ioc header naturally aligned for the reinterpret_cast below.
+  std::vector<uint32_t> buffer(
+      (sizeof(struct fmac_ioc) + cap + sizeof(uint32_t) - 1) / sizeof(uint32_t),
+      0);
+  auto *raw = reinterpret_cast<uint8_t *>(buffer.data());
+  auto *msg = reinterpret_cast<struct fmac_ioc *>(raw);
+  msg->flag = IOC_GET_PROFILES;
+  msg->size = cap;
+
+  if (ioctl(ctlfd, IOC_CMD, raw) < 0) {
+    LOG_ERR("listProfiles failed: %s", strerror(errno));
+    return nullptr;
+  }
+
+  // The kernel only writes the text; the zero-filled tail keeps it NUL-ended.
+  return env->NewStringUTF(reinterpret_cast<const char *>(msg->data));
+}
+
 static void helloLog(JNIEnv *env, jobject thiz) {
   (void)env;
   (void)thiz;
@@ -509,6 +552,7 @@ const JNINativeMethod gMethods[] = {
      (void *)ncore::addSelinuxRule},
     {"addRule", "(Ljava/lang/String;J)I", (void *)ncore::addRule},
     {"delRule", "(Ljava/lang/String;)I", (void *)ncore::delRule},
+    {"listProfiles", "()Ljava/lang/String;", (void *)ncore::listProfiles},
     {"helloLog", "()V", (void *)ncore::helloLog},
     {"isGki", "()Z", (void *)ncore::isGki},
     {"kernelVersion", "()Ljava/lang/String;", (void *)ncore::kernelVersion},

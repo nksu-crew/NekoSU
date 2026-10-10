@@ -60,7 +60,9 @@ object ncore {
         domain: String,
         namespace: Int,
     ): Int
-    
+
+    external fun listProfiles(): String?
+
     external fun isGki(): Boolean
     external fun kernelVersion(): String?
 }

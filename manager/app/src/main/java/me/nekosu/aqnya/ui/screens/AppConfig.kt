@@ -67,9 +67,9 @@ enum class NksuNamespace(
     @StringRes val labelRes: Int,
     @StringRes val descriptionRes: Int,
 ) {
-    INHERITED(0, R.string.namespace_inherited_label, R.string.namespace_inherited_desc),
-    INDIVIDUAL(1, R.string.namespace_individual_label, R.string.namespace_individual_desc),
-    GLOBAL(2, R.string.namespace_global_label, R.string.namespace_global_desc),
+    INHERITED(1, R.string.namespace_inherited_label, R.string.namespace_inherited_desc),
+    INDIVIDUAL(2, R.string.namespace_individual_label, R.string.namespace_individual_desc),
+    GLOBAL(3, R.string.namespace_global_label, R.string.namespace_global_desc),
 }
 
 data class AppConfig(

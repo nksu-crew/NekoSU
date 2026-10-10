@@ -22,6 +22,7 @@ enum fmac_flag {
   IOC_SET_PROFILE,  /* data[80]  = uid[4] caps[8] domain[64] namespace[4] */
   /* 11 was IOC_LIST_MODULES; module enumeration now lives in ncore. */
   IOC_SET_SEPOLICY = 12, /* data = KernelSU-format sepolicy batch, size = length */
+  IOC_GET_PROFILES = 13, /* data[<=64KiB] out = profile table as text */
 };
 
 struct fmac_ioc {

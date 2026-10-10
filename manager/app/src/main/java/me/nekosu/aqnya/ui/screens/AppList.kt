@@ -50,15 +50,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.builtins.SetSerializer
-import kotlinx.serialization.builtins.serializer
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.protobuf.ProtoBuf
 import me.nekosu.aqnya.R
 import me.nekosu.aqnya.ncore
 import me.nekosu.aqnya.ui.component.SearchAppBar
 import me.nekosu.aqnya.ui.component.groupShape
-import me.nekosu.aqnya.util.RootDbHelper
 import java.io.File
 
 @Serializable
@@ -79,15 +75,11 @@ enum class FilterMode(
     USER(R.string.user_app),
 }
 
-private val json = Json { ignoreUnknownKeys = true }
 private val proto = ProtoBuf
 
 class AppViewModel(
     private val context: Context,
 ) : ViewModel() {
-    private val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
-    private val dbHelper = RootDbHelper(context)
-
     val listState = LazyListState()
 
     private var _filterMode = mutableStateOf(FilterMode.USER)
@@ -114,6 +106,9 @@ class AppViewModel(
     var isLoaded by mutableStateOf(false)
         private set
 
+    // 内核按 UID 保存 profile；管理器只读它、不再自己落盘。
+    private var profilesByUid: Map<Int, AppConfig> = emptyMap()
+
     var appConfigs by mutableStateOf<Map<String, AppConfig>>(emptyMap())
         private set
 
@@ -127,11 +122,6 @@ class AppViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             loadAppConfigs()
         }
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        dbHelper.close()
     }
 
     private fun updateFilteredApps() {
@@ -156,42 +146,33 @@ class AppViewModel(
                 }.sortedWith(compareBy({ app -> if (app.packageName in configs) 0 else 1 }, { it.name.lowercase() }))
     }
 
-    private fun readConfigFromPrefs(pkg: String): AppConfig {
-        val capsJson = prefs.getString("caps_$pkg", null)
-        val domain = prefs.getString("domain_$pkg", "u:r:nksu:s0") ?: "u:r:nksu:s0"
-        val nsValue = prefs.getInt("ns_$pkg", NksuNamespace.INHERITED.value)
-        val ns = NksuNamespace.entries.find { it.value == nsValue } ?: NksuNamespace.INHERITED
-        val caps =
-            if (capsJson != null) {
-                try {
-                    val capLabels = json.decodeFromString(SetSerializer(String.serializer()), capsJson)
-                    LinuxCap.entries.filter { it.label in capLabels }.toSet()
-                } catch (_: Exception) {
-                    DEFAULT_CAPS
-                }
-            } else {
-                DEFAULT_CAPS
-            }
-        return AppConfig(allowed = true, caps = caps, selinuxDomain = domain, namespace = ns)
+    // 内核保存的是 UID → profile；这里映射回包名供界面使用。
+    private fun rebuildConfigs() {
+        appConfigs =
+            allApps
+                .mapNotNull { app -> profilesByUid[app.uid]?.let { app.packageName to it } }
+                .toMap()
+    }
+
+    /**
+     * 内核提供 API 返回 profile 表，管理器通过 JNI 获取；它不再自己保存。
+     * 控制 fd 尚不可用时返回空表。
+     */
+    private fun readKernelProfiles(): Map<Int, AppConfig> {
+        val text =
+            try {
+                ncore.listProfiles()
+            } catch (_: Throwable) {
+                null
+            } ?: return emptyMap()
+        return parseAllowProfile(text)
     }
 
     private suspend fun loadAppConfigs() =
         withContext(Dispatchers.IO) {
             try {
-                val allowed = dbHelper.getAllowedPackages()
-                val configs = allowed.associateWith { readConfigFromPrefs(it) }
-                appConfigs = configs
-
-                val pm = context.packageManager
-                for ((pkg, cfg) in configs) {
-                    try {
-                        val uid = pm.getApplicationInfo(pkg, 0).uid
-                        if (ncore.hasuid(uid) == 0) ncore.adduid(uid)
-                        val capsBits = cfg.caps.fold(0L) { acc, cap -> acc or (1L shl cap.value) }
-                        ncore.setProfile(uid, capsBits, cfg.selinuxDomain, cfg.namespace.value)
-                    } catch (_: Exception) {
-                    }
-                }
+                profilesByUid = readKernelProfiles()
+                rebuildConfigs()
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -269,42 +250,22 @@ class AppViewModel(
         app: AppInfo,
         config: AppConfig,
     ) {
-        appConfigs =
+        profilesByUid =
             if (config.allowed) {
-                appConfigs + (app.packageName to config)
+                profilesByUid + (app.uid to config)
             } else {
-                appConfigs - app.packageName
+                profilesByUid - app.uid
             }
+        rebuildConfigs()
         updateFilteredApps()
 
-        dbHelper.setAllowed(app.packageName, config.allowed)
-
+        // 只把变更下发给内核；内核负责落盘（allow.profile），管理器不再保存。
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 if (config.allowed) {
-                    val capsJson =
-                        json.encodeToString(
-                            SetSerializer(String.serializer()),
-                            config.caps.map { it.label }.toSet(),
-                        )
-                    prefs
-                        .edit()
-                        .putString("caps_${app.packageName}", capsJson)
-                        .putString("domain_${app.packageName}", config.selinuxDomain)
-                        .putInt("ns_${app.packageName}", config.namespace.value)
-                        .apply()
-
-                    ncore.adduid(app.uid)
                     val capsBits = config.caps.fold(0L) { acc, cap -> acc or (1L shl cap.value) }
                     ncore.setProfile(app.uid, capsBits, config.selinuxDomain, config.namespace.value)
                 } else {
-                    prefs
-                        .edit()
-                        .remove("caps_${app.packageName}")
-                        .remove("domain_${app.packageName}")
-                        .remove("ns_${app.packageName}")
-                        .apply()
-                    ncore.delCap(app.uid)
                     ncore.deluid(app.uid)
                 }
             } catch (e: Exception) {
@@ -316,21 +277,39 @@ class AppViewModel(
     fun refreshAppConfig(packageName: String) {
         if (packageName.isBlank()) return
         viewModelScope.launch(Dispatchers.IO) {
-            val isAllowed =
-                try {
-                    dbHelper.isAllowed(packageName)
-                } catch (_: Exception) {
-                    false
-                }
-            if (isAllowed) {
-                val cfg = readConfigFromPrefs(packageName)
-                appConfigs = appConfigs + (packageName to cfg)
-            } else {
-                appConfigs = appConfigs - packageName
-            }
+            profilesByUid = readKernelProfiles()
+            rebuildConfigs()
             withContext(Dispatchers.Main) { updateFilteredApps() }
         }
     }
+}
+
+/** 解析内核 API 返回的 profile 表：每行 `<uid> <caps_hex> <ns> <domain>`。 */
+private fun parseAllowProfile(text: String): Map<Int, AppConfig> {
+    val profiles = mutableMapOf<Int, AppConfig>()
+    text.lineSequence().forEach { raw ->
+        val line = raw.trim()
+        if (line.isEmpty() || line.startsWith("#")) return@forEach
+
+        val parts = line.split(Regex("\\s+"))
+        if (parts.size < 3) return@forEach
+
+        val uid = parts[0].toIntOrNull() ?: return@forEach
+        val caps = parts[1].toULongOrNull(16)?.toLong() ?: 0L
+        val nsValue = parts[2].toIntOrNull() ?: NksuNamespace.INHERITED.value
+        val domain = if (parts.size >= 4) parts[3] else "u:r:nksu:s0"
+
+        val capSet = LinuxCap.entries.filter { ((caps shr it.value) and 1L) == 1L }.toSet()
+        val namespace = NksuNamespace.entries.find { it.value == nsValue } ?: NksuNamespace.INHERITED
+        profiles[uid] =
+            AppConfig(
+                allowed = true,
+                caps = capSet,
+                selinuxDomain = domain,
+                namespace = namespace,
+            )
+    }
+    return profiles
 }
 
 class AppViewModelFactory(
