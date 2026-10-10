@@ -8,8 +8,8 @@
 #include <linux/slab.h>
 
 #include "fmac.h"
-#include "ioctl.h"
-#include "nksu_module.h"
+#include "manager/ioctl.h"
+#include "module/nksu_module.h"
 
 static long ioc_get_shm(void)
 {

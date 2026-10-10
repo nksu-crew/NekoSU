@@ -39,7 +39,7 @@
 #include "xfrm.h"
 #include "security.h"
 
-#include "symbol_compat.h"
+#include "symbol/symbol_compat.h"
 /*
  * This file calls resolved unexported kernel functions through pointers.
  * Disable CFI for its functions so those indirect calls are not type-hash

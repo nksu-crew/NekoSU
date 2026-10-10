@@ -45,8 +45,8 @@
 #include <asm/unistd.h>
 
 #include <fmac.h>
-#include "init_rc.h"
-#include "syscall.h"
+#include "boot/init_rc.h"
+#include "hook/syscall.h"
 
 #define NKSU_RC_INIT_PATH "/system/etc/init/hw/init.rc"
 #define NKSU_RC_INIT_PATH_LEGACY "/system/etc/init.rc"

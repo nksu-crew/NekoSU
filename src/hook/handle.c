@@ -5,11 +5,11 @@
 #include <asm/ptrace.h>
 #include <linux/compiler.h>
 
-#include "hook.h"
-#include "manager.h"
+#include "hook/hook.h"
+#include "manager/manager.h"
 #include "fd/fd.h"
-#include "privilege.h"
-#include "ioctl.h"
+#include "privilege/privilege.h"
+#include "manager/ioctl.h"
 #include <fmac.h>
 #include "klog.h"
 

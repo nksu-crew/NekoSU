@@ -13,7 +13,7 @@
 #include <linux/cpumask.h>
 
 #include <fmac.h>
-#include "symbol_compat.h"
+#include "symbol/symbol_compat.h"
 
 static struct mm_struct *init_mm_ptr;
 syscall_fn_t *syscall_table;

@@ -33,7 +33,7 @@
 #include <linux/completion.h>
 
 #include <fmac.h>
-#include "symbol_compat.h"
+#include "symbol/symbol_compat.h"
 
 /*
  * kernel_thread() gained a @name argument in 6.4:

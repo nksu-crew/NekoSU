@@ -68,7 +68,7 @@
 #include <linux/uaccess.h>
 
 #include "klog.h"
-#include "symbol.h"
+#include "symbol/symbol.h"
 
 #define KSYM_MAX_SYMS     (1u << 21)  /* ~2M, far above real needs */
 #define KSYM_NAME_MAX     512         /* matches kernel KSYM_NAME_LEN cap */

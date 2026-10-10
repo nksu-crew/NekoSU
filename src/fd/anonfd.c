@@ -5,7 +5,7 @@
 #include <linux/anon_inodes.h>
 #include <linux/vmalloc.h>
 #include <linux/version.h>
-#include "fd.h"
+#include "fd/fd.h"
 
 static void *shared_buffer;
 

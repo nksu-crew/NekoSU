@@ -8,8 +8,8 @@
 #include <linux/nospec.h>
 
 #include <fmac.h>
-#include "syscall.h"
-#include "dispatch.h"
+#include "hook/syscall.h"
+#include "hook/dispatch.h"
 
 syscall_fn_t nksu_orig_table[__NR_syscalls] ____cacheline_aligned;
 nksu_handler_t virt_table[__NR_syscalls] ____cacheline_aligned;

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <linux/eventfd.h>
 #include <linux/version.h>
-#include "fd.h"
+#include "fd/fd.h"
 
 static struct eventfd_ctx *event_ctx;
 

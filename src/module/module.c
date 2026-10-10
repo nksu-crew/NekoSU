@@ -3,9 +3,9 @@
  * nksu -- kernel side of Magisk/KernelSU-style modules.
  *
  * Module loading itself now lives in userspace: the rc that nksu injects into
- * init (src/init_rc.c) execs ncore (/data/adb/nksu/ncore) at `on post-fs-data`,
+ * init (src/boot/init_rc.c) execs ncore (/data/adb/nksu/ncore) at `on post-fs-data`,
  * `services` and `boot-completed`, and ncore runs the KernelSU-compatible
- * module runtime.  See src/include/nksu_module.h.
+ * module runtime.  See src/module/nksu_module.h.
  *
  * This file keeps only the two pieces that genuinely need the kernel:
  *
@@ -17,7 +17,7 @@
  *
  * A late load (nksu.ko insmod'ed after init has parsed its rc files) has no
  * rc left to fire, so it does not bring modules up at all: module loading is a
- * boot-time, init.rc-driven feature.  See src/include/nksu_module.h.
+ * boot-time, init.rc-driven feature.  See src/module/nksu_module.h.
  *
  * Each module's sepolicy.rule is applied by the loader through the
  * /proc/nksu/sepolicy sink (src/selinux/rule_file.c), because only the kernel
@@ -40,7 +40,7 @@
 
 #include <fmac.h>
 
-#include "nksu_module.h"
+#include "module/nksu_module.h"
 
 #define NKSU_MODULES_DIR "/data/adb/modules"
 #define NKSU_MODULE_PROP "module.prop"

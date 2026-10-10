@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <linux/jhash.h>
 
-#include "fd.h"
+#include "fd/fd.h"
 
 static u32 last_hash;
 

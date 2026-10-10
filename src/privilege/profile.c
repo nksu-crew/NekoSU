@@ -13,8 +13,8 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 
-#include "profile.h"
-#include "ns.h"
+#include "privilege/profile.h"
+#include "privilege/ns.h"
 
 static DEFINE_MUTEX(profile_lock);
 static struct nksu_profile_blob __rcu *g_profile_blob;

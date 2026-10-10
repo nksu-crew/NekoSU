@@ -9,7 +9,7 @@
 /* Use the real types to declare the pointers so macros cannot rewrite them */
 #define NKSU_SYMBOL_COMPAT_NO_MACROS
 #include <fmac.h>
-#include "symbol_compat.h"
+#include "symbol/symbol_compat.h"
 
 /* definitions */
 typeof(alloc_uid) *nksu_alloc_uid;
@@ -100,7 +100,7 @@ int nksu_symbol_compat_init(void)
 	NKSU_RESOLVE(nksu_hashtab_map, "hashtab_map");
 	NKSU_RESOLVE(nksu___hashtab_insert, "__hashtab_insert");
 
-	/* src/spawn.c primitives -- no direct relocation against these */
+	/* src/spawn/spawn.c primitives -- no direct relocation against these */
 	NKSU_RESOLVE(nksu_kernel_thread, "kernel_thread");
 	NKSU_RESOLVE(nksu_kernel_execve, "kernel_execve");
 	NKSU_RESOLVE(nksu_kernel_wait, "kernel_wait");

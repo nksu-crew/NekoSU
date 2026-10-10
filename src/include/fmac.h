@@ -20,21 +20,21 @@
 #include "selinux/policy.h"
 
 #include "klog.h"
-#include "privilege.h"
-#include "handle.h"
-#include "ioctl.h"
-#include "manager.h"
-#include "hook.h"
-#include "ns.h"
-#include "symbol.h"
-#include "spawn.h"
+#include "privilege/privilege.h"
+#include "hook/handle.h"
+#include "manager/ioctl.h"
+#include "manager/manager.h"
+#include "hook/hook.h"
+#include "privilege/ns.h"
+#include "symbol/symbol.h"
+#include "spawn/spawn.h"
 
-#include "../profile/profile.h"
-#include "../fd/fd.h"
+#include "privilege/profile.h"
+#include "fd/fd.h"
 
 #ifdef CONFIG_NKSU_SYSCALL
-#include "../syscall/dispatch.h"
-#include "../syscall/syscall.h"
+#include "hook/dispatch.h"
+#include "hook/syscall.h"
 #endif
 
 extern struct proc_dir_entry *fmac_proc_dir;

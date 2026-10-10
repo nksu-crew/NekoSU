@@ -20,7 +20,7 @@
 #include <linux/limits.h>
 
 #include <fmac.h>
-#include "nksu_uapi_selinux.h"
+#include "selinux/nksu_uapi_selinux.h"
 #include "ss/avtab.h"
 
 struct nksu_sepol_cmd {

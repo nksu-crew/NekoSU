@@ -10,10 +10,10 @@
 #include <linux/uaccess.h>
 #include <linux/string.h>
 #include <fmac.h>
-#include "symbol_compat.h"
+#include "symbol/symbol_compat.h"
 #include "nksu.h"
-#include "nksu_module.h"
-#include "init.h"
+#include "module/nksu_module.h"
+#include "boot/init.h"
 
 #ifndef NKSU_GIT_COMMIT
 #define NKSU_GIT_COMMIT "unknown"

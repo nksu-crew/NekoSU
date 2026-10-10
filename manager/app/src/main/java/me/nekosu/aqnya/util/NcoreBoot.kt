@@ -5,7 +5,7 @@ import android.content.Context
 /**
  * 让随 APK 打包的 ncore 就位到固定路径 `/data/adb/nksu/ncore`。
  *
- * 内核注入的 init.rc（见 `src/init_rc.c`）在 `post-fs-data` / `services` /
+ * 内核注入的 init.rc（见 `src/boot/init_rc.c`）在 `post-fs-data` / `services` /
  * `boot-completed` 阶段 exec 这个路径。与 KernelSU 的 `ksud install` 一致，
  * 这里不自己拷贝，而是以 root 运行 `ncore install`，由 ncore 把
  * `/proc/self/exe`（即 APK 的 libncore.so）复制过去——这样它永远是当前
