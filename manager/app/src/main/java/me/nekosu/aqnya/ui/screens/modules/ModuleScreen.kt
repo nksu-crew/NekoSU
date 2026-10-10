@@ -36,7 +36,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -62,7 +61,8 @@ import me.nekosu.aqnya.R
 /**
  * 模块管理页 —— 参照 KernelSU 管理器的模块列表 / 安装界面。
  *
- * 列表由用户态 ncore 提供；安装走 root shell（见 [me.nekosu.aqnya.util.ModuleRepository]）。
+ * 列表由用户态 ncore 提供；安装由 ncore 完成（`ncore module install`），
+ * 管理器通过 root shell 流式显示安装器日志（见 [me.nekosu.aqnya.util.ModuleRepository]）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -178,12 +178,18 @@ private fun InstallSection(
     state: ModulesUiState,
     onClose: () -> Unit,
 ) {
+    val scrollState = rememberScrollState()
     val accent =
         when {
             state.installing -> MaterialTheme.colorScheme.primary
             state.installSuccess == true -> MaterialTheme.colorScheme.primary
             else -> MaterialTheme.colorScheme.error
         }
+
+    // 安装器输出是流式回填的，跟随内容自动滚动到底部。
+    LaunchedEffect(state.installLog) {
+        scrollState.animateScrollTo(scrollState.maxValue)
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -215,28 +221,23 @@ private fun InstallSection(
                     )
                 }
 
-                if (state.installing) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
-
-                if (state.installLog.isNotBlank()) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    ) {
-                        SelectionContainer {
-                            Text(
-                                text = state.installLog,
-                                modifier =
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .verticalScroll(rememberScrollState())
-                                        .padding(12.dp),
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                            )
-                        }
+                // 安装过程中的实时控制台输出，和 KernelSU 一致。
+                Surface(
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp, max = 420.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                ) {
+                    SelectionContainer {
+                        Text(
+                            text = state.installLog,
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .verticalScroll(scrollState)
+                                    .padding(12.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                        )
                     }
                 }
             }

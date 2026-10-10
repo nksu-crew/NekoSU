@@ -75,18 +75,18 @@ object ModuleRepository {
     fun uninstall(id: String): Result = exec("rm -rf ${quote("/data/adb/modules/$id")}")
 
     /**
-     * 用 ncore 安装模块：`ncore module install <zip>`。
+     * 用 ncore 安装模块的命令：`ncore module install <zip>`。
      *
      * ncore 会完成校验、解压、customize.sh、metamodule 处理与 modules.rc 刷新，
-     * 模块在下次开机生效。输出即 ncore 的进度/错误信息。
+     * 模块在下次开机生效。输出即 ncore 的进度/错误信息，供 root shell 流式回填。
      */
-    fun install(
+    fun installCommand(
         context: Context,
         zipPath: String,
-    ): Result {
+    ): String {
         val ncore = VendorBootInstaller.ncorePath(context)
-        if (!ncore.exists()) return Result(-1, "ncore not found")
-        return exec("${quote(ncore.absolutePath)} module install ${quote(zipPath)}")
+        if (!ncore.exists()) return "echo 'ncore not found'; exit 1"
+        return "${quote(ncore.absolutePath)} module install ${quote(zipPath)}"
     }
 
     /** 用 ncore 执行模块的 `action.sh`：`ncore module action <id>`。 */

@@ -111,24 +111,39 @@ class ModuleViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         viewModelScope.launch {
-            val result =
+            val zip = withContext(Dispatchers.IO) { stageZip(uri) }
+            if (zip == null) {
+                _uiState.update {
+                    it.copy(
+                        installing = false,
+                        installDone = true,
+                        installSuccess = false,
+                        installLog = "unable to read the selected file",
+                    )
+                }
+                return@launch
+            }
+
+            // 与 action 相同：把安装器输出逐行回填，界面实时滚动显示日志，
+            // 而不是整个安装过程只挂一个进度条。
+            val buffer = StringBuilder()
+            val command = ModuleRepository.installCommand(appContext, zip.absolutePath)
+            val code =
                 withContext(Dispatchers.IO) {
-                    val zip = stageZip(uri)
-                    if (zip == null) {
-                        ModuleRepository.Result(-1, "unable to read the selected file")
-                    } else {
-                        ModuleRepository.install(appContext, zip.absolutePath)
+                    RootShell.execStreaming(command) { line ->
+                        buffer.append(line).append('\n')
+                        _uiState.update { state -> state.copy(installLog = buffer.toString()) }
                     }
                 }
             _uiState.update {
                 it.copy(
                     installing = false,
                     installDone = true,
-                    installSuccess = result.ok,
-                    installLog = result.output,
+                    installSuccess = code == 0,
+                    installLog = buffer.toString(),
                 )
             }
-            if (result.ok) refresh()
+            if (code == 0) refresh()
         }
     }
 
