@@ -53,6 +53,17 @@ bool is_manager_uid(uid_t uid)
 }
 
 /*
+ * Whether /data/adb/nksu/ncore is known to be present.  Set by the (sleepable)
+ * manager scan; read by the su tracepoint hook, which must not sleep.
+ */
+static bool ncore_ready;
+
+bool is_ncore_ready(void)
+{
+    return READ_ONCE(ncore_ready);
+}
+
+/*
  * ABX (Android Binary XML) wire format, as produced by
  * com.android.modules.utils.BinaryXmlSerializer (AOSP modules-utils).
  *
@@ -812,8 +823,10 @@ static int install_ncore_from_manager(const struct manager_paths *paths)
     char src[320];
     int err;
 
-    if (kfile_exists(NKSU_NCORE_BOOT_PATH))
+    if (kfile_exists(NKSU_NCORE_BOOT_PATH)) {
+        WRITE_ONCE(ncore_ready, true);
         return 0;
+    }
 
     if (!resolve_lib_dir(paths, lib_dir, sizeof(lib_dir))) {
         pr_err("[manager] cannot locate %s in the manager install\n", NKSU_NCORE_LIB_NAME);
@@ -849,6 +862,7 @@ static int install_ncore_from_manager(const struct manager_paths *paths)
     }
 
     pr_info("[manager] installed ncore from %s\n", lib_dir);
+    WRITE_ONCE(ncore_ready, true);
     return 0;
 }
 
