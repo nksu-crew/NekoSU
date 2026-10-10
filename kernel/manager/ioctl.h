@@ -47,7 +47,7 @@ struct fmac_ioc {
 #define FMAC_DATA_PROFILE   80
 
 /*
- * prctl opcodes.  201-203 are reserved for the manager (is_manager-gated);
+ * prctl opcodes.  201 and 203 are reserved for the manager (is_manager-gated);
  * 204 lets the boot-time daemon obtain the control fd (root-gated) so it can
  * send IOC_SET_SEPOLICY.
  */

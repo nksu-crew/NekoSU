@@ -38,10 +38,6 @@ long handle_prctl_hooks(struct pt_regs *regs)
         fmac_anonfd_get();
         return 1;
 
-    case 202:
-        privilege_escalate_from_profile();
-        return 1;
-
     case 203:
         fmac_ctlfd_get();
         return 1;

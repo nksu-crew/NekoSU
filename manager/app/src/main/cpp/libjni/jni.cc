@@ -15,15 +15,12 @@
 #include <sys/poll.h>
 #include <sys/prctl.h>
 #include <sys/utsname.h>
-#include <sys/wait.h>
 #include <unistd.h>
-
-#include <string>
 
 #include "ioctl.h"
 #include "log.h"
 
-enum Opcode { OP_AUTHENTICATE = 201, OP_GET_ROOT = 202, OP_IOCTL = 203 };
+enum Opcode { OP_AUTHENTICATE = 201, OP_IOCTL = 203 };
 
 class JniUtfString {
 public:
@@ -121,7 +118,6 @@ static int scan_fd_by_link(const char *target) {
 int Ctl(enum Opcode code) {
   switch (code) {
   case OP_AUTHENTICATE:
-  case OP_GET_ROOT:
   case OP_IOCTL:
     return prctl((unsigned int)code, 0, 0, 0, 0);
   default:
@@ -302,9 +298,6 @@ static jint ctl(JNIEnv *env, jobject thiz, jint value) {
   case 1:
     op = OP_AUTHENTICATE;
     break;
-  case 2:
-    op = OP_GET_ROOT;
-    break;
   case 3:
     op = OP_IOCTL;
     break;
@@ -476,75 +469,6 @@ static jint delRule(JNIEnv *env, jobject thiz, jstring pathStr) {
   return 0;
 }
 
-/*
- * Run a shell command as root.  The kernel interface (prctl OP_GET_ROOT)
- * grants the child root; it then execs /system/bin/sh.  Output (stdout +
- * stderr) is returned with a trailing "[exit N]" line.
- */
-static jstring execRoot(JNIEnv *env, jobject thiz, jstring cmdStr) {
-  (void)thiz;
-
-  JniUtfString cmd(env, cmdStr);
-  if (!cmd)
-    return nullptr;
-
-  int pfd[2];
-  if (pipe(pfd) != 0)
-    return nullptr;
-
-  pid_t pid = fork();
-  if (pid < 0) {
-    close(pfd[0]);
-    close(pfd[1]);
-    return nullptr;
-  }
-
-  if (pid == 0) {
-    close(pfd[0]);
-
-    /*
-     * Ask the kernel for root before exec'ing the shell.  Escalation is a
-     * side effect of the prctl hook, so its return value is only meaningful
-     * under the syscall-table hook: when prctl is trapped from the sys_enter
-     * tracepoint the original prctl(2) still runs afterwards and returns
-     * -EINVAL.  Verify the effect rather than the return value.
-     */
-    prctl(OP_GET_ROOT, 0, 0, 0, 0);
-    if (getuid() != 0)
-      _exit(126);
-
-    if (dup2(pfd[1], STDOUT_FILENO) < 0 || dup2(pfd[1], STDERR_FILENO) < 0)
-      _exit(126);
-    close(pfd[1]);
-
-    char *argv[] = {const_cast<char *>("/system/bin/sh"), const_cast<char *>("-c"),
-                    const_cast<char *>(cmd.c_str()), nullptr};
-    char *envp[] = {const_cast<char *>("PATH=/sbin:/system/sbin:/system/bin:/system/xbin"),
-                    const_cast<char *>("ANDROID_ROOT=/system"), nullptr};
-    execve("/system/bin/sh", argv, envp);
-    _exit(127);
-  }
-
-  close(pfd[1]);
-
-  std::string out;
-  char tmp[4096];
-  ssize_t n;
-  while ((n = read(pfd[0], tmp, sizeof(tmp))) > 0)
-    out.append(tmp, static_cast<size_t>(n));
-  close(pfd[0]);
-
-  int status = 0;
-  waitpid(pid, &status, 0);
-
-  char tail[48];
-  int code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-  snprintf(tail, sizeof(tail), "\n[exit %d]", code);
-  out += tail;
-
-  return env->NewStringUTF(out.c_str());
-}
-
 static void helloLog(JNIEnv *env, jobject thiz) {
   (void)env;
   (void)thiz;
@@ -585,7 +509,6 @@ const JNINativeMethod gMethods[] = {
      (void *)ncore::addSelinuxRule},
     {"addRule", "(Ljava/lang/String;J)I", (void *)ncore::addRule},
     {"delRule", "(Ljava/lang/String;)I", (void *)ncore::delRule},
-    {"execRoot", "(Ljava/lang/String;)Ljava/lang/String;", (void *)ncore::execRoot},
     {"helloLog", "()V", (void *)ncore::helloLog},
     {"isGki", "()Z", (void *)ncore::isGki},
     {"kernelVersion", "()Ljava/lang/String;", (void *)ncore::kernelVersion},

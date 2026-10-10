@@ -100,7 +100,7 @@ object ModuleRepository {
 
     /** 执行任意 root 命令，返回退出码与合并输出。 */
     fun exec(cmd: String): Result {
-        val r = RootShell.ncoreExec(cmd)
+        val r = RootShell.exec(cmd)
         return Result(r.code, r.output)
     }
 
