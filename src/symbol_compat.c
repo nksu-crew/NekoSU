@@ -39,6 +39,7 @@ typeof(ebitmap_cpy) *nksu_ebitmap_cpy;
 typeof(hashtab_duplicate) *nksu_hashtab_duplicate;
 typeof(hashtab_destroy) *nksu_hashtab_destroy;
 typeof(hashtab_map) *nksu_hashtab_map;
+typeof(__hashtab_insert) *nksu___hashtab_insert;
 typeof(security_context_to_sid) *nksu_security_context_to_sid;
 
 typeof(kernel_thread) *nksu_kernel_thread;
@@ -97,6 +98,7 @@ int nksu_symbol_compat_init(void)
 	NKSU_RESOLVE(nksu_hashtab_duplicate, "hashtab_duplicate");
 	NKSU_RESOLVE(nksu_hashtab_destroy, "hashtab_destroy");
 	NKSU_RESOLVE(nksu_hashtab_map, "hashtab_map");
+	NKSU_RESOLVE(nksu___hashtab_insert, "__hashtab_insert");
 
 	/* src/spawn.c primitives -- no direct relocation against these */
 	NKSU_RESOLVE(nksu_kernel_thread, "kernel_thread");
@@ -149,6 +151,7 @@ void nksu_symbol_compat_exit(void)
 	nksu_hashtab_duplicate = NULL;
 	nksu_hashtab_destroy = NULL;
 	nksu_hashtab_map = NULL;
+	nksu___hashtab_insert = NULL;
 	nksu___set_fixmap = NULL;
 	nksu_copy_to_kernel_nofault = NULL;
 	nksu_kernel_thread = NULL;

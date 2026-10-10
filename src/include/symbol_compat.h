@@ -77,6 +77,7 @@ extern typeof(ebitmap_cpy) *nksu_ebitmap_cpy;
 extern typeof(hashtab_duplicate) *nksu_hashtab_duplicate;
 extern typeof(hashtab_destroy) *nksu_hashtab_destroy;
 extern typeof(hashtab_map) *nksu_hashtab_map;
+extern typeof(__hashtab_insert) *nksu___hashtab_insert;
 extern typeof(security_context_to_sid) *nksu_security_context_to_sid;
 
 /*

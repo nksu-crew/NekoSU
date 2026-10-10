@@ -487,6 +487,40 @@ static const struct hashtab_key_params filenametr_key_params = {
 };
 #endif
 
+/*
+ * hashtab_insert() is a static inline that dereferences the unexported
+ * __hashtab_insert; reimplement it here so the module only depends on the
+ * pointer resolved at load time.
+ */
+static int nksu_hashtab_insert(struct hashtab *h, void *key, void *datum,
+			       struct hashtab_key_params key_params)
+{
+	u32 hvalue;
+	struct hashtab_node *prev, *cur;
+
+	cond_resched();
+
+	if (!h->size || h->nel == HASHTAB_MAX_NODES)
+		return -EINVAL;
+
+	hvalue = key_params.hash(key) & (h->size - 1);
+	prev = NULL;
+	cur = h->htable[hvalue];
+	while (cur) {
+		int cmp = key_params.cmp(key, cur->key);
+
+		if (cmp == 0)
+			return -EEXIST;
+		if (cmp < 0)
+			break;
+		prev = cur;
+		cur = cur->next;
+	}
+
+	return nksu___hashtab_insert(h, prev ? &prev->next : &h->htable[hvalue],
+				     key, datum);
+}
+
 static bool rule_add_filename_trans(struct policydb *db, const char *s,
 				    const char *t, const char *c, const char *d,
 				    const char *o)
@@ -539,7 +573,8 @@ static bool rule_add_filename_trans(struct policydb *db, const char *s,
 
 		trans->next = last;
 		trans->otype = def->value;
-		rc = hashtab_insert(&db->filename_trans, new_key, trans, filenametr_key_params);
+		rc = nksu_hashtab_insert(&db->filename_trans, new_key, trans,
+					 filenametr_key_params);
 		if (rc)
 			goto free_name;
 	}
