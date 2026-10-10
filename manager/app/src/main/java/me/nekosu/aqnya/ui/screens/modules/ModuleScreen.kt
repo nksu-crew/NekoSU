@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -210,6 +211,15 @@ private fun ModuleCard(
             }
 
             Spacer(Modifier.width(8.dp))
+
+            if (module.hasActionScript && module.enabled && !module.remove) {
+                IconButton(onClick = onAction) {
+                    Icon(
+                        Icons.Filled.PlayArrow,
+                        contentDescription = stringResource(R.string.modules_action_run),
+                    )
+                }
+            }
 
             Switch(
                 checked = module.enabled,
