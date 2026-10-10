@@ -315,7 +315,6 @@ err_dispatch:
 
 void hook_exit(void)
 {
-    nksu_init_rc_exit();
     stop_init_thread();
 
     if (READ_ONCE(features_loaded))

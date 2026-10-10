@@ -52,13 +52,6 @@ int sepolicy_add_domain(const char *name);
  */
 int sepolicy_apply_batch(const void __user *data, size_t len);
 
-/*
- * Write-only /proc/nksu/sepolicy sink: writing a KernelSU-format sepolicy
- * batch applies it.  Used by the daemon when it cannot reach the ioctl.
- */
-int nksu_sepolicy_sink_init(void);
-void nksu_sepolicy_sink_exit(void);
-
 #ifdef CONFIG_NKSU_DEBUG
 int sepolicy_make_audit(void);
 #endif

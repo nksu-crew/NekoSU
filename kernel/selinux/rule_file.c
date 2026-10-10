@@ -17,7 +17,6 @@
 #include <linux/mm.h>
 #include <linux/fs.h>
 #include <linux/file.h>
-#include <linux/proc_fs.h>
 #include <linux/limits.h>
 
 #include <fmac.h>
@@ -233,71 +232,4 @@ int sepolicy_apply_batch(const void __user *user_data, size_t data_len)
 out:
 	kvfree(payload);
 	return applied;
-}
-
-/* ---- /proc/nksu/sepolicy sink (binary batch) ---- */
-
-struct proc_dir_entry *fmac_proc_dir;
-static struct proc_dir_entry *nksu_sepolicy_pde;
-
-/*
- * Write-only sink the daemon feeds the sepolicy batch to.  Writing the
- * KernelSU-format batch here is equivalent to IOC_SET_SEPOLICY; it exists
- * because a boot-time daemon cannot always obtain the manager-gated control
- * fd (see handle.c).
- */
-static ssize_t nksu_sepolicy_write(struct file *file, const char __user *ubuf,
-				   size_t count, loff_t *ppos)
-{
-	int applied;
-
-	(void)file;
-	(void)ppos;
-
-	if (!count || count > NKSU_SEPOLICY_MAX_BATCH_SIZE)
-		return -EINVAL;
-
-	applied = sepolicy_apply_batch(ubuf, count);
-	if (applied < 0)
-		return applied;
-
-	pr_info("[selinux]: sepolicy batch: %d command(s) applied\n", applied);
-	return (ssize_t)count;
-}
-
-static const struct proc_ops nksu_sepolicy_proc_ops = {
-	.proc_write = nksu_sepolicy_write,
-};
-
-int nksu_sepolicy_sink_init(void)
-{
-	if (nksu_sepolicy_pde)
-		return 0;
-
-	if (!fmac_proc_dir)
-		fmac_proc_dir = proc_mkdir("nksu", NULL);
-	if (!fmac_proc_dir)
-		return -ENOMEM;
-
-	nksu_sepolicy_pde = proc_create("sepolicy", 0200, fmac_proc_dir,
-					&nksu_sepolicy_proc_ops);
-	if (!nksu_sepolicy_pde)
-		return -ENOMEM;
-
-	pr_info("[selinux]: sepolicy sink at /proc/nksu/sepolicy\n");
-	return 0;
-}
-
-void nksu_sepolicy_sink_exit(void)
-{
-	if (!nksu_sepolicy_pde)
-		return;
-
-	remove_proc_entry("sepolicy", fmac_proc_dir);
-	nksu_sepolicy_pde = NULL;
-
-	if (fmac_proc_dir) {
-		remove_proc_entry("nksu", NULL);
-		fmac_proc_dir = NULL;
-	}
 }

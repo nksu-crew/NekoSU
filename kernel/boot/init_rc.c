@@ -17,8 +17,7 @@
  *
  * ncore (userspace/ of the ncore project, shipped by the manager as
  * /data/adb/nksu/ncore) is the KernelSU-compatible module runtime.  The kernel
- * only edits init's view of init.rc and provides the sepolicy sink ncore writes
- * to (kernel/selinux/rule_file.c).  Because init's `exec` is synchronous, the
+ * only edits init's view of init.rc.  Because init's `exec` is synchronous, the
  * post-fs-data hooks (metamodule mount included) finish before init continues,
  * so modules are mounted before zygote/system_server start.
  *
@@ -237,11 +236,6 @@ int nksu_init_rc_init(void)
 {
     int ret;
 
-    /* ncore pushes each module's sepolicy.rule through this sink. */
-    ret = nksu_sepolicy_sink_init();
-    if (ret)
-        pr_warn("nksu: cannot create sepolicy sink: %d\n", ret);
-
     ret = hook_save(__NR_read, nksu_sys_read, &nksu_orig_read_sys, "nksu_rc_read");
     if (ret) {
         pr_err("nksu: cannot hook __NR_read: %d\n", ret);
@@ -257,13 +251,8 @@ int nksu_init_rc_init(void)
     return 0;
 }
 
-void nksu_init_rc_exit(void)
-{
-    nksu_sepolicy_sink_exit();
-
-    /*
-     * The read/fstat syscall hops are torn down together with the temporary
-     * boot watcher (nksu_dispatch_exit -> syscalltable_exit), so there is
-     * nothing to unhook here.
-     */
-}
+/*
+ * There is no nksu_init_rc_exit(): the read/fstat syscall hops are torn down
+ * together with the temporary boot watcher (nksu_dispatch_exit ->
+ * syscalltable_exit), so there is nothing to unhook.
+ */
