@@ -134,7 +134,7 @@ class AppViewModel(
         }
     }
 
-    private fun setAllApps(apps: List<AppInfo>) {
+    private fun applyApps(apps: List<AppInfo>) {
         allApps = apps
         allAppsLower = apps.map { it to it.name.lowercase() }
     }
@@ -223,7 +223,7 @@ class AppViewModel(
                                 cacheFile.readBytes(),
                             )
                         if (cached.isNotEmpty()) {
-                            setAllApps(cached)
+                            applyApps(cached)
                             isLoaded = true
                             loadAppConfigs()
                             return@withContext
@@ -258,7 +258,7 @@ class AppViewModel(
                     )
             }
             apps.sortBy { it.name.lowercase() }
-            setAllApps(apps)
+            applyApps(apps)
             isLoaded = true
 
             context.cacheDir
