@@ -41,6 +41,8 @@ typeof(hashtab_destroy) *nksu_hashtab_destroy;
 typeof(hashtab_map) *nksu_hashtab_map;
 typeof(__hashtab_insert) *nksu___hashtab_insert;
 typeof(security_context_to_sid) *nksu_security_context_to_sid;
+typeof(vfs_mkdir) *nksu_vfs_mkdir;
+typeof(lookup_one_len) *nksu_lookup_one_len;
 
 typeof(kernel_thread) *nksu_kernel_thread;
 typeof(kernel_execve) *nksu_kernel_execve;
@@ -79,6 +81,8 @@ int nksu_symbol_compat_init(void)
 	NKSU_RESOLVE(nksu_selinux_status_update_policyload,
 		     "selinux_status_update_policyload");
 	NKSU_RESOLVE(nksu_security_context_to_sid, "security_context_to_sid");
+	NKSU_RESOLVE(nksu_vfs_mkdir, "vfs_mkdir");
+	NKSU_RESOLVE(nksu_lookup_one_len, "lookup_one_len");
 	NKSU_RESOLVE(nksu_selinux_state, "selinux_state");
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
 	NKSU_RESOLVE(nksu_selinux_blob_sizes, "selinux_blob_sizes");
@@ -136,6 +140,8 @@ void nksu_symbol_compat_exit(void)
 	nksu_selnl_notify_policyload = NULL;
 	nksu_selinux_status_update_policyload = NULL;
 	nksu_security_context_to_sid = NULL;
+	nksu_vfs_mkdir = NULL;
+	nksu_lookup_one_len = NULL;
 	nksu_selinux_state = NULL;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
 	nksu_selinux_blob_sizes = NULL;

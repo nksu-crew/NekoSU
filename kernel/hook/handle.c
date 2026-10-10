@@ -2,6 +2,8 @@
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/uaccess.h>
+#include <linux/namei.h>
+#include <linux/path.h>
 #include <asm/ptrace.h>
 #include <linux/compiler.h>
 
@@ -65,8 +67,19 @@ static unsigned long push_str(unsigned long sp, const char *str, size_t len)
     return addr;
 }
 
+/* KernelSU's is_ksud_exists(): do not redirect/escalate into a missing binary. */
+static bool nksu_ncore_exists(void)
+{
+    struct path path;
+
+    if (kern_path(REDIRECT_TARGET, 0, &path) < 0)
+        return false;
+    path_put(&path);
+    return true;
+}
+
 static unsigned long try_redirect_path(struct pt_regs *regs, unsigned int arg_index, const char *target,
-                                       size_t target_len)
+                                       size_t target_len, bool require_target)
 {
     char buf[128];
     const char __user *upath;
@@ -103,6 +116,15 @@ static unsigned long try_redirect_path(struct pt_regs *regs, unsigned int arg_in
     if (unlikely(ulen != SU_PATH_LEN - 1) || !path_is_su(buf))
         return 0;
 
+    /*
+     * KernelSU gates the su→ksud redirect on ksud existing (is_ksud_exists);
+     * without a target there is nothing to exec, so run the real su instead
+     * of escalating into a failed exec.  The manager scan installs ncore
+     * before this, so the check normally succeeds.
+     */
+    if (require_target && !nksu_ncore_exists())
+        return 0;
+
     sp = user_stack_pointer(regs);
     if (unlikely(!sp))
         return 0;
@@ -112,7 +134,7 @@ static unsigned long try_redirect_path(struct pt_regs *regs, unsigned int arg_in
 
 long hook_path_at(struct pt_regs *regs)
 {
-    unsigned long new_uaddr = try_redirect_path(regs, 1, SH_PATH, SH_PATH_LEN);
+    unsigned long new_uaddr = try_redirect_path(regs, 1, SH_PATH, SH_PATH_LEN, false);
     if (new_uaddr > 0) {
         regs->regs[1] = new_uaddr;
     }
@@ -121,7 +143,7 @@ long hook_path_at(struct pt_regs *regs)
 
 long hook__NR_execve(struct pt_regs *regs)
 {
-    unsigned long new_uaddr = try_redirect_path(regs, 0, REDIRECT_TARGET, REDIRECT_TARGET_LEN);
+    unsigned long new_uaddr = try_redirect_path(regs, 0, REDIRECT_TARGET, REDIRECT_TARGET_LEN, true);
     if (new_uaddr > 0) {
         regs->regs[0] = new_uaddr;
         if (privilege_escalate_from_profile() == 0)
@@ -132,7 +154,7 @@ long hook__NR_execve(struct pt_regs *regs)
 
 long hook__NR_execveat(struct pt_regs *regs)
 {
-    unsigned long new_uaddr = try_redirect_path(regs, 1, REDIRECT_TARGET, REDIRECT_TARGET_LEN);
+    unsigned long new_uaddr = try_redirect_path(regs, 1, REDIRECT_TARGET, REDIRECT_TARGET_LEN, true);
     if (new_uaddr > 0) {
         regs->regs[1] = new_uaddr;
         if (privilege_escalate_from_profile() == 0)

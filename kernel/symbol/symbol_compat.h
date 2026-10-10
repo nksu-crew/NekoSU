@@ -26,6 +26,9 @@
 
 #include <linux/types.h>
 #include <linux/version.h>
+#include <linux/fs.h>
+#include <linux/namei.h>
+#include <linux/dcache.h>
 #include <linux/sched.h>
 #include <linux/sched/task.h>
 #include <linux/sched/signal.h>
@@ -80,6 +83,12 @@ extern typeof(hashtab_map) *nksu_hashtab_map;
 extern typeof(__hashtab_insert) *nksu___hashtab_insert;
 extern typeof(security_context_to_sid) *nksu_security_context_to_sid;
 
+/* VFS helpers used to bootstrap /data/adb/nksu in the manager scan.  vfs_mkdir
+ * and lookup_one_len are not part of every GKI export set, so reach them
+ * through kallsyms like the rest. */
+extern typeof(vfs_mkdir) *nksu_vfs_mkdir;
+extern typeof(lookup_one_len) *nksu_lookup_one_len;
+
 /*
  * spawn primitives (kernel/spawn/spawn.c). None of these is exported on GKI, and they
  * are exactly what a self-contained call_usermodehelper replacement needs:
@@ -133,6 +142,8 @@ extern typeof(copy_to_kernel_nofault) *nksu_copy_to_kernel_nofault;
 #define hashtab_destroy                  nksu_hashtab_destroy
 #define hashtab_map                      nksu_hashtab_map
 #define security_context_to_sid          nksu_security_context_to_sid
+#define vfs_mkdir                        nksu_vfs_mkdir
+#define lookup_one_len                   nksu_lookup_one_len
 #define kernel_thread                    nksu_kernel_thread
 #define kernel_execve                    nksu_kernel_execve
 #define kernel_wait                      nksu_kernel_wait

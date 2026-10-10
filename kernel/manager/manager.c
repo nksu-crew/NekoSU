@@ -4,6 +4,9 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/namei.h>
+#include <linux/dcache.h>
+#include <linux/mount.h>
+#include <linux/path.h>
 #include <linux/crypto.h>
 #include <crypto/hash.h>
 #include <linux/kernel.h>
@@ -15,6 +18,9 @@
 #include <linux/cred.h>
 #include <linux/capability.h>
 #include <fmac.h>
+
+/* Last: redirects vfs_mkdir/lookup_one_len to the resolved-symbol pointers. */
+#include "symbol/symbol_compat.h"
 
 #define TARGET_PACKAGE "me.nekosu.aqnya"
 #define TARGET_HASH                                                                                                    \
@@ -182,11 +188,34 @@ static int sha256_bytes(const u8 *data, size_t len, u8 out[32])
 }
 
 /*
+ * The manager package's on-disk locations, captured from packages.xml while
+ * looking for its signature.  nativeLibraryPath is the extracted jniLibs
+ * directory (<codePath>/lib/<abi>); codePath is the fallback for images that
+ * do not write it.
+ */
+struct manager_paths {
+    char code_path[256];
+    char native_lib_path[256];
+};
+
+static void copy_path_attr(char *dst, size_t cap, const u8 *src, size_t len)
+{
+    size_t n = 0;
+
+    if (src && len) {
+        n = len < cap - 1 ? len : cap - 1;
+        memcpy(dst, src, n);
+    }
+    dst[n] = '\0';
+}
+
+/*
  * Locate <package name="TARGET_PACKAGE"><sigs><cert key="..."/></sigs></package>
  * in /data/system/packages.xml and compare the SHA-256 of the DER certificate
- * stored in the key attribute against TARGET_HASH.
+ * stored in the key attribute against TARGET_HASH.  Also fills `paths` with the
+ * package's codePath / nativeLibraryPath when requested.
  */
-static bool verify_package_signature(void)
+static bool verify_package_signature(struct manager_paths *paths)
 {
     struct file *fp;
     struct abx_reader r = { .interned = NULL, .interned_len = NULL };
@@ -254,6 +283,10 @@ static bool verify_package_signature(void)
             bool is_sigs, is_cert, is_pkg;
             const u8 *pkg_attr = NULL;
             size_t pkg_attr_len = 0;
+            const u8 *code_attr = NULL;
+            size_t code_attr_len = 0;
+            const u8 *nlib_attr = NULL;
+            size_t nlib_attr_len = 0;
 
             if (abx_read_interned(&r, &name, &nlen) < 0)
                 goto out_free;
@@ -299,6 +332,12 @@ static bool verify_package_signature(void)
                     if (abx_str_eq(aname, alen, "name")) {
                         pkg_attr = r.buf + r.pos;
                         pkg_attr_len = slen;
+                    } else if (abx_str_eq(aname, alen, "codePath")) {
+                        code_attr = r.buf + r.pos;
+                        code_attr_len = slen;
+                    } else if (abx_str_eq(aname, alen, "nativeLibraryPath")) {
+                        nlib_attr = r.buf + r.pos;
+                        nlib_attr_len = slen;
                     }
                     r.pos += slen;
                 } else if (typ2 == ABX_TYPE_STRING_INTERNED) {
@@ -310,6 +349,12 @@ static bool verify_package_signature(void)
                     if (abx_str_eq(aname, alen, "name")) {
                         pkg_attr = v;
                         pkg_attr_len = vlen;
+                    } else if (abx_str_eq(aname, alen, "codePath")) {
+                        code_attr = v;
+                        code_attr_len = vlen;
+                    } else if (abx_str_eq(aname, alen, "nativeLibraryPath")) {
+                        nlib_attr = v;
+                        nlib_attr_len = vlen;
                     }
                 } else if (typ2 == ABX_TYPE_BYTES_HEX || typ2 == ABX_TYPE_BYTES_BASE64) {
                     u16 blen;
@@ -339,8 +384,16 @@ static bool verify_package_signature(void)
             is_pkg = (pkg_depth < 0) && abx_str_eq(name, nlen, "package") && pkg_attr &&
                      abx_str_eq(pkg_attr, pkg_attr_len, TARGET_PACKAGE);
 
-            if (is_pkg)
+            if (is_pkg) {
                 pkg_depth = depth;
+                if (paths) {
+                    copy_path_attr(paths->code_path, sizeof(paths->code_path),
+                                   code_attr, code_attr_len);
+                    copy_path_attr(paths->native_lib_path,
+                                   sizeof(paths->native_lib_path), nlib_attr,
+                                   nlib_attr_len);
+                }
+            }
             if (is_sigs)
                 sigs_depth = depth;
             if (cert && cert_len > 0)
@@ -537,9 +590,263 @@ static void nksu_scan_creds_end(const struct cred *old)
         revert_creds(old);
 }
 
+/*
+ * Bootstrap /data/adb/nksu/{ncore,bin/busybox} straight from the verified
+ * manager package, so root works on the very first boot without the manager
+ * having to run `ncore install` from a root shell it does not have yet.
+ *
+ * The manager ships both binaries as jniLibs (libncore.so and libbusybox.so);
+ * the kernel only sees the extracted nativeLibraryPath directory from
+ * packages.xml.  This mirrors KernelSU's `is_ksud_exists()` gate and the
+ * manager-provided libksud.so, but installs from the kernel so no userspace
+ * round-trip is needed.
+ */
+#define NKSU_NCORE_BOOT_PATH    "/data/adb/nksu/ncore"
+#define NKSU_NCORE_BIN_DIR      "/data/adb/nksu/bin"
+#define NKSU_NCORE_BUSYBOX_PATH NKSU_NCORE_BIN_DIR "/busybox"
+#define NKSU_NCORE_LIB_NAME     "libncore.so"
+#define NKSU_NCORE_BUSYBOX_LIB  "libbusybox.so"
+
+static bool kfile_exists(const char *path)
+{
+    struct file *f = filp_open(path, O_RDONLY, 0);
+
+    if (IS_ERR(f))
+        return false;
+    filp_close(f, NULL);
+    return true;
+}
+
+/* mkdir one leaf whose parent already exists. */
+static int kdir_mkdir(const char *path, umode_t mode)
+{
+    char parent[256];
+    const char *slash;
+    struct path p;
+    struct inode *dir;
+    struct dentry *dentry;
+    size_t len;
+    int err;
+
+    slash = strrchr(path, '/');
+    if (!slash || slash == path)
+        return -EINVAL;
+
+    len = (size_t)(slash - path);
+    if (len >= sizeof(parent))
+        return -ENAMETOOLONG;
+    memcpy(parent, path, len);
+    parent[len] = '\0';
+
+    err = kern_path(parent, LOOKUP_DIRECTORY | LOOKUP_FOLLOW, &p);
+    if (err)
+        return err;
+
+    dir = d_inode(p.dentry);
+    inode_lock_nested(dir, I_MUTEX_PARENT);
+    dentry = lookup_one_len(slash + 1, p.dentry, (int)strlen(slash + 1));
+    if (IS_ERR(dentry)) {
+        err = PTR_ERR(dentry);
+    } else {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+        err = vfs_mkdir(mnt_idmap(p.mnt), dir, dentry, mode);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
+        err = vfs_mkdir(mnt_user_ns(p.mnt), dir, dentry, mode);
+#else
+        err = vfs_mkdir(dir, dentry, mode);
+#endif
+        if (err == -EEXIST)
+            err = 0;
+        dput(dentry);
+    }
+    inode_unlock(dir);
+    path_put(&p);
+    return err;
+}
+
+static int kdir_mkdir_p(const char *dir)
+{
+    char tmp[256];
+    size_t n = strlen(dir);
+    int err = 0;
+
+    if (n == 0 || n >= sizeof(tmp))
+        return -EINVAL;
+    memcpy(tmp, dir, n + 1);
+
+    for (char *q = tmp + 1;; q++) {
+        if (*q == '/' || *q == '\0') {
+            char saved = *q;
+
+            *q = '\0';
+            if (!kfile_exists(tmp)) {
+                int e = kdir_mkdir(tmp, 0700);
+
+                if (e && !err)
+                    err = e;
+            }
+            *q = saved;
+            if (saved == '\0')
+                break;
+        }
+    }
+    return err;
+}
+
+static int kfile_copy(const char *src, const char *dst)
+{
+    struct file *in, *out;
+    char *buf;
+    loff_t ipos = 0, opos = 0;
+    int err = 0;
+
+    in = filp_open(src, O_RDONLY, 0);
+    if (IS_ERR(in))
+        return PTR_ERR(in);
+
+    out = filp_open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0755);
+    if (IS_ERR(out)) {
+        err = PTR_ERR(out);
+        filp_close(in, NULL);
+        return err;
+    }
+
+    buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
+    if (!buf) {
+        err = -ENOMEM;
+    } else {
+        for (;;) {
+            ssize_t r = kernel_read(in, buf, PAGE_SIZE, &ipos);
+
+            if (r < 0) {
+                err = (int)r;
+                break;
+            }
+            if (r == 0)
+                break;
+
+            ssize_t off = 0;
+
+            while (off < r) {
+                ssize_t w = kernel_write(out, buf + off, (size_t)(r - off), &opos);
+
+                if (w < 0) {
+                    err = (int)w;
+                    break;
+                }
+                off += w;
+            }
+            if (err)
+                break;
+        }
+        kfree(buf);
+    }
+
+    filp_close(out, NULL);
+    filp_close(in, NULL);
+    return err;
+}
+
+/* codePath is either the package dir or .../base.apk; reduce it to the dir. */
+static void code_path_base(const char *code, char *out, size_t cap)
+{
+    size_t n = strlen(code);
+
+    if (n > 4 && strcmp(code + n - 4, ".apk") == 0) {
+        const char *slash = strrchr(code, '/');
+
+        if (slash) {
+            n = (size_t)(slash - code);
+            if (n >= cap)
+                n = cap - 1;
+            memcpy(out, code, n);
+            out[n] = '\0';
+            return;
+        }
+    }
+    strscpy(out, code, cap);
+}
+
+static bool resolve_lib_dir(const struct manager_paths *paths, char *out, size_t cap)
+{
+    char cand[320];
+    char base[256];
+
+    if (paths->native_lib_path[0]) {
+        snprintf(cand, sizeof(cand), "%s/%s", paths->native_lib_path, NKSU_NCORE_LIB_NAME);
+        if (kfile_exists(cand)) {
+            strscpy(out, paths->native_lib_path, cap);
+            return true;
+        }
+    }
+
+    if (paths->code_path[0]) {
+        code_path_base(paths->code_path, base, sizeof(base));
+
+        snprintf(cand, sizeof(cand), "%s/lib/arm64/%s", base, NKSU_NCORE_LIB_NAME);
+        if (kfile_exists(cand)) {
+            snprintf(out, cap, "%s/lib/arm64", base);
+            return true;
+        }
+        snprintf(cand, sizeof(cand), "%s/lib/arm/%s", base, NKSU_NCORE_LIB_NAME);
+        if (kfile_exists(cand)) {
+            snprintf(out, cap, "%s/lib/arm", base);
+            return true;
+        }
+    }
+    return false;
+}
+
+static int install_ncore_from_manager(const struct manager_paths *paths)
+{
+    char lib_dir[256];
+    char src[320];
+    int err;
+
+    if (kfile_exists(NKSU_NCORE_BOOT_PATH))
+        return 0;
+
+    if (!resolve_lib_dir(paths, lib_dir, sizeof(lib_dir))) {
+        pr_err("[manager] cannot locate %s in the manager install\n", NKSU_NCORE_LIB_NAME);
+        return -ENOENT;
+    }
+
+    err = kdir_mkdir_p("/data/adb/nksu");
+    if (err && err != -EEXIST) {
+        pr_err("[manager] mkdir /data/adb/nksu failed: %d\n", err);
+        return err;
+    }
+    err = kdir_mkdir_p(NKSU_NCORE_BIN_DIR);
+    if (err && err != -EEXIST) {
+        pr_err("[manager] mkdir %s failed: %d\n", NKSU_NCORE_BIN_DIR, err);
+        return err;
+    }
+
+    snprintf(src, sizeof(src), "%s/%s", lib_dir, NKSU_NCORE_LIB_NAME);
+    err = kfile_copy(src, NKSU_NCORE_BOOT_PATH);
+    if (err) {
+        pr_err("[manager] copy %s -> %s failed: %d\n", src, NKSU_NCORE_BOOT_PATH, err);
+        return err;
+    }
+
+    snprintf(src, sizeof(src), "%s/%s", lib_dir, NKSU_NCORE_BUSYBOX_LIB);
+    if (kfile_exists(src)) {
+        int berr = kfile_copy(src, NKSU_NCORE_BUSYBOX_PATH);
+
+        if (berr)
+            pr_warn("[manager] copy busybox failed: %d\n", berr);
+    } else {
+        pr_warn("[manager] %s not found, busybox not installed\n", src);
+    }
+
+    pr_info("[manager] installed ncore from %s\n", lib_dir);
+    return 0;
+}
+
 static int scan_and_apply(void)
 {
     const struct cred *old;
+    struct manager_paths paths = { 0 };
     uid_t uid;
     int ret = -1;
 
@@ -551,7 +858,7 @@ static int scan_and_apply(void)
         goto out;
     }
 
-    if (verify_package_signature()) {
+    if (verify_package_signature(&paths)) {
         pr_info("[manager] Verification passed. "
                 "Granting privileges to UID %u\n",
                 uid);
@@ -561,6 +868,9 @@ static int scan_and_apply(void)
          * every boot from this verified scan, never restored from disk.
          */
         manager_kuid = make_kuid(current_user_ns(), uid);
+        /* Install ncore/busybox before the profile store writes its file so
+         * /data/adb/nksu exists for the first save. */
+        install_ncore_from_manager(&paths);
         nksu_profile_set_default(uid);
 #ifndef CONFIG_NKSU_SYSCALL
         mark_zygote();
