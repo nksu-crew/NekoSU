@@ -452,6 +452,19 @@ out:
 	return ret;
 }
 
+/*
+ * Every successful mutation is mirrored to disk so the table survives a
+ * reboot; the store is what makes the manager's per-startup sync unnecessary.
+ */
+static int blob_update_and_persist(blob_modify_fn mod, void *ctx)
+{
+	int ret = blob_update(mod, ctx);
+
+	if (ret == 0)
+		nksu_profile_persist();
+	return ret;
+}
+
 int nksu_profile_set(uid_t uid, kernel_cap_t caps, const char *domain, int ns)
 {
 	struct set_all_ctx ctx = {
@@ -461,7 +474,7 @@ int nksu_profile_set(uid_t uid, kernel_cap_t caps, const char *domain, int ns)
 		.ns = ns,
 	};
 
-	return blob_update(__set_all, &ctx);
+	return blob_update_and_persist(__set_all, &ctx);
 }
 
 int nksu_profile_set_caps(uid_t uid, kernel_cap_t caps)
@@ -471,7 +484,7 @@ int nksu_profile_set_caps(uid_t uid, kernel_cap_t caps)
 		.caps = caps,
 	};
 
-	return blob_update(__set_caps, &ctx);
+	return blob_update_and_persist(__set_caps, &ctx);
 }
 
 int nksu_profile_set_domain(uid_t uid, const char *domain)
@@ -481,7 +494,7 @@ int nksu_profile_set_domain(uid_t uid, const char *domain)
 		.domain = domain,
 	};
 
-	return blob_update(__set_domain, &ctx);
+	return blob_update_and_persist(__set_domain, &ctx);
 }
 
 int nksu_profile_set_ns(uid_t uid, int ns)
@@ -491,7 +504,7 @@ int nksu_profile_set_ns(uid_t uid, int ns)
 		.ns = ns,
 	};
 
-	return blob_update(__set_ns, &ctx);
+	return blob_update_and_persist(__set_ns, &ctx);
 }
 
 /*
@@ -512,7 +525,8 @@ void nksu_profile_clear(uid_t uid)
 {
 	struct clear_ctx ctx = { .uid = uid };
 
-	blob_update(__clear_entry, &ctx);
+	if (blob_update(__clear_entry, &ctx) == 0)
+		nksu_profile_persist();
 }
 
 void nksu_profile_clear_all(void)
@@ -532,4 +546,47 @@ int nksu_profile_init(void)
 
 	rcu_assign_pointer(g_profile_blob, b);
 	return 0;
+}
+
+u32 nksu_profile_count(void)
+{
+	struct nksu_profile_blob *b;
+	u32 count = 0;
+
+	rcu_read_lock();
+	b = rcu_dereference(g_profile_blob);
+	if (b)
+		count = b->count;
+	rcu_read_unlock();
+	return count;
+}
+
+void nksu_profile_foreach(nksu_profile_iter_fn fn, void *ctx)
+{
+	struct nksu_profile_blob *b;
+	struct nksu_profile_entry *entries;
+	const u8 *arena;
+	u32 i;
+
+	if (!fn)
+		return;
+
+	rcu_read_lock();
+	b = rcu_dereference(g_profile_blob);
+	if (b) {
+		entries = blob_entries(b);
+		arena = blob_arena(b);
+		for (i = 0; i < b->count; i++) {
+			struct nksu_profile_entry *e = &entries[i];
+			const char *domain = "";
+			size_t domain_len = 0;
+
+			if (e->domain_len > 0 && e->domain_off != 0xffff) {
+				domain = (const char *)(arena + e->domain_off);
+				domain_len = e->domain_len;
+			}
+			fn(e->uid, entry_caps(e), e->ns, domain, domain_len, ctx);
+		}
+	}
+	rcu_read_unlock();
 }

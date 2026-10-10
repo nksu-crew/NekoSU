@@ -4,9 +4,11 @@
 #include <linux/version.h>
 #include <linux/capability.h>
 #include <linux/kernel.h>
+#include <linux/slab.h>
 
 #include "fmac.h"
 #include "manager/ioctl.h"
+#include "privilege/profile_store.h"
 
 static long ioc_get_shm(void)
 {
@@ -163,6 +165,31 @@ static long ioc_set_profile(const void __user *data, unsigned int size)
     return nksu_profile_set((uid_t)uid, u64_to_cap(caps), domain, namespace);
 }
 
+/*
+ * Serialize the profile table into the caller's buffer.  The manager reads it
+ * with JNI instead of keeping its own copy, so the kernel stays the single
+ * source of truth.  Returns the byte count, or a negative errno.
+ */
+static long ioc_get_profiles(void __user *data, unsigned int size)
+{
+    char *buf;
+    int len;
+
+    if (size == 0 || size > NKSU_PROFILE_TEXT_MAX)
+        return -EINVAL;
+
+    buf = kvmalloc(size, GFP_KERNEL);
+    if (!buf)
+        return -ENOMEM;
+
+    len = nksu_profile_to_text(buf, size);
+    if (len >= 0 && copy_to_user(data, buf, (size_t)len))
+        len = -EFAULT;
+
+    kvfree(buf);
+    return len;
+}
+
 static long fmac_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
     struct fmac_ioc ioc;
@@ -201,6 +228,8 @@ static long fmac_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
         return ioc_set_profile(data, ioc.size);
     case IOC_SET_SEPOLICY:
         return sepolicy_apply_batch(data, ioc.size);
+    case IOC_GET_PROFILES:
+        return ioc_get_profiles((void __user *)data, ioc.size);
     default:
         return -ENOTTY;
     }

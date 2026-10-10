@@ -30,7 +30,16 @@ enum {
     IOC_SET_PROFILE,   /* data[80]  = uid[4] caps[8] domain[64] namespace[4] */
     /* 11 was IOC_LIST_MODULES; module enumeration now lives in ncore (userspace). */
     IOC_SET_SEPOLICY = 12, /* data = KernelSU-format sepolicy batch, size = 长度 */
+    /*
+     * data[<= NKSU_PROFILE_TEXT_MAX] (out) = the profile table as text, one
+     * `<uid> <caps_hex> <ns> <domain>` line per entry.  Returns the number of
+     * bytes written, or -ENOSPC when the buffer is too small.  Backs the
+     * manager's JNI listProfiles() so it never has to persist the profiles.
+     */
+    IOC_GET_PROFILES = 13,
 };
+
+#define NKSU_PROFILE_TEXT_MAX (64 * 1024)
 
 struct fmac_ioc {
     unsigned int flag;

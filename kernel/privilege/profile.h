@@ -136,4 +136,23 @@ void nksu_profile_clear_all(void);
 
 int nksu_profile_init(void);
 
+/* Number of active entries in the profile table. */
+u32 nksu_profile_count(void);
+
+/*
+ * Visit every profile entry in ascending uid order.  The callback runs under
+ * the RCU read lock, so it must not sleep; `domain` is a non-terminated view
+ * into the arena, valid only for the duration of the call.
+ */
+typedef void (*nksu_profile_iter_fn)(uid_t uid, kernel_cap_t caps, int ns,
+				     const char *domain, size_t domain_len,
+				     void *ctx);
+void nksu_profile_foreach(nksu_profile_iter_fn fn, void *ctx);
+
+/*
+ * Persistence hook, implemented by the profile store (privilege/profile_store.c).
+ * Called after every successful mutation so the on-disk copy stays in sync.
+ */
+void nksu_profile_persist(void);
+
 #endif /* __NKSU_PROFILE_H */

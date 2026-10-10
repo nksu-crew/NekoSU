@@ -25,11 +25,16 @@
 #define MAX_INTERNED_STRINGS 512
 #define BUF_SIZE 65536
 
-static kuid_t manager_kuid;
+static kuid_t manager_kuid = INVALID_UID;
 
 bool is_manager(void)
 {
     return uid_valid(manager_kuid) && uid_eq(current_uid(), manager_kuid);
+}
+
+bool is_manager_uid(uid_t uid)
+{
+    return uid_valid(manager_kuid) && __kuid_val(manager_kuid) == uid;
 }
 
 /*
@@ -550,8 +555,13 @@ static int scan_and_apply(void)
         pr_info("[manager] Verification passed. "
                 "Granting privileges to UID %u\n",
                 uid);
-        nksu_profile_set_default(uid);
+        /*
+         * Record the UID before granting the profile so the store can leave
+         * the manager's own entry out of allow.profile: it is re-created on
+         * every boot from this verified scan, never restored from disk.
+         */
         manager_kuid = make_kuid(current_user_ns(), uid);
+        nksu_profile_set_default(uid);
 #ifndef CONFIG_NKSU_SYSCALL
         mark_zygote();
 #endif

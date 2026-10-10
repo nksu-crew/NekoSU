@@ -13,6 +13,7 @@
 #include "symbol/symbol_compat.h"
 #include "nksu.h"
 #include "boot/init.h"
+#include "privilege/profile_store.h"
 
 #ifndef NKSU_GIT_COMMIT
 #define NKSU_GIT_COMMIT "unknown"
@@ -54,6 +55,11 @@ static const module_component_t feature_components[] = {
         .name = "uid profile",
         .init = nksu_profile_init,
         .exit = nksu_profile_clear_all,
+    },
+    {
+        .name = "profile store",
+        .init = nksu_profile_store_init,
+        .exit = nksu_profile_store_exit,
     },
 #ifndef CONFIG_NKSU_SYSCALL
     {
