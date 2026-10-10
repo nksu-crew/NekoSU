@@ -308,6 +308,8 @@
     <string name="modules_install_done">Module installed</string>
     <string name="modules_install_failed">Install failed</string>
     <string name="modules_install_close">Done</string>
+    <string name="modules_log_saved">Log saved to Download/%1$s</string>
+    <string name="modules_log_save_failed">Failed to save log</string>
     <string name="cd_more">More</string>
 
     <!-- Modules - action script -->

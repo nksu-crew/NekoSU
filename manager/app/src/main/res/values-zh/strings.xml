@@ -302,6 +302,8 @@
     <string name="modules_install_done">模块已安装</string>
     <string name="modules_install_failed">安装失败</string>
     <string name="modules_install_close">完成</string>
+    <string name="modules_log_saved">日志已保存到 Download/%1$s</string>
+    <string name="modules_log_save_failed">日志保存失败</string>
     <string name="cd_more">更多</string>
 
     <!-- Modules - action script -->

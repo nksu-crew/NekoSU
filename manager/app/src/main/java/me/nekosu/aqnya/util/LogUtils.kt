@@ -9,6 +9,28 @@ import androidx.core.content.FileProvider
 import java.io.File
 
 object LogUtils {
+    /**
+     * 把一段文本日志保存到 /sdcard/Download。
+     *
+     * 先写进缓存目录，再复用 [VendorBootInstaller.exportToDownload]：它在
+     * Android 10+ 走 MediaStore、否则直接写公共目录，无需额外拼接导出逻辑。
+     */
+    fun saveLog(
+        context: Context,
+        fileName: String,
+        content: String,
+    ) {
+        runCatching {
+            val tmp = File(context.cacheDir, fileName)
+            tmp.writeText(content)
+            VendorBootInstaller.exportToDownload(context, tmp)
+        }.onSuccess { dest ->
+            Toast.makeText(context, context.getString(R.string.modules_log_saved, dest.name), Toast.LENGTH_SHORT).show()
+        }.onFailure {
+            Toast.makeText(context, context.getString(R.string.modules_log_save_failed), Toast.LENGTH_SHORT).show()
+        }
+    }
+
     fun exportLogs(context: Context) {
         val logFile = File(context.cacheDir, "logcat.log")
         try {
