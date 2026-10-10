@@ -77,7 +77,11 @@ int set_domain(const char *domain, struct cred *new_cred)
 	}
 
 	if (new_cred->security) {
-		struct task_security_struct *tsec = new_cred->security;
+		/*
+		 * Address the SELinux blob through the accessor: it lives at
+		 * an LSM offset inside cred->security, not at the start.
+		 */
+		struct task_security_struct *tsec = selinux_cred(new_cred);
 
 		tsec->osid          = tsec->sid;
 		tsec->sid           = newsid;
@@ -138,8 +142,19 @@ void nksu_relabel_tty_fds(void)
 		inode = file_inode(file);
 		if (inode && inode->i_sb &&
 		    inode->i_sb->s_magic == DEVPTS_SUPER_MAGIC) {
+			/*
+			 * The SELinux inode blob lives at an LSM offset inside
+			 * inode->i_security; addressing it directly would write
+			 * past the struct and corrupt isec->list (a later
+			 * inode free then hits list_del corruption).  Use the
+			 * accessor, as KernelSU's ksu_handle_devpts does.
+			 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
+			struct inode_security_struct *sec = selinux_inode(inode);
+#else
 			struct inode_security_struct *sec =
 				(struct inode_security_struct *)inode->i_security;
+#endif
 
 			if (sec) {
 				sec->sid = nksu_file_sid;
