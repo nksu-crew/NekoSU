@@ -8,7 +8,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
 import android.util.Log
-import android.view.View
+import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.JsPromptResult
 import android.webkit.JsResult
@@ -36,6 +36,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -62,9 +64,15 @@ private const val WEBUI_DOMAIN = "mui.kernelsu.org"
 /** `ksu://icon/<pkg>` 返回的图标边长（像素）。 */
 private const val ICON_PX = 192
 
+private const val HOME_URL = "https://$WEBUI_DOMAIN/index.html"
+
 /**
  * 模块 WebUI 的宿主：加载 `<module>/webroot/index.html`，注入 `window.ksu`，
  * 处理 `ksu://icon/<pkg>` 与 `internal/insets.css` / `internal/colors.css`。
+ *
+ * 结构参照 KernelSU：WebView 在组合期创建并复用（不是每次 factory 重建），
+ * 设置 `MATCH_PARENT` 并由 `update = requestLayout()` 触发布局；只有拿到非零
+ * 尺寸后才 `loadUrl`，否则 SPA 会按 0×0 视口渲染成空白。
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -79,7 +87,7 @@ internal fun WebUIScreen(
 
     val webRoot = remember(moduleId) { File("/data/adb/modules/$moduleId/webroot") }
     var loading by remember { mutableStateOf(true) }
-    var currentWebView by remember { mutableStateOf<WebView?>(null) }
+    var urlLoaded by remember { mutableStateOf(false) }
     val currentInsets = remember { mutableStateOf(Insets(0, 0, 0, 0)) }
     val insetsEnabled = remember { mutableStateOf(false) }
     var pendingDialog by remember { mutableStateOf<JsDialog?>(null) }
@@ -99,6 +107,158 @@ internal fun WebUIScreen(
             fileCallback = null
         }
 
+    val webViewRef = remember { arrayOfNulls<WebView>(1) }
+
+    val webView =
+        remember(moduleId) {
+            WebView(context).apply {
+                layoutParams =
+                    ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+                setBackgroundColor(Color.TRANSPARENT)
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.allowFileAccess = false
+
+                val assetLoader =
+                    WebViewAssetLoader.Builder()
+                        .setDomain(WEBUI_DOMAIN)
+                        .addPathHandler(
+                            "/",
+                            ModulePathHandler(
+                                webRoot = webRoot,
+                                insetsProvider = { currentInsets.value },
+                                onInsetsRequested = { insetsEnabled.value = true },
+                                colorsProvider = { MonetColorsProvider.getColorsCss() },
+                            ),
+                        )
+                        .build()
+
+                webViewClient =
+                    object : WebViewClient() {
+                        override fun shouldInterceptRequest(
+                            view: WebView,
+                            request: WebResourceRequest,
+                        ): WebResourceResponse? {
+                            val url = request.url
+                            if (url.scheme.equals("ksu", ignoreCase = true) &&
+                                url.host.equals("icon", ignoreCase = true)
+                            ) {
+                                return iconResponse(context, url.path?.trimStart('/').orEmpty())
+                            }
+                            val response = assetLoader.shouldInterceptRequest(url)
+                            if (response == null) Log.w("NksuWebUI", "asset loader miss: $url")
+                            return response
+                        }
+
+                        override fun onPageFinished(
+                            view: WebView,
+                            url: String,
+                        ) {
+                            loading = false
+                            view.evaluateJavascript(
+                                "(function(){try{var b=document.body;return (b?b.innerText.length:-1)+'/'+" +
+                                    "(b?b.innerHTML.length:-1)+' viewport='+window.innerWidth+'x'+window.innerHeight;}catch(e){return 'err:'+e;}})()",
+                            ) { result -> Log.d("NksuWebUI", "dom=$result") }
+                        }
+
+                        override fun onReceivedError(
+                            view: WebView,
+                            request: WebResourceRequest,
+                            error: WebResourceError,
+                        ) {
+                            if (request.isForMainFrame) {
+                                loading = false
+                                Log.w("NksuWebUI", "load error: ${error.description} for ${request.url}")
+                            }
+                        }
+                    }
+
+                webChromeClient =
+                    object : WebChromeClient() {
+                        override fun onJsAlert(
+                            view: WebView,
+                            url: String?,
+                            message: String?,
+                            result: JsResult?,
+                        ): Boolean {
+                            if (message == null || result == null) return false
+                            pendingDialog = JsDialog.Alert(message, result)
+                            return true
+                        }
+
+                        override fun onJsConfirm(
+                            view: WebView,
+                            url: String?,
+                            message: String?,
+                            result: JsResult?,
+                        ): Boolean {
+                            if (message == null || result == null) return false
+                            pendingDialog = JsDialog.Confirm(message, result)
+                            return true
+                        }
+
+                        override fun onJsPrompt(
+                            view: WebView,
+                            url: String?,
+                            message: String?,
+                            defaultValue: String?,
+                            result: JsPromptResult?,
+                        ): Boolean {
+                            if (message == null || defaultValue == null || result == null) return false
+                            pendingDialog = JsDialog.Prompt(message, defaultValue, result)
+                            return true
+                        }
+
+                        override fun onShowFileChooser(
+                            view: WebView,
+                            callback: ValueCallback<Array<Uri>>?,
+                            params: FileChooserParams?,
+                        ): Boolean {
+                            fileCallback?.onReceiveValue(null)
+                            fileCallback = callback
+                            val intent =
+                                params?.createIntent()
+                                    ?: Intent(Intent.ACTION_GET_CONTENT).apply { type = "*/*" }
+                            if (params?.mode == FileChooserParams.MODE_OPEN_MULTIPLE) {
+                                intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                            }
+                            fileLauncher.launch(intent)
+                            return true
+                        }
+
+                        override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
+                            Log.d(
+                                "NksuWebUI",
+                                "${consoleMessage?.message()} @ ${consoleMessage?.sourceId()}:${consoleMessage?.lineNumber()}",
+                            )
+                            return true
+                        }
+                    }
+
+                addJavascriptInterface(
+                    WebViewBridge(
+                        context = context,
+                        moduleId = moduleId,
+                        webViewProvider = { webViewRef[0] },
+                        onExit = onExit,
+                    ),
+                    "ksu",
+                )
+
+                webViewRef[0] = this
+            }
+        }
+
+    DisposableEffect(webView) {
+        onDispose {
+            (webView.parent as? ViewGroup)?.removeView(webView)
+            webView.destroy()
+        }
+    }
+
     MonetColorsProvider.UpdateCss()
 
     // 页面通过 internal/insets.css 申请安全区后，跟随系统栏变化持续注入 CSS 变量。
@@ -114,14 +274,13 @@ internal fun WebUIScreen(
         }.collect { newInsets ->
             if (currentInsets.value != newInsets) {
                 currentInsets.value = newInsets
-                currentWebView?.evaluateJavascript(newInsets.js, null)
+                webView.evaluateJavascript(newInsets.js, null)
             }
         }
     }
 
     BackHandler(enabled = true) {
-        val webView = currentWebView
-        if (webView != null && webView.canGoBack()) webView.goBack() else onExit()
+        if (webView.canGoBack()) webView.goBack() else onExit()
     }
 
     val contentModifier =
@@ -133,168 +292,15 @@ internal fun WebUIScreen(
 
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
-            modifier = contentModifier,
-            factory = { ctx ->
-                WebView(ctx).apply {
-                    setBackgroundColor(Color.TRANSPARENT)
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.allowFileAccess = false
-
-                    val assetLoader =
-                        WebViewAssetLoader.Builder()
-                            .setDomain(WEBUI_DOMAIN)
-                            .addPathHandler(
-                                "/",
-                                ModulePathHandler(
-                                    webRoot = webRoot,
-                                    insetsProvider = { currentInsets.value },
-                                    onInsetsRequested = { insetsEnabled.value = true },
-                                    colorsProvider = { MonetColorsProvider.getColorsCss() },
-                                ),
-                            )
-                            .build()
-
-                    webViewClient =
-                        object : WebViewClient() {
-                            override fun shouldInterceptRequest(
-                                view: WebView,
-                                request: WebResourceRequest,
-                            ): WebResourceResponse? {
-                                val url = request.url
-                                if (url.scheme.equals("ksu", ignoreCase = true) &&
-                                    url.host.equals("icon", ignoreCase = true)
-                                ) {
-                                    return iconResponse(context, url.path?.trimStart('/').orEmpty())
-                                }
-                                val response = assetLoader.shouldInterceptRequest(url)
-                                if (response == null) Log.w("NksuWebUI", "asset loader miss: $url")
-                                return response
-                            }
-
-                            override fun onPageFinished(
-                                view: WebView,
-                                url: String,
-                            ) {
-                                loading = false
-                            }
-
-                            override fun onReceivedError(
-                                view: WebView,
-                                request: WebResourceRequest,
-                                error: WebResourceError,
-                            ) {
-                                if (request.isForMainFrame) {
-                                    loading = false
-                                    Log.w("NksuWebUI", "load error: ${error.description} for ${request.url}")
-                                }
-                            }
-                        }
-
-                    webChromeClient =
-                        object : WebChromeClient() {
-                            override fun onJsAlert(
-                                view: WebView,
-                                url: String?,
-                                message: String?,
-                                result: JsResult?,
-                            ): Boolean {
-                                if (message == null || result == null) return false
-                                pendingDialog = JsDialog.Alert(message, result)
-                                return true
-                            }
-
-                            override fun onJsConfirm(
-                                view: WebView,
-                                url: String?,
-                                message: String?,
-                                result: JsResult?,
-                            ): Boolean {
-                                if (message == null || result == null) return false
-                                pendingDialog = JsDialog.Confirm(message, result)
-                                return true
-                            }
-
-                            override fun onJsPrompt(
-                                view: WebView,
-                                url: String?,
-                                message: String?,
-                                defaultValue: String?,
-                                result: JsPromptResult?,
-                            ): Boolean {
-                                if (message == null || defaultValue == null || result == null) return false
-                                pendingDialog = JsDialog.Prompt(message, defaultValue, result)
-                                return true
-                            }
-
-                            override fun onShowFileChooser(
-                                view: WebView,
-                                callback: ValueCallback<Array<Uri>>?,
-                                params: FileChooserParams?,
-                            ): Boolean {
-                                fileCallback?.onReceiveValue(null)
-                                fileCallback = callback
-                                val intent =
-                                    params?.createIntent()
-                                        ?: Intent(Intent.ACTION_GET_CONTENT).apply { type = "*/*" }
-                                if (params?.mode == FileChooserParams.MODE_OPEN_MULTIPLE) {
-                                    intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-                                }
-                                fileLauncher.launch(intent)
-                                return true
-                            }
-
-                            override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
-                                Log.d(
-                                    "NksuWebUI",
-                                    "${consoleMessage?.message()} @ ${consoleMessage?.sourceId()}:${consoleMessage?.lineNumber()}",
-                                )
-                                return true
-                            }
-                        }
-
-                    addJavascriptInterface(
-                        WebViewBridge(
-                            context = context,
-                            moduleId = moduleId,
-                            webViewProvider = { currentWebView },
-                            onExit = onExit,
-                        ),
-                        "ksu",
-                    )
-
-                    currentWebView = this
-
-                    // AndroidView 的 factory 在测量之前运行，此时 WebView 尺寸为
-                    // 0×0；若立刻 loadUrl，SPA 会按 0×0 视口渲染成空白。等拿到非零
-                    // 尺寸再加载（与 KernelSU 相同）。
-                    val homePage = "https://$WEBUI_DOMAIN/index.html"
-                    if (width > 0 && height > 0) {
-                        loadUrl(homePage)
-                    } else {
-                        addOnLayoutChangeListener(
-                            object : View.OnLayoutChangeListener {
-                                override fun onLayoutChange(
-                                    v: View,
-                                    left: Int,
-                                    top: Int,
-                                    right: Int,
-                                    bottom: Int,
-                                    oldLeft: Int,
-                                    oldTop: Int,
-                                    oldRight: Int,
-                                    oldBottom: Int,
-                                ) {
-                                    if (v.width > 0 && v.height > 0) {
-                                        v.removeOnLayoutChangeListener(this)
-                                        (v as WebView).loadUrl(homePage)
-                                    }
-                                }
-                            },
-                        )
+            modifier =
+                contentModifier.onSizeChanged { size ->
+                    if (!urlLoaded && size.width > 0 && size.height > 0) {
+                        urlLoaded = true
+                        webView.loadUrl(HOME_URL)
                     }
-                }
-            },
+                },
+            factory = { webView },
+            update = { it.requestLayout() },
         )
 
         if (loading) {
