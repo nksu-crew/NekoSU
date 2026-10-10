@@ -12,7 +12,6 @@
 #include <fmac.h>
 #include "symbol/symbol_compat.h"
 #include "nksu.h"
-#include "module/nksu_module.h"
 #include "boot/init.h"
 
 #ifndef NKSU_GIT_COMMIT
@@ -181,7 +180,6 @@ static int nekosu_init_all_components(void)
 static void nekosu_cleanup_all_components(void)
 {
     nksu_exit_feature_components();
-    nksu_modules_exit();
     nksu_exit_selinux_components();
 }
 

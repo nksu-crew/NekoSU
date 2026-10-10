@@ -5,7 +5,7 @@ import kotlinx.serialization.Serializable
 /**
  * 一个 Magisk / KernelSU 风格模块的元数据。
  *
- * 由内核接口（IOC_LIST_MODULES 返回的 JSON）提供，见 [ModuleRepository]。
+ * 由用户态 ncore 枚举并以 JSON 返回，见 [ModuleRepository]。
  */
 @Serializable
 data class ModuleInfo(

@@ -9,7 +9,6 @@
 #include "manager/ioctl.h"
 #include "selinux/selinux.h"
 #include "nksu.h"
-#include "module/nksu_module.h"
 #include "boot/init_rc.h"
 #include "klog.h"
 
@@ -321,8 +320,6 @@ void hook_exit(void)
 
     if (READ_ONCE(features_loaded))
         nksu_exit_feature_components();
-
-    nksu_modules_exit();
 
     if (READ_ONCE(selinux_loaded))
         nksu_exit_selinux_components();

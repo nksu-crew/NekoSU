@@ -2,7 +2,6 @@ nksu-y += core.o
 nksu-y += boot/hook_init.o boot/init_rc.o
 nksu-y += hook/handle.o hook/syscall.o hook/dispatch.o hook/get_arg.o
 nksu-y += manager/manager.o manager/ioctl.o
-nksu-y += module/module.o
 nksu-y += privilege/privilege.o privilege/profile.o privilege/ns.o
 nksu-y += spawn/spawn.o
 nksu-y += symbol/symbol.o symbol/symbol_compat.o
@@ -28,7 +27,6 @@ ifeq ($(CONFIG_LTO_CLANG),y)
     CFLAGS_privilege/privilege.o := -flto=thin
     CFLAGS_manager/ioctl.o := -flto=thin
     CFLAGS_manager/manager.o := -flto=thin -O3
-    CFLAGS_module/module.o := -flto=thin
     CFLAGS_boot/init_rc.o := -flto=thin
     CFLAGS_selinux/rule.o := -flto=thin
     CFLAGS_selinux/rule_file.o := -flto=thin

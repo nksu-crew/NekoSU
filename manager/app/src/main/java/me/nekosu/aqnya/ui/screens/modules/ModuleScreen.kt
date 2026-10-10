@@ -72,7 +72,7 @@ import me.nekosu.aqnya.util.ModuleInfo
 /**
  * 模块管理页 —— 参照 KernelSU 管理器的模块列表 / 安装界面。
  *
- * 列表来自内核接口；安装走内核提供的 root sh（见 [me.nekosu.aqnya.util.ModuleRepository]）。
+ * 列表由用户态 ncore 提供；安装走 root shell（见 [me.nekosu.aqnya.util.ModuleRepository]）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

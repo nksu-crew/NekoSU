@@ -4,12 +4,9 @@
 #include <linux/version.h>
 #include <linux/capability.h>
 #include <linux/kernel.h>
-#include <linux/mm.h>
-#include <linux/slab.h>
 
 #include "fmac.h"
 #include "manager/ioctl.h"
-#include "module/nksu_module.h"
 
 static long ioc_get_shm(void)
 {
@@ -166,36 +163,6 @@ static long ioc_set_profile(const void __user *data, unsigned int size)
     return nksu_profile_set((uid_t)uid, u64_to_cap(caps), domain, namespace);
 }
 
-/*
- * Fill the caller's buffer with the module list as JSON and return its
- * length.  The buffer lives in the request data area, whose capacity is
- * passed in @size.
- */
-static long ioc_list_modules(void __user *data, unsigned int size)
-{
-    char *buf;
-    size_t cap, len;
-    long ret;
-
-    if (!size)
-        return -EINVAL;
-
-    cap = min_t(size_t, size, NKSU_MODULES_JSON_MAX);
-    buf = kvmalloc(cap, GFP_KERNEL);
-    if (!buf)
-        return -ENOMEM;
-
-    len = nksu_modules_emit_json(buf, cap);
-
-    if (copy_to_user(data, buf, len + 1))
-        ret = -EFAULT;
-    else
-        ret = (long)len;
-
-    kvfree(buf);
-    return ret;
-}
-
 static long fmac_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
     struct fmac_ioc ioc;
@@ -232,8 +199,6 @@ static long fmac_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
         return ioc_sel_add_rule(data, ioc.size);
     case IOC_SET_PROFILE:
         return ioc_set_profile(data, ioc.size);
-    case IOC_LIST_MODULES:
-        return ioc_list_modules((void __user *)data, ioc.size);
     case IOC_SET_SEPOLICY:
         return sepolicy_apply_batch(data, ioc.size);
     default:

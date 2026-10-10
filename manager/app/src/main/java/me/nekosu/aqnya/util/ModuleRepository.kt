@@ -1,15 +1,16 @@
 package me.nekosu.aqnya.util
 
+import android.content.Context
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
-import me.nekosu.aqnya.ncore
 
 /**
  * 模块列表与安装流程的入口。
  *
  * 与 KernelSU 管理器依赖 ksud 守护进程不同，这里没有用户态守护进程：
- *  - 模块信息由内核接口返回（[ncore.listModules] -> IOC_LIST_MODULES）
- *  - 安装 / 启用 / 移除通过内核提供的 root sh 执行（[ncore.execRoot]）
+ *  - 模块枚举由用户态的 ncore 完成，管理器以 root 运行
+ *    `ncore module list --json` 并解析其输出的 JSON（见 [list]）；
+ *  - 安装 / 启用 / 移除通过 root shell 执行。
  */
 object ModuleRepository {
     private val json =
@@ -25,15 +26,26 @@ object ModuleRepository {
         val ok: Boolean get() = code == 0
     }
 
-    /** 内核接口是否可用（模块列表非 null 即视为可用）。 */
-    fun available(): Boolean = ncore.listModules() != null
+    /** 以 root 运行 ncore 枚举模块，返回解析后的列表；失败时返回空表。 */
+    fun list(context: Context): List<ModuleInfo> {
+        val ncore = VendorBootInstaller.ncorePath(context)
+        if (!ncore.exists()) return emptyList()
 
-    fun list(): List<ModuleInfo> {
-        val raw = ncore.listModules() ?: return emptyList()
-        if (raw.isBlank()) return emptyList()
+        val result = RootShell.exec("${quote(ncore.absolutePath)} module list --json")
+        if (!result.ok) return emptyList()
+
+        val payload = extractJsonArray(result.output) ?: return emptyList()
         return runCatching {
-            json.decodeFromString(ListSerializer(ModuleInfo.serializer()), raw)
+            json.decodeFromString(ListSerializer(ModuleInfo.serializer()), payload)
         }.getOrDefault(emptyList())
+    }
+
+    /** 取出输出中的 JSON 数组，忽略 su 可能附带的前后噪声。 */
+    private fun extractJsonArray(output: String): String? {
+        val start = output.indexOf('[')
+        val end = output.lastIndexOf(']')
+        if (start < 0 || end <= start) return null
+        return output.substring(start, end + 1)
     }
 
     fun setEnabled(

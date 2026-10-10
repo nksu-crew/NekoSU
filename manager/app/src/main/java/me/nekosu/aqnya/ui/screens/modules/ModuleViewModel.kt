@@ -37,7 +37,7 @@ class ModuleViewModel(app: Application) : AndroidViewModel(app) {
     fun refresh() {
         _uiState.update { it.copy(loading = true) }
         viewModelScope.launch {
-            val list = withContext(Dispatchers.IO) { ModuleRepository.list() }
+            val list = withContext(Dispatchers.IO) { ModuleRepository.list(appContext) }
             _uiState.update {
                 it.copy(
                     modules = list,
