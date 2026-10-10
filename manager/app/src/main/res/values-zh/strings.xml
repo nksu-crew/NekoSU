@@ -297,6 +297,8 @@
     <string name="modules_install">安装模块</string>
     <string name="modules_metamodule">元</string>
     <string name="modules_update">待更新</string>
+    <string name="modules_update_available">有可用更新</string>
+    <string name="modules_update_action">更新</string>
     <string name="modules_version">版本</string>
     <string name="modules_author">作者</string>
     <string name="modules_action">执行</string>

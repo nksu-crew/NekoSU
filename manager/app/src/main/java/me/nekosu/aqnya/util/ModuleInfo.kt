@@ -13,6 +13,7 @@ data class ModuleInfo(
     val name: String = "",
     val version: String = "",
     val versionCode: String = "",
+    val updateJson: String = "",
     val author: String = "",
     val description: String = "",
     val enabled: Boolean = true,

@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import me.nekosu.aqnya.R
 import me.nekosu.aqnya.util.ModuleInfo
+import me.nekosu.aqnya.util.ModuleUpdateInfo
 import kotlin.math.roundToInt
 
 /** 描述收起时最多显示的行数，超出后可点击卡片展开。 */
@@ -84,7 +85,9 @@ private const val DESCRIPTION_MAX_LINES = 3
 @Composable
 internal fun ModuleCard(
     module: ModuleInfo,
+    updateInfo: ModuleUpdateInfo?,
     onToggle: (Boolean) -> Unit,
+    onUpdate: () -> Unit,
     onAction: () -> Unit,
     onOpenWebUi: () -> Unit,
     onRemove: () -> Unit,
@@ -170,7 +173,7 @@ internal fun ModuleCard(
                 )
             }
 
-            if (module.metamodule || module.update) {
+            if (module.metamodule || module.update || updateInfo != null) {
                 Row(
                     modifier = Modifier.padding(top = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -180,6 +183,12 @@ internal fun ModuleCard(
                     }
                     if (module.update) {
                         ModuleTag(stringResource(R.string.modules_update), MaterialTheme.colorScheme.tertiary)
+                    }
+                    if (updateInfo != null) {
+                        ModuleTag(
+                            text = stringResource(R.string.modules_update_available),
+                            color = MaterialTheme.colorScheme.tertiary,
+                        )
                     }
                 }
             }
@@ -199,6 +208,24 @@ internal fun ModuleCard(
                     exit = fadeOut(),
                 ) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (updateInfo != null) {
+                            FilledTonalButton(
+                                onClick = onUpdate,
+                                modifier = Modifier.defaultMinSize(minWidth = 52.dp, minHeight = 32.dp),
+                                contentPadding = ButtonDefaults.TextButtonContentPadding,
+                            ) {
+                                Icon(
+                                    modifier = Modifier.size(20.dp),
+                                    imageVector = Icons.Outlined.Refresh,
+                                    contentDescription = null,
+                                )
+                                Text(
+                                    modifier = Modifier.padding(start = 7.dp),
+                                    text = stringResource(R.string.modules_update_action),
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                        }
                         if (module.hasActionScript) {
                             FilledTonalButton(
                                 onClick = onAction,

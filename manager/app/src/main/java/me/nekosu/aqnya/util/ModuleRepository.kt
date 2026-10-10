@@ -1,8 +1,13 @@
 package me.nekosu.aqnya.util
 
 import android.content.Context
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.io.File
 
 /**
  * 模块列表与安装流程的入口。
@@ -16,6 +21,8 @@ import kotlinx.serialization.json.Json
  *    校验 module.prop、解压到 modules_update/、运行 customize.sh、处理
  *    metamodule，并在下次开机生效；管理器只负责把所选 zip 交给 ncore。
  *  - 启用 / 移除通过 root shell 操作标记文件。
+ *  - 更新：模块 `module.prop` 声明了 `updateJson` 时，读取远端元数据，在版本更高
+ *    时提供更新（见 [checkUpdate] / [downloadZip]），安装仍走上面的 ncore 流程。
  */
 object ModuleRepository {
     private val json =
@@ -52,6 +59,55 @@ object ModuleRepository {
         if (start < 0 || end <= start) return null
         return output.substring(start, end + 1)
     }
+
+    private val httpClient = OkHttpClient()
+
+    /**
+     * 读取模块 `module.prop` 里 `updateJson` 指向的远端信息；远端版本更高且带
+     * `zipUrl` 时返回更新信息，否则返回 null。
+     */
+    suspend fun checkUpdate(module: ModuleInfo): ModuleUpdateInfo? =
+        withContext(Dispatchers.IO) {
+            if (module.updateJson.isBlank() || module.remove || module.update || !module.enabled) {
+                return@withContext null
+            }
+
+            val body =
+                runCatching {
+                    httpClient
+                        .newCall(Request.Builder().url(module.updateJson).build())
+                        .execute()
+                        .use { resp -> if (resp.isSuccessful) resp.body.string() else "" }
+                }.getOrDefault("")
+            if (body.isBlank()) return@withContext null
+
+            val info =
+                runCatching { json.decodeFromString(ModuleUpdateInfo.serializer(), body) }.getOrNull()
+                    ?: return@withContext null
+            val current = module.versionCode.toIntOrNull() ?: 0
+            if (info.zipUrl.isBlank() || info.versionCode <= current) null else info
+        }
+
+    /** 下载 [url] 到 [dest]；成功返回 true。 */
+    suspend fun downloadZip(
+        url: String,
+        dest: File,
+    ): Boolean =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                httpClient
+                    .newCall(Request.Builder().url(url).build())
+                    .execute()
+                    .use { resp ->
+                        if (!resp.isSuccessful) {
+                            false
+                        } else {
+                            dest.outputStream().use { out -> resp.body.byteStream().copyTo(out) }
+                            true
+                        }
+                    }
+            }.getOrDefault(false)
+        }
 
     fun setEnabled(
         id: String,

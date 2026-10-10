@@ -303,6 +303,8 @@
     <string name="modules_install">Install module</string>
     <string name="modules_metamodule">Meta</string>
     <string name="modules_update">Update</string>
+    <string name="modules_update_available">Update available</string>
+    <string name="modules_update_action">Update</string>
     <string name="modules_version">Version</string>
     <string name="modules_author">Author</string>
     <string name="modules_action">Action</string>

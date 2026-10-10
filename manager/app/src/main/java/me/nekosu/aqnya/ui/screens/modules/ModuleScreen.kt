@@ -228,7 +228,9 @@ fun ModuleScreen() {
                         items(state.modules, key = { it.id }) { module ->
                             ModuleCard(
                                 module = module,
+                                updateInfo = state.updates[module.id],
                                 onToggle = { enabled -> moduleViewModel.setEnabled(module, enabled) },
+                                onUpdate = { moduleViewModel.update(module) },
                                 onAction = { moduleViewModel.runAction(module) },
                                 onOpenWebUi = { context.startActivity(WebUIActivity.intent(context, module.id)) },
                                 onRemove = { moduleViewModel.remove(module) },

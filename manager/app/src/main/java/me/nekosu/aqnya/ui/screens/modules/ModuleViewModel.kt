@@ -7,6 +7,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,11 +18,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.nekosu.aqnya.util.ModuleInfo
 import me.nekosu.aqnya.util.ModuleRepository
+import me.nekosu.aqnya.util.ModuleUpdateInfo
 import me.nekosu.aqnya.util.RootShell
 import java.io.File
 
 data class ModulesUiState(
     val modules: List<ModuleInfo> = emptyList(),
+    val updates: Map<String, ModuleUpdateInfo> = emptyMap(),
     val loading: Boolean = false,
     val available: Boolean = true,
     val installing: Boolean = false,
@@ -50,8 +55,29 @@ class ModuleViewModel(app: Application) : AndroidViewModel(app) {
                     modules = list,
                     loading = false,
                     available = true,
+                    updates = it.updates.filterKeys { id -> list.any { m -> m.id == id } },
                 )
             }
+            syncUpdates(list)
+        }
+    }
+
+    /** 逐个检查带 `updateJson` 的模块，把有更高版本的记进 [ModulesUiState.updates]。 */
+    private fun syncUpdates(modules: List<ModuleInfo>) {
+        val candidates =
+            modules.filter { it.updateJson.isNotBlank() && !it.remove && !it.update && it.enabled }
+        if (candidates.isEmpty()) {
+            _uiState.update { it.copy(updates = emptyMap()) }
+            return
+        }
+        viewModelScope.launch {
+            val found =
+                coroutineScope {
+                    candidates
+                        .map { module -> async { module.id to ModuleRepository.checkUpdate(module) } }
+                        .awaitAll()
+                }.mapNotNull { (id, info) -> info?.let { id to it } }.toMap()
+            _uiState.update { it.copy(updates = found) }
         }
     }
 
@@ -124,26 +150,61 @@ class ModuleViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
 
-            // 逐行回填安装器输出，界面实时滚动显示日志。
-            val buffer = StringBuilder()
-            val command = ModuleRepository.installCommand(appContext, zip.absolutePath)
-            val code =
-                withContext(Dispatchers.IO) {
-                    RootShell.execStreaming(command) { line ->
-                        buffer.append(line).append('\n')
-                        _uiState.update { state -> state.copy(installLog = buffer.toString()) }
-                    }
-                }
-            _uiState.update {
-                it.copy(
-                    installing = false,
-                    installDone = true,
-                    installSuccess = code == 0,
-                    installLog = buffer.toString(),
-                )
-            }
-            if (code == 0) refresh()
+            runInstall(zip)
         }
+    }
+
+    /** 下载模块的更新（`updateJson` 里的 `zipUrl`），再走与本地安装相同的流程。 */
+    fun update(module: ModuleInfo) {
+        val info = _uiState.value.updates[module.id] ?: return
+        if (_uiState.value.installing) return
+        _uiState.update {
+            it.copy(
+                installing = true,
+                installLog = "",
+                installDone = false,
+                installSuccess = null,
+            )
+        }
+        viewModelScope.launch {
+            val zip = File(appContext.cacheDir, "module-update-${module.id}.zip")
+            val downloaded =
+                withContext(Dispatchers.IO) { ModuleRepository.downloadZip(info.zipUrl, zip) }
+            if (!downloaded) {
+                _uiState.update {
+                    it.copy(
+                        installing = false,
+                        installDone = true,
+                        installSuccess = false,
+                        installLog = "download failed: ${info.zipUrl}",
+                    )
+                }
+                return@launch
+            }
+            runInstall(zip)
+        }
+    }
+
+    /** 把已就位的 zip 交给 ncore 安装，逐行回填输出。 */
+    private suspend fun runInstall(zip: File) {
+        val buffer = StringBuilder()
+        val command = ModuleRepository.installCommand(appContext, zip.absolutePath)
+        val code =
+            withContext(Dispatchers.IO) {
+                RootShell.execStreaming(command) { line ->
+                    buffer.append(line).append('\n')
+                    _uiState.update { state -> state.copy(installLog = buffer.toString()) }
+                }
+            }
+        _uiState.update {
+            it.copy(
+                installing = false,
+                installDone = true,
+                installSuccess = code == 0,
+                installLog = buffer.toString(),
+            )
+        }
+        if (code == 0) refresh()
     }
 
     fun resetInstall() {
