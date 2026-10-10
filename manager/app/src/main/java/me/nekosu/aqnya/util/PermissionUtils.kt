@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -19,22 +20,29 @@ import androidx.core.content.ContextCompat
 
 enum class AppPermission(
     val manifest: String,
+    val minSdk: Int? = null,
 ) {
-    POST_NOTIFICATIONS(Manifest.permission.POST_NOTIFICATIONS),
-    READ_MEDIA_IMAGES(Manifest.permission.READ_MEDIA_IMAGES),
-    QUERY_ALL_PACKAGES(Manifest.permission.QUERY_ALL_PACKAGES),
+    POST_NOTIFICATIONS(Manifest.permission.POST_NOTIFICATIONS, Build.VERSION_CODES.TIRAMISU),
+    READ_MEDIA_IMAGES(Manifest.permission.READ_MEDIA_IMAGES, Build.VERSION_CODES.TIRAMISU),
+    QUERY_ALL_PACKAGES(Manifest.permission.QUERY_ALL_PACKAGES, Build.VERSION_CODES.R),
     MIUI_GET_INSTALLED_APPS("com.android.permission.GET_INSTALLED_APPS"),
+    ;
+
+    val isApplicable: Boolean
+        get() = minSdk == null || Build.VERSION.SDK_INT >= minSdk
 }
 
 object PermissionUtils {
     fun isGranted(
         context: Context,
         permission: AppPermission,
-    ): Boolean =
-        ContextCompat.checkSelfPermission(
+    ): Boolean {
+        if (!permission.isApplicable) return true
+        return ContextCompat.checkSelfPermission(
             context,
             permission.manifest,
         ) == PackageManager.PERMISSION_GRANTED
+    }
 
     fun allGranted(
         context: Context,
@@ -49,9 +57,11 @@ object PermissionUtils {
     fun isPermanentlyDenied(
         activity: Activity,
         permission: AppPermission,
-    ): Boolean =
-        !activity.shouldShowRequestPermissionRationale(permission.manifest) &&
+    ): Boolean {
+        if (!permission.isApplicable) return false
+        return !activity.shouldShowRequestPermissionRationale(permission.manifest) &&
             !isGranted(activity, permission)
+    }
 
     fun openAppSettings(context: Context) {
         val intent =
@@ -155,12 +165,14 @@ fun rememberMultiplePermissionsState(
 ): MultiplePermissionsState {
     val context = androidx.compose.ui.platform.LocalContext.current
 
+    val applicablePermissions = remember(permissions) { permissions.filter { it.isApplicable } }
+
     val state =
         remember(permissions) {
             MultiplePermissionsState(
-                permissions = permissions,
+                permissions = applicablePermissions,
                 initialGranted =
-                    permissions.associateWith {
+                    applicablePermissions.associateWith {
                         PermissionUtils.isGranted(context, it)
                     },
             )
@@ -172,7 +184,7 @@ fun rememberMultiplePermissionsState(
         ) { results ->
             val mapped =
                 results.entries.associate { (manifest, granted) ->
-                    permissions.first { it.manifest == manifest } to granted
+                    applicablePermissions.first { it.manifest == manifest } to granted
                 }
             state.statuses = mapped
             onResult(mapped)

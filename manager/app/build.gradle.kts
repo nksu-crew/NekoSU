@@ -35,7 +35,7 @@ android {
 
     defaultConfig {
         applicationId = "me.nekosu.aqnya"
-        minSdk = 33
+        minSdk = 31
         targetSdk = 37
         versionCode = gitCommitCount()
         versionName = gitCommitHash()

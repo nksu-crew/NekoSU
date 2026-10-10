@@ -74,7 +74,8 @@ object KernelInfo {
             Build.VERSION.SDK_INT >= 36 -> "16"
             Build.VERSION.SDK_INT == 35 -> "15"
             Build.VERSION.SDK_INT == 34 -> "14"
-            else -> "13"
+            Build.VERSION.SDK_INT == 33 -> "13"
+            else -> "12"
         }
     }
 }

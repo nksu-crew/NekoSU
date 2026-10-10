@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.os.Build
 import android.util.LruCache
 import androidx.annotation.StringRes
 import androidx.compose.animation.*
@@ -235,9 +236,14 @@ class AppViewModel(
 
             val launcherIntent =
                 Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-            val launchable =
-                pm.queryIntentActivities(launcherIntent, PackageManager.ResolveInfoFlags.of(0))
-                    .mapNotNullTo(HashSet<String>()) { it.activityInfo?.packageName }
+            val resolved =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    pm.queryIntentActivities(launcherIntent, PackageManager.ResolveInfoFlags.of(0))
+                } else {
+                    @Suppress("DEPRECATION")
+                    pm.queryIntentActivities(launcherIntent, 0)
+                }
+            val launchable = resolved.mapNotNullTo(HashSet<String>()) { it.activityInfo?.packageName }
 
             val apps = ArrayList<AppInfo>(packages.size)
             for (pkg in packages) {
