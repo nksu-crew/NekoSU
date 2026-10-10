@@ -300,6 +300,7 @@
     <string name="modules_version">版本</string>
     <string name="modules_author">作者</string>
     <string name="modules_action">执行</string>
+    <string name="modules_webui">WebUI</string>
     <string name="modules_remove">移除</string>
     <string name="modules_undo">撤销</string>
     <string name="modules_action_uninstall">立即卸载</string>

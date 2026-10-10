@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import me.nekosu.aqnya.R
 import me.nekosu.aqnya.ui.component.KeyEventBlocker
+import me.nekosu.aqnya.ui.webui.WebUIActivity
 import me.nekosu.aqnya.util.LogUtils
 
 /**
@@ -222,6 +223,7 @@ fun ModuleScreen() {
                                 module = module,
                                 onToggle = { enabled -> moduleViewModel.setEnabled(module, enabled) },
                                 onAction = { moduleViewModel.runAction(module) },
+                                onOpenWebUi = { context.startActivity(WebUIActivity.intent(context, module.id)) },
                                 onRemove = { moduleViewModel.remove(module) },
                                 onUndoRemove = { moduleViewModel.undoRemove(module) },
                                 onUninstall = { moduleViewModel.uninstall(module) },

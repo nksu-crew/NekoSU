@@ -22,8 +22,12 @@ data class ModuleInfo(
     val skipMount: Boolean = false,
     val hasSystem: Boolean = false,
     val hasActionScript: Boolean = false,
+    val hasWebUi: Boolean = false,
 ) {
     val title: String get() = name.ifBlank { id }
 
     val installDir: String get() = "/data/adb/modules/$id"
+
+    /** 模块 WebUI 的根目录（`<module>/webroot`）。 */
+    val webRootDir: String get() = "$installDir/webroot"
 }

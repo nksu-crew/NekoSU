@@ -306,6 +306,7 @@
     <string name="modules_version">Version</string>
     <string name="modules_author">Author</string>
     <string name="modules_action">Action</string>
+    <string name="modules_webui">WebUI</string>
     <string name="modules_remove">Remove</string>
     <string name="modules_undo">Undo</string>
     <string name="modules_action_uninstall">Uninstall now</string>

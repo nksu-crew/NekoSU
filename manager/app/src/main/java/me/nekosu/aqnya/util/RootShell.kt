@@ -39,6 +39,25 @@ object RootShell {
             ?: Result(-1, "root shell unavailable")
     }
 
+    /**
+     * 以 root 读取一个文件的原始字节（供模块 WebUI 提供静态资源）。
+     *
+     * 用 `su -c cat` 拿到 stdout 的字节流；失败返回 null。注意不要走
+     * [exec]，那条路径会把输出按文本解码，二进制资源会被破坏。
+     */
+    fun readFileBytes(path: String): ByteArray? =
+        try {
+            val process =
+                ProcessBuilder(SU_PATH, "-c", "cat ${quote(path)}")
+                    .redirectErrorStream(false)
+                    .start()
+            val bytes = process.inputStream.readBytes()
+            process.waitFor()
+            if (process.exitValue() == 0 && bytes.isNotEmpty()) bytes else null
+        } catch (e: Exception) {
+            null
+        }
+
     /** 执行 root 命令并把输出逐行回调，返回退出码。 */
     fun execStreaming(
         cmd: String,
@@ -61,6 +80,8 @@ object RootShell {
     /** su 环境可能没有可用的 PATH，显式补齐 toybox 等系统工具。 */
     private fun withPath(cmd: String): String =
         "PATH=/sbin:/system/sbin:/system/bin:/system/xbin; export PATH; $cmd"
+
+    private fun quote(s: String): String = "'" + s.replace("'", "'\\''") + "'"
 
     private fun runCapture(
         command: List<String>,

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
@@ -85,6 +86,7 @@ internal fun ModuleCard(
     module: ModuleInfo,
     onToggle: (Boolean) -> Unit,
     onAction: () -> Unit,
+    onOpenWebUi: () -> Unit,
     onRemove: () -> Unit,
     onUndoRemove: () -> Unit,
     onUninstall: () -> Unit,
@@ -211,6 +213,24 @@ internal fun ModuleCard(
                                 Text(
                                     modifier = Modifier.padding(start = 7.dp),
                                     text = stringResource(R.string.modules_action),
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                        }
+                        if (module.hasWebUi) {
+                            FilledTonalButton(
+                                onClick = onOpenWebUi,
+                                modifier = Modifier.defaultMinSize(minWidth = 52.dp, minHeight = 32.dp),
+                                contentPadding = ButtonDefaults.TextButtonContentPadding,
+                            ) {
+                                Icon(
+                                    modifier = Modifier.size(20.dp),
+                                    imageVector = Icons.Outlined.Code,
+                                    contentDescription = null,
+                                )
+                                Text(
+                                    modifier = Modifier.padding(start = 7.dp),
+                                    text = stringResource(R.string.modules_webui),
                                     style = MaterialTheme.typography.labelMedium,
                                 )
                             }
