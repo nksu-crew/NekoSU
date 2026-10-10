@@ -43,28 +43,10 @@ object RootShell {
     /**
      * 以 root 读取一个文件的原始字节（供模块 WebUI 提供静态资源）。
      *
-     * 优先走 JNI（[ncore.readFile]，在 native 侧 fork `su -c cat`，省去 JVM 的
-     * 进程封装）；native 不可用时退回 Kotlin 的 `su -c cat`。两条路径都返回原始
-     * 字节，二进制安全。
+     * 走 JNI（[ncore.readFile]：native 侧 fork `su -c cat`，返回原始字节，二进制安全）。
      */
-    fun readFileBytes(path: String): ByteArray? {
-        val fromJni = runCatching { ncore.readFile(path) }.getOrNull()
-        if (fromJni != null && fromJni.isNotEmpty()) return fromJni
-        return readFileBytesShell(path)
-    }
-
-    private fun readFileBytesShell(path: String): ByteArray? =
-        try {
-            val process =
-                ProcessBuilder(SU_PATH, "-c", withPath("cat ${quote(path)}"))
-                    .redirectErrorStream(false)
-                    .start()
-            val bytes = process.inputStream.readBytes()
-            process.waitFor()
-            if (process.exitValue() == 0 && bytes.isNotEmpty()) bytes else null
-        } catch (e: Exception) {
-            null
-        }
+    fun readFileBytes(path: String): ByteArray? =
+        runCatching { ncore.readFile(path) }.getOrNull()?.takeIf { it.isNotEmpty() }
 
     /** 执行 root 命令并把输出逐行回调，返回退出码。 */
     fun execStreaming(
@@ -88,8 +70,6 @@ object RootShell {
     /** su 环境可能没有可用的 PATH，显式补齐 toybox 等系统工具。 */
     private fun withPath(cmd: String): String =
         "PATH=/sbin:/system/sbin:/system/bin:/system/xbin; export PATH; $cmd"
-
-    private fun quote(s: String): String = "'" + s.replace("'", "'\\''") + "'"
 
     private fun runCapture(
         command: List<String>,

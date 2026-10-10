@@ -36,19 +36,12 @@ class ModulePathHandler(
 
         val root = webRoot.toPath().normalize()
         var target = File(webRoot, path).toPath().normalize()
-        if (!target.startsWith(root)) return notFound(path)
-
-        // 目录（或根路径）→ index.html
         if (path.isBlank() || path.endsWith('/')) {
             target = target.resolve("index.html")
         }
+        if (!target.startsWith(root)) return notFound(path)
 
-        var bytes = RootShell.readFileBytes(target.toFile().absolutePath)
-        if (bytes == null) {
-            // 请求可能指向一个目录：退回它的 index.html 再试一次。
-            target = target.resolve("index.html")
-            bytes = RootShell.readFileBytes(target.toFile().absolutePath)
-        }
+        val bytes = RootShell.readFileBytes(target.toFile().absolutePath)
         if (bytes == null) {
             Log.w("NksuWebUI", "404 webui:$path (root=$webRoot)")
             return notFound(path)
