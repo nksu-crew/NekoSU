@@ -15,16 +15,17 @@
 #include "boot/init.h"
 #include "privilege/profile_store.h"
 
-#ifndef NKSU_GIT_COMMIT
-#define NKSU_GIT_COMMIT "unknown"
-#endif
-
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Aqnya");
 MODULE_DESCRIPTION("nekosu");
 MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
 
 bool late_load = false;
+
+const char *nksu_version(void)
+{
+    return NKSU_GIT_COMMIT;
+}
 
 typedef struct {
     const char *name;

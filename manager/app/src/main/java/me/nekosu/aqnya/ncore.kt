@@ -67,4 +67,7 @@ object ncore {
 
     external fun isGki(): Boolean
     external fun kernelVersion(): String?
+
+    /** 运行中内核模块（nksu.ko）的构建版本，用于和 APK 版本比对。 */
+    external fun moduleVersion(): String?
 }

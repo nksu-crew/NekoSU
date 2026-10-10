@@ -13,6 +13,7 @@ import kotlinx.coroutines.withContext
 import me.nekosu.aqnya.ncore
 import me.nekosu.aqnya.util.KernelInfo
 import me.nekosu.aqnya.util.NcoreBoot
+import me.nekosu.aqnya.util.getAppCommit
 import me.nekosu.aqnya.util.getAppVersion
 
 class HomeViewModel(
@@ -33,13 +34,33 @@ class HomeViewModel(
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 val installed = ncore.ctl(1) == 0
-                _installStatus.value = if (installed) InstallStatus.INSTALLED else InstallStatus.NOT_INSTALLED
                 _managerVersion.value = getAppVersion(appContext)
                 _isGki.value = KernelInfo.isGki()
 
-                // nksu 已生效：确保启动用的 ncore 位于 /data/adb/nksu/ncore。
-                if (installed) {
-                    NcoreBoot.install(appContext)
+                if (!installed) {
+                    _installStatus.value = InstallStatus.NOT_INSTALLED
+                } else {
+                    // LKM 与 APK 版本绑定：运行中的内核模块必须来自本 APK 的同一
+                    // commit，否则管理器内打包的 ncore 会与已刷入的 LKM 不匹配
+                    // （表现为模块卡在 modules_update、/data/adb/ksu 软链接缺失，
+                    // 甚至启动失败）。旧内核没有 IOC_GET_VERSION，此时视为匹配。
+                    ncore.ctl(3)
+                    val moduleVersion = runCatching { ncore.moduleVersion() }.getOrNull()
+                    val appCommit = runCatching { getAppCommit(appContext) }.getOrNull()
+                    val matched =
+                        moduleVersion.isNullOrBlank() ||
+                            moduleVersion == "unknown" ||
+                            appCommit.isNullOrBlank() ||
+                            moduleVersion == appCommit
+
+                    _installStatus.value =
+                        if (matched) InstallStatus.INSTALLED else InstallStatus.NEED_UPDATE
+
+                    // 只有版本一致时才把随包的 ncore 放到 /data/adb/nksu/ncore，
+                    // 避免用一个不匹配的 ncore 覆盖能工作的旧版本。
+                    if (matched) {
+                        NcoreBoot.install(appContext)
+                    }
                 }
             }
             refresh()

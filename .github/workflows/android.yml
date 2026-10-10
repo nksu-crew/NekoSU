@@ -26,7 +26,16 @@ permissions:
   actions: read
 
 jobs:
+  # Build the LKM from the same commit as the APK so the manager's version, the
+  # bundled nksu.ko and the flashed kernel module are always bound together.
+  # (Previously the APK downloaded the latest LKM artifacts, which could come
+  # from a different commit and whose ncore would not match the manager.)
+  build-lkm:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    uses: ./.github/workflows/build-lkm.yml
+
   build:
+    needs: build-lkm
     if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     env:
@@ -63,38 +72,14 @@ jobs:
         mv android-ndk-"$NDK_VERSION" "$ANDROID_NDK_HOME"
         rm -f ndk.zip
 
-    - name: Download latest LKM artifacts
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        set -euo pipefail
+    - name: Download LKM artifacts (same commit)
+      uses: actions/download-artifact@v8
+      with:
+        path: lkm-artifacts
+        pattern: '*-lkm'
 
-        repo="${GITHUB_REPOSITORY}"
-        workflow="build-lkm.yml"
-
-        echo "::group::Locating the latest successful LKM run"
-        run_id="$(gh run list \
-          --repo "$repo" \
-          --workflow "$workflow" \
-          --branch main \
-          --status success \
-          --limit 1 \
-          --json databaseId \
-          --jq '.[0].databaseId')"
-        if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
-          echo "::error::no successful '$workflow' run found in $repo"
-          exit 1
-        fi
-        echo "latest successful LKM run: $run_id"
-        echo "::endgroup::"
-
-        rm -rf lkm-artifacts
-        mkdir -p lkm-artifacts
-        gh run download "$run_id" \
-          --repo "$repo" \
-          --dir lkm-artifacts \
-          --pattern '*-lkm'
-        find lkm-artifacts -name '*_nksu.ko' -print
+    - name: List LKM artifacts
+      run: find lkm-artifacts -name '*_nksu.ko' -print
 
     - name: Prepare KOs (assets)
       run: |

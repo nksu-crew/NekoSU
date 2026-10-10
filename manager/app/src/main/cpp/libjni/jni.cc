@@ -624,6 +624,38 @@ static jstring kernelVersion(JNIEnv *env, jobject thiz) {
   }
   return env->NewStringUTF(ver);
 }
+
+/*
+ * The running kernel module's build version (IOC_GET_VERSION).  The manager
+ * binds its own version to it so it can tell that the flashed LKM is stale and
+ * never install a userspace ncore that does not match it.
+ */
+static jstring moduleVersion(JNIEnv *env, jobject thiz) {
+  (void)thiz;
+
+  if (ctlfd < 0) {
+    // Best effort: acquire the manager-gated control fd if nobody did yet.
+    if (Ctl(OP_IOCTL) >= 0) {
+      const int f = ScanCtlFd();
+      if (f >= 0)
+        ctlfd = f;
+    }
+  }
+
+  if (ctlfd < 0) {
+    LOG_ERR("moduleVersion: control fd unavailable");
+    return nullptr;
+  }
+
+  char buf[64];
+  memset(buf, 0, sizeof(buf));
+  if (ioc_call(ctlfd, IOC_GET_VERSION, buf, sizeof(buf)) < 0) {
+    LOG_ERR("moduleVersion failed: %s", strerror(errno));
+    return nullptr;
+  }
+  buf[sizeof(buf) - 1] = '\0';
+  return env->NewStringUTF(buf);
+}
 } // namespace ncore
 
 const JNINativeMethod gMethods[] = {
@@ -646,6 +678,7 @@ const JNINativeMethod gMethods[] = {
     {"helloLog", "()V", (void *)ncore::helloLog},
     {"isGki", "()Z", (void *)ncore::isGki},
     {"kernelVersion", "()Ljava/lang/String;", (void *)ncore::kernelVersion},
+    {"moduleVersion", "()Ljava/lang/String;", (void *)ncore::moduleVersion},
 };
 
 static int registerNativeMethods(JNIEnv *env) {

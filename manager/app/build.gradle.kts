@@ -15,8 +15,10 @@ fun gitCommitCount(): Int =
         .trim()
         .toInt()
 
+// Keep the length identical to the LKM's NKSU_GIT_COMMIT (--short=12) so the
+// manager can compare its own version with the running kernel module's.
 fun gitCommitHash(): String =
-    ProcessBuilder("git", "rev-parse", "--short", "HEAD")
+    ProcessBuilder("git", "rev-parse", "--short=12", "HEAD")
         .directory(rootDir)
         .start()
         .inputStream

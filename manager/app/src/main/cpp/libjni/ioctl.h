@@ -23,6 +23,7 @@ enum fmac_flag {
   /* 11 was IOC_LIST_MODULES; module enumeration now lives in ncore. */
   IOC_SET_SEPOLICY = 12, /* data = KernelSU-format sepolicy batch, size = length */
   IOC_GET_PROFILES = 13, /* data[<=64KiB] out = profile table as text */
+  IOC_GET_VERSION = 14,  /* data[<=64] out = kernel module build version */
 };
 
 struct fmac_ioc {

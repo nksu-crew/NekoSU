@@ -6,9 +6,11 @@
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
+#include <linux/string.h>
 
 #include "fmac.h"
 #include "manager/ioctl.h"
+#include "nksu.h"
 #include "privilege/profile_store.h"
 
 static long ioc_get_shm(void)
@@ -191,6 +193,18 @@ static long ioc_get_profiles(void __user *data, unsigned int size)
     return len;
 }
 
+/* Expose the module's build version so the manager can detect a stale LKM. */
+static long ioc_get_version(void __user *data, unsigned int size)
+{
+    const char *version = nksu_version();
+    size_t len = strlen(version) + 1;
+
+    if (!data || size < len)
+        return -ENOSPC;
+
+    return copy_to_user(data, version, len) ? -EFAULT : 0;
+}
+
 static long fmac_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
     struct fmac_ioc ioc;
@@ -231,6 +245,8 @@ static long fmac_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
         return sepolicy_apply_batch(data, ioc.size);
     case IOC_GET_PROFILES:
         return ioc_get_profiles((void __user *)data, ioc.size);
+    case IOC_GET_VERSION:
+        return ioc_get_version((void __user *)data, ioc.size);
     default:
         return -ENOTTY;
     }

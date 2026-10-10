@@ -37,6 +37,13 @@ enum {
      * manager's JNI listProfiles() so it never has to persist the profiles.
      */
     IOC_GET_PROFILES = 13,
+    /*
+     * data[<= 64] (out) = the kernel module's build version string
+     * (NKSU_GIT_COMMIT), NUL-terminated.  The manager compares it with its own
+     * bound version so it never runs a userspace ncore that does not match the
+     * flashed LKM.
+     */
+    IOC_GET_VERSION = 14,
 };
 
 #define NKSU_PROFILE_TEXT_MAX (64 * 1024)
