@@ -29,8 +29,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -47,7 +45,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import me.nekosu.aqnya.R
+import me.nekosu.aqnya.ui.component.HazeTopAppBar
 import me.nekosu.aqnya.ui.component.StatusCard
 import me.nekosu.aqnya.util.getAppVersion
 
@@ -68,19 +69,16 @@ fun HomeScreenContent(
     onInstallClick: () -> Unit,
     onAboutClick: () -> Unit = {},
 ) {
+    val hazeState = rememberHazeState()
     Scaffold(
         topBar = {
-            TopAppBar(
+            HazeTopAppBar(
+                state = hazeState,
                 title = {
                     Text(
                         text = stringResource(R.string.app_name),
                     )
                 },
-                colors =
-                    TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    ),
             )
         },
     ) { innerPadding ->
@@ -88,8 +86,9 @@ fun HomeScreenContent(
             modifier =
                 Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
+                    .hazeSource(hazeState)
                     .verticalScroll(rememberScrollState())
+                    .padding(innerPadding)
                     .padding(horizontal = 16.dp, vertical = 12.dp)
                     .padding(bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),

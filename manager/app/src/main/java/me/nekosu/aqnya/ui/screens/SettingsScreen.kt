@@ -13,10 +13,8 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
@@ -29,8 +27,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.launch
 import me.nekosu.aqnya.R
+import me.nekosu.aqnya.ui.component.HazeTopAppBar
 import me.nekosu.aqnya.ui.screens.enums.ThemeColor
 import me.nekosu.aqnya.ui.screens.enums.ThemeMode
 import me.nekosu.aqnya.ui.screens.sections.*
@@ -68,21 +69,18 @@ fun SettingsScreen(navController: NavController) {
             ?.let { stringResource(it.labelRes) }
             ?: stringResource(R.string.language_system)
 
+    val hazeState = rememberHazeState()
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
-            TopAppBar(
+            HazeTopAppBar(
+                state = hazeState,
                 title = {
                     Text(
                         text = stringResource(R.string.settings_title),
                     )
                 },
                 scrollBehavior = scrollBehavior,
-                colors =
-                    TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        scrolledContainerColor = MaterialTheme.colorScheme.surface,
-                    ),
             )
         },
         contentWindowInsets =
@@ -94,8 +92,9 @@ fun SettingsScreen(navController: NavController) {
             modifier =
                 Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
+                    .hazeSource(hazeState)
                     .verticalScroll(rememberScrollState())
+                    .padding(innerPadding)
                     .padding(top = 16.dp)
                     .padding(bottom = 96.dp)
                     .padding(horizontal = 16.dp),

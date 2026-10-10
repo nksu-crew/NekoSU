@@ -21,6 +21,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -34,11 +35,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import dev.chrisbanes.haze.HazeInput
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.blur.hazeBlur
 
 private const val TAG = "SearchBar"
 
@@ -55,6 +60,7 @@ fun SearchAppBar(
     leadingActions: @Composable (() -> Unit)? = null,
     trailingActions: @Composable (() -> Unit)? = null,
     startInSearchMode: Boolean = false,
+    hazeState: HazeState? = null,
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
@@ -78,6 +84,23 @@ fun SearchAppBar(
             keyboardController?.hide()
         }
     }
+
+    val hazeStyle = rememberHazeAppBarStyle()
+    val hazeModifier =
+        if (hazeState != null) {
+            Modifier.hazeBlur(input = HazeInput.Sources(hazeState), style = hazeStyle)
+        } else {
+            Modifier
+        }
+    val appBarColors =
+        if (hazeState != null) {
+            TopAppBarDefaults.topAppBarColors(
+                containerColor = Color.Transparent,
+                scrolledContainerColor = Color.Transparent,
+            )
+        } else {
+            TopAppBarDefaults.topAppBarColors()
+        }
 
     TopAppBar(
         title = {
@@ -138,6 +161,8 @@ fun SearchAppBar(
                 }
             }
         },
+        modifier = hazeModifier,
+        colors = appBarColors,
         navigationIcon = {
             if (onBackClick != null) {
                 IconButton(

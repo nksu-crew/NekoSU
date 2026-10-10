@@ -44,6 +44,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -343,6 +345,7 @@ fun AppListScreen(
     var isRefreshing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val refreshState = rememberPullToRefreshState()
+    val hazeState = rememberHazeState()
 
     LaunchedEffect(Unit) { viewModel.loadApps() }
 
@@ -411,6 +414,7 @@ fun AppListScreen(
                 leadingActions = null,
                 trailingActions = null,
                 startInSearchMode = false,
+                hazeState = hazeState,
             )
         },
         contentWindowInsets = WindowInsets(0),
@@ -429,7 +433,10 @@ fun AppListScreen(
             state = refreshState,
             indicator = {
                 Indicator(
-                    modifier = Modifier.align(Alignment.TopCenter),
+                    modifier =
+                        Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = innerPadding.calculateTopPadding()),
                     isRefreshing = isRefreshing,
                     state = refreshState,
                     color = MaterialTheme.colorScheme.primary,
@@ -439,17 +446,26 @@ fun AppListScreen(
             modifier =
                 Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
                     .padding(horizontal = 16.dp),
             contentAlignment = Alignment.Center,
         ) {
             when {
                 !viewModel.isLoaded -> {
-                    LoadingState()
+                    Box(
+                        modifier = Modifier.fillMaxSize().padding(innerPadding),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        LoadingState()
+                    }
                 }
 
                 apps.isEmpty() -> {
-                    EmptyState(isSearching, searchQuery)
+                    Box(
+                        modifier = Modifier.fillMaxSize().padding(innerPadding),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        EmptyState(isSearching, searchQuery)
+                    }
                 }
 
                 else -> {
@@ -458,9 +474,13 @@ fun AppListScreen(
 
                     LazyColumn(
                         state = listState,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize().hazeSource(hazeState),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
-                        contentPadding = PaddingValues(top = 12.dp, bottom = extraBottomPadding),
+                        contentPadding =
+                            PaddingValues(
+                                top = innerPadding.calculateTopPadding() + 12.dp,
+                                bottom = extraBottomPadding,
+                            ),
                     ) {
                         val allItems = pinnedList + otherList
 

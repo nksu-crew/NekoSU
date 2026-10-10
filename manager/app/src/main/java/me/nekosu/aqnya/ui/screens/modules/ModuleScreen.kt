@@ -57,7 +57,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import me.nekosu.aqnya.R
+import me.nekosu.aqnya.ui.component.HazeTopAppBar
 import me.nekosu.aqnya.ui.component.KeyEventBlocker
 import me.nekosu.aqnya.ui.webui.WebUIActivity
 import me.nekosu.aqnya.util.LogUtils
@@ -77,6 +80,7 @@ fun ModuleScreen() {
 
     val state by moduleViewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val hazeState = rememberHazeState()
 
     val pickZip =
         rememberLauncherForActivityResult(
@@ -141,13 +145,9 @@ fun ModuleScreen() {
                 }
 
                 else -> {
-                    TopAppBar(
+                    HazeTopAppBar(
+                        state = hazeState,
                         title = { Text(stringResource(R.string.modules_title)) },
-                        colors =
-                            TopAppBarDefaults.topAppBarColors(
-                                containerColor = MaterialTheme.colorScheme.surface,
-                                scrolledContainerColor = MaterialTheme.colorScheme.surface,
-                            ),
                     )
                 }
             }
@@ -185,7 +185,7 @@ fun ModuleScreen() {
                 WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
             ),
     ) { innerPadding ->
-        Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+        Box(modifier = Modifier.fillMaxSize()) {
             // 日志界面显示时消费音量键，避免系统音量条盖住提示；脚本仍从
             // /dev/input 读到按键，因此不影响「按音量键选择」。
             if (installVisible || actionVisible) {
@@ -194,25 +194,32 @@ fun ModuleScreen() {
 
             when {
                 installVisible -> {
-                    LogPane(text = state.installLog, running = state.installing)
+                    Box(Modifier.fillMaxSize().padding(innerPadding)) {
+                        LogPane(text = state.installLog, running = state.installing)
+                    }
                 }
 
                 actionVisible -> {
-                    LogPane(text = state.actionOutput, running = state.actionRunning)
+                    Box(Modifier.fillMaxSize().padding(innerPadding)) {
+                        LogPane(text = state.actionOutput, running = state.actionRunning)
+                    }
                 }
 
                 state.modules.isEmpty() -> {
-                    EmptyState(loading = state.loading)
+                    Box(Modifier.fillMaxSize().padding(innerPadding)) {
+                        EmptyState(loading = state.loading)
+                    }
                 }
 
                 else -> {
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize().hazeSource(hazeState),
                         contentPadding =
                             PaddingValues(
                                 start = 16.dp,
                                 end = 16.dp,
-                                top = 12.dp,
+                                // 用顶栏高度做内容内边距，列表往上滚时经过顶栏下方。
+                                top = innerPadding.calculateTopPadding() + 12.dp,
                                 // 底部留出空间，避免最后一张卡被安装 FAB / 悬浮导航栏挡住。
                                 bottom = 88.dp,
                             ),
