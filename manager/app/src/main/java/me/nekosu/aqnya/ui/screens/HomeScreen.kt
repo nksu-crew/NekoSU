@@ -143,8 +143,6 @@ fun DeviceInfoCard(modifier: Modifier = Modifier) {
             Triple(Icons.Outlined.Fingerprint,stringResource(id = R.string.finger_print),Build.FINGERPRINT),
         )
 
-    // 以前卡片背后叠了一层模糊渐变，但卡片本身不透明，那层永远看不见，
-    // 白白每帧跑一次 RenderEffect；这里直接去掉。
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),

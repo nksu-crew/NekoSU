@@ -1,6 +1,5 @@
 package me.nekosu.aqnya.ui.theme
 
-import android.os.Build
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
@@ -213,7 +212,7 @@ fun NekosuTheme(content: @Composable () -> Unit) {
         onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
-    val useDynamicColor = themeColorValue == 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val useDynamicColor = themeColorValue == 0
     val isDarkTheme =
         when (themePreference) {
             1 -> false

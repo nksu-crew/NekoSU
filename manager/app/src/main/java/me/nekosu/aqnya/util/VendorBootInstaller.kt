@@ -3,10 +3,8 @@ package me.nekosu.aqnya.util
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
-import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import androidx.annotation.RequiresApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -373,9 +371,9 @@ object VendorBootInstaller {
     /**
      * 把生成的补丁镜像导出到 /sdcard/Download。
      *
-     * - Android 10 以下、或已授予「所有文件访问」时直接写入公共目录,
-     *   导出后保持生成的名称 (Download/nekosu_<随机串>_vendor_boot.img)。
-     * - 否则走 MediaStore.Downloads, 无需存储权限即可发布文件。
+     * - 已授予「所有文件访问」时直接写入公共目录，保持生成的名称
+     *   (Download/nekosu_<随机串>_vendor_boot.img)。
+     * - 否则走 MediaStore.Downloads，无需存储权限即可发布文件。
      *
      * 返回导出后的目标文件。
      */
@@ -386,13 +384,9 @@ object VendorBootInstaller {
         val downloads =
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
 
-        // Android 10+ 只有拿到「所有文件访问」才能直接写公共目录, 否则走 MediaStore。
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val directWrite =
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
-            if (!directWrite) {
-                return exportViaMediaStore(context, source, downloads)
-            }
+        // 没有「所有文件访问」就写不了公共目录，改走 MediaStore。
+        if (!Environment.isExternalStorageManager()) {
+            return exportViaMediaStore(context, source, downloads)
         }
 
         if (!downloads.exists() && !downloads.mkdirs()) {
@@ -403,7 +397,6 @@ object VendorBootInstaller {
         return dest
     }
 
-    @RequiresApi(Build.VERSION_CODES.Q)
     private fun exportViaMediaStore(
         context: Context,
         source: File,

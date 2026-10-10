@@ -45,6 +45,7 @@ import dev.chrisbanes.haze.HazeInput
 import dev.chrisbanes.haze.HazePerformanceMode
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.blur.hazeBlur
+import dev.chrisbanes.haze.rememberHazeState
 
 private const val TAG = "SearchBar"
 
@@ -52,6 +53,7 @@ private const val TAG = "SearchBar"
 @Composable
 fun SearchAppBar(
     title: @Composable () -> Unit,
+    hazeState: HazeState,
     searchText: String,
     onSearchTextChange: (String) -> Unit,
     onClearClick: () -> Unit,
@@ -61,7 +63,6 @@ fun SearchAppBar(
     leadingActions: @Composable (() -> Unit)? = null,
     trailingActions: @Composable (() -> Unit)? = null,
     startInSearchMode: Boolean = false,
-    hazeState: HazeState? = null,
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
@@ -85,27 +86,6 @@ fun SearchAppBar(
             keyboardController?.hide()
         }
     }
-
-    val hazeStyle = rememberHazeAppBarStyle()
-    val hazeModifier =
-        if (hazeState != null) {
-            Modifier.hazeBlur(
-                input = HazeInput.Sources(hazeState),
-                style = hazeStyle,
-                performanceMode = HazePerformanceMode.Performance,
-            )
-        } else {
-            Modifier
-        }
-    val appBarColors =
-        if (hazeState != null) {
-            TopAppBarDefaults.topAppBarColors(
-                containerColor = Color.Transparent,
-                scrolledContainerColor = Color.Transparent,
-            )
-        } else {
-            TopAppBarDefaults.topAppBarColors()
-        }
 
     TopAppBar(
         title = {
@@ -166,8 +146,17 @@ fun SearchAppBar(
                 }
             }
         },
-        modifier = hazeModifier,
-        colors = appBarColors,
+        modifier =
+            Modifier.hazeBlur(
+                input = HazeInput.Sources(hazeState),
+                style = rememberHazeAppBarStyle(),
+                performanceMode = HazePerformanceMode.Performance,
+            ),
+        colors =
+            TopAppBarDefaults.topAppBarColors(
+                containerColor = Color.Transparent,
+                scrolledContainerColor = Color.Transparent,
+            ),
         navigationIcon = {
             if (onBackClick != null) {
                 IconButton(
@@ -203,6 +192,7 @@ private fun SearchAppBarPreview() {
     var searchText by remember { mutableStateOf("") }
     SearchAppBar(
         title = { Text("Search text") },
+        hazeState = rememberHazeState(),
         searchText = searchText,
         onSearchTextChange = { searchText = it },
         onClearClick = { searchText = "" },

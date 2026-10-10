@@ -47,7 +47,6 @@ fun SettingsScreen(navController: NavController) {
     val scope = rememberCoroutineScope()
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(rememberTopAppBarState())
 
-    // 现有设置
     val themeValue by DebugPreferences.themeModeFlow(mContext).collectAsState(initial = 0)
     val currentThemeMode = ThemeMode.fromValue(themeValue)
 

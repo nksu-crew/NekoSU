@@ -269,7 +269,6 @@ fun AppDetailScreen(
             // ── 组 1：应用信息 + Root 开关  ──────────────────────────────────
             item {
                 CardGroup {
-                    // 1-0  应用信息头
                     CardItem(index = 0, total = 2) {
                         Row(
                             modifier =
@@ -307,7 +306,6 @@ fun AppDetailScreen(
                         }
                     }
 
-                    // 1-1  Root 开关
                     CardItem(index = 1, total = 2) {
                         ListRow(
                             modifier =
@@ -359,7 +357,6 @@ fun AppDetailScreen(
             // ── 组 2：Capabilities + SELinux Domain ──────────────────────────
             item {
                 CardGroup {
-                    // 2-0  Capabilities 行
                     CardItem(index = 0, total = 2) {
                         Row(
                             modifier =
@@ -429,7 +426,6 @@ fun AppDetailScreen(
                         }
                     }
 
-                    // 2-1  SELinux Domain
                     CardItem(index = 1, total = 2) {
                         Column(
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),

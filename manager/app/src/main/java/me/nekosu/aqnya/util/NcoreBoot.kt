@@ -38,9 +38,7 @@ object NcoreBoot {
         val busybox = File(context.applicationInfo.nativeLibraryDir, BUSYBOX_LIB_NAME)
         if (!busybox.exists()) return false
 
-        // APK 没升级就不用每次启动都再跑一遍 root 安装：内核在开机时已用管理器
-        // 引导过一次，这里只是升级后刷新二进制，避免每开一次管理器就 fork 一次 su
-        // 并复制约 2MB。
+        // 内核在开机时已引导过一次，这里只在 APK 升级后刷新二进制。
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val version = getAppVersionCode(context)
         if (version != 0L && prefs.getLong(KEY_INSTALLED_VERSION, -1L) == version) return true

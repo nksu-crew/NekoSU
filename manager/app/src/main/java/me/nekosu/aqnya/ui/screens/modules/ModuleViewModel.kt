@@ -124,8 +124,7 @@ class ModuleViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
 
-            // 与 action 相同：把安装器输出逐行回填，界面实时滚动显示日志，
-            // 而不是整个安装过程只挂一个进度条。
+            // 逐行回填安装器输出，界面实时滚动显示日志。
             val buffer = StringBuilder()
             val command = ModuleRepository.installCommand(appContext, zip.absolutePath)
             val code =

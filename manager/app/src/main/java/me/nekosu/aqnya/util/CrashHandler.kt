@@ -54,8 +54,7 @@ class CrashHandler(
                     printWriter.write(sw.toString())
                 }
             }
-        } catch (e: Exception) {
-            // Ignore
+        } catch (_: Exception) {
         }
     }
 

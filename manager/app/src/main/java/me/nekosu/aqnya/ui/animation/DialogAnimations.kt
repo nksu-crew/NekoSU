@@ -35,7 +35,6 @@ object DialogAnimations {
                 animationSpec = tween((200f / speed).toInt().coerceIn(50, 600)),
             )
 
-    // 默认配置（速度1.0），方便直接引用
     val enter = createEnterAnimation()
     val exit = createExitAnimation()
 }

@@ -74,12 +74,7 @@ object KernelInfo {
             Build.VERSION.SDK_INT >= 36 -> "16"
             Build.VERSION.SDK_INT == 35 -> "15"
             Build.VERSION.SDK_INT == 34 -> "14"
-            Build.VERSION.SDK_INT == 33 -> "13"
-            Build.VERSION.SDK_INT >= 31 -> "12"
-            Build.VERSION.SDK_INT == 30 -> "11"
-            Build.VERSION.SDK_INT == 29 -> "10"
-            Build.VERSION.SDK_INT == 28 -> "9"
-            else -> Build.VERSION.RELEASE.substringBefore('.').ifBlank { Build.VERSION.SDK_INT.toString() }
+            else -> "13"
         }
     }
 }

@@ -54,7 +54,6 @@ fun AppearanceSection(
     var navBarStyleMenuExpanded by remember { mutableStateOf(false) }
 
     CardGroup {
-        // 主题模式
         CardItem(index = 0, total = 4) {
             ListItem(
                 modifier = Modifier.fillMaxWidth().clickable { themeMenuExpanded = true },
@@ -98,7 +97,6 @@ fun AppearanceSection(
             )
         }
 
-        // 主题色
         CardItem(index = 1, total = 4) {
             ListItem(
                 modifier = Modifier.fillMaxWidth().clickable { themeColorMenuExpanded = true },
@@ -147,7 +145,6 @@ fun AppearanceSection(
             )
         }
 
-        // AMOLED 纯黑
         CardItem(index = 2, total = 4) {
             ListRow(
                 modifier = Modifier.toggleable(value = amoledEnabled, role = Role.Switch, onValueChange = onAmoledChange),
@@ -162,7 +159,6 @@ fun AppearanceSection(
             )
         }
 
-        // 导航栏样式
         CardItem(index = 3, total = 4) {
             ListItem(
                 modifier = Modifier.fillMaxWidth().clickable { navBarStyleMenuExpanded = true },

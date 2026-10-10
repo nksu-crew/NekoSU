@@ -91,7 +91,7 @@ object PageTransitions {
                         ) + fadeOut(tween(duration))
                 Pair(enter, exit)
             }
-            else -> { // linear
+            else -> {
                 if (isNavigationRail) {
                     val offsetY = if (direction > 0) { h: Int -> h } else { h: Int -> -h }
                     val enter =

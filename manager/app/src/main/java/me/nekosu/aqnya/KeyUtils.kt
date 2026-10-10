@@ -99,7 +99,7 @@ object KeyUtils {
             )
             val plaintext = cipher.doFinal(ciphertext)
             val result = String(plaintext, Charsets.UTF_8)
-            plaintext.fill(0) // 清零中间缓冲
+            plaintext.fill(0)
             result
         } catch (e: Exception) {
             Log.e("KeyUtils", "loadKey failed: ${e.message}")
