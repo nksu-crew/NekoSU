@@ -1,6 +1,7 @@
 #include <linux/kthread.h>
 #include <linux/wait.h>
 #include <linux/delay.h>
+#include <linux/completion.h>
 #include <linux/cred.h>
 #include "syscall.h"
 #include "dispatch.h"
@@ -37,14 +38,19 @@ int boot_stage = INIT_FIRST_STAGE;
  *                                   started here: it is driven entirely by
  *                                   the injected init.rc, which execs the
  *                                   userspace loader at post-fs-data and
- *                                   late_start.  Then drop the watcher.
+ *                                   late_start.  Then drop the watcher: it
+ *                                   exits on its own once the last stage is
+ *                                   handled (see stop_init_thread() for the
+ *                                   early-exit path at module unload).
  *
  * Late load just initializes everything at once (see nksu.c).
  */
 
 static struct task_struct *init_thread;
 static DECLARE_WAIT_QUEUE_HEAD(stage_wq);
+static DECLARE_COMPLETION(init_done);
 static bool stage_pending;
+static bool init_exiting;
 static bool zygote_seen;
 static bool selinux_loaded;
 static bool features_loaded;
@@ -184,15 +190,17 @@ int load_temp_syscall(void)
 static int init_thread_fn(void *data)
 {
     /*
-     * The loop must never return on its own: a kthread that exits while
-     * the module still holds its task_struct makes the later kthread_stop()
-     * dereference freed memory.  It only leaves when kthread_stop() asks.
+     * The watcher follows init until the zygote starts; at that point every
+     * component is up and there is nothing left to wait for, so it leaves on
+     * its own.  hook_exit() asks it to leave earlier by setting init_exiting.
+     * Either way it signals init_done before returning so the unload path can
+     * wait for it -- see stop_init_thread() for why we never kthread_stop().
      */
-    while (!kthread_should_stop()) {
+    while (!READ_ONCE(init_exiting)) {
         wait_event_interruptible(stage_wq,
                                  READ_ONCE(stage_pending) ||
-                                 kthread_should_stop());
-        if (kthread_should_stop())
+                                 READ_ONCE(init_exiting));
+        if (READ_ONCE(init_exiting))
             break;
 
         WRITE_ONCE(stage_pending, false);
@@ -229,13 +237,19 @@ static int init_thread_fn(void *data)
                 features_loaded = true;
             else
                 pr_err("nksu: feature init failed\n");
+
+            /* Zygote was the last boot stage to watch for. */
+            break;
         }
     }
+
+    complete(&init_done);
     return 0;
 }
 
 static int start_init_thread(void)
 {
+    reinit_completion(&init_done);
     init_thread = kthread_run(init_thread_fn, NULL, "nksu-init");
     if (IS_ERR(init_thread)) {
         int ret = PTR_ERR(init_thread);
@@ -248,10 +262,19 @@ static int start_init_thread(void)
 
 static void stop_init_thread(void)
 {
-    if (init_thread) {
-        kthread_stop(init_thread); /* sets KTHREAD_SHOULD_STOP and wakes us */
-        init_thread = NULL;
-    }
+    if (!init_thread)
+        return;
+
+    /*
+     * The watcher may already have exited on its own after the zygote stage,
+     * so kthread_stop() would dereference a freed task_struct.  Ask it to
+     * leave and wait for it to signal init_done instead; once complete() has
+     * run no further module code executes, so it is safe to tear down.
+     */
+    WRITE_ONCE(init_exiting, true);
+    wake_up_interruptible(&stage_wq);
+    wait_for_completion(&init_done);
+    init_thread = NULL;
 }
 
 int hook_init(void)
