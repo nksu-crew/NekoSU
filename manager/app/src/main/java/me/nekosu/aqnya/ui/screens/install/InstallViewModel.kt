@@ -28,15 +28,36 @@ import me.nekosu.aqnya.util.VendorBootInstaller
 enum class InstallMethod { FILE, DIRECT, INACTIVE }
 
 /**
+ * 内核模块（LKM）的选择，对齐 KernelSU 的 `LkmSelection`：
+ *  - [Auto]  按设备 KMI 自动匹配随 APK 打包的 nksu.ko；
+ *  - [Kmi]   用户在弹窗里显式选择的 KMI 对应的打包模块；
+ *  - [Local] 用户选择的本地 .ko 文件。
+ *
+ * 打包的候选模块不再平铺，只通过 KMI 选择弹窗选取。
+ */
+sealed interface LkmSelection {
+    data object Auto : LkmSelection
+
+    data class Kmi(val kmi: String) : LkmSelection
+
+    data class Local(
+        val uri: Uri,
+        val name: String,
+    ) : LkmSelection
+}
+
+/**
  * 安装页面的可观察状态。
  */
 data class InstallUiState(
     val kernelVersion: String? = null,
     val isGki: Boolean = false,
     val currentKmi: String? = null,
-    val candidates: List<String> = emptyList(),
-    val selectedKo: String? = null,
-    val recommendedKo: String? = null,
+    /** assets/ko 中的全部候选，仅用于内部匹配。 */
+    val koCandidates: List<String> = emptyList(),
+    /** 按设备 KMI 自动匹配到的打包模块名；无候选时为 null。 */
+    val autoKo: String? = null,
+    val lkmSelection: LkmSelection = LkmSelection.Auto,
     val method: InstallMethod = InstallMethod.FILE,
     val vendorBootUri: Uri? = null,
     val vendorBootName: String? = null,
@@ -54,10 +75,14 @@ data class InstallUiState(
 
     val inactiveReady: Boolean get() = rootAvailable && inactiveTarget != null
 
+    /** 有可用的内核模块（自动匹配或本地文件）。 */
+    val hasKernelModule: Boolean
+        get() = lkmSelection is LkmSelection.Local || autoKo != null
+
     val canInstall: Boolean
         get() =
             !running &&
-                selectedKo != null &&
+                hasKernelModule &&
                 when (method) {
                     InstallMethod.FILE -> vendorBootUri != null
                     InstallMethod.DIRECT -> directReady
@@ -68,7 +93,8 @@ data class InstallUiState(
 /**
  * vendor_boot 安装流程的状态持有者。
  *
- * 通过 [KernelInfo] 展示 JNI 查询到的内核版本 / KMI，并据此预选匹配的 nksu.ko。
+ * 通过 [KernelInfo] 展示 JNI 查询到的内核版本 / KMI，并据此自动选择匹配的
+ * nksu.ko；模块不再全部列出，只保留一个「使用本地 LKM」入口（对齐 KernelSU）。
  * 安装方式与 KernelSU 对齐：选择镜像、直接安装、安装到非活动 slot；后两者
  * 只有在检测到 root（且为 GKI 设备）时才显示。
  */
@@ -89,7 +115,7 @@ class InstallViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 载入内核信息与可用的内核模块，只执行一次。 */
     fun load() {
-        if (_uiState.value.candidates.isNotEmpty()) return
+        if (_uiState.value.koCandidates.isNotEmpty()) return
         viewModelScope.launch {
             val loaded =
                 withContext(Dispatchers.IO) {
@@ -110,9 +136,8 @@ class InstallViewModel(app: Application) : AndroidViewModel(app) {
                     kernelVersion = loaded.kernelVersion,
                     isGki = loaded.isGki,
                     currentKmi = loaded.currentKmi,
-                    candidates = loaded.candidates,
-                    recommendedKo = loaded.recommendedKo,
-                    selectedKo = current.selectedKo ?: loaded.recommendedKo,
+                    koCandidates = loaded.candidates,
+                    autoKo = loaded.recommendedKo,
                 )
             }
             checkRoot()
@@ -150,9 +175,48 @@ class InstallViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun selectKo(name: String) {
+    /** 使用本地 .ko 文件。 */
+    fun selectLocalKo(uri: Uri) {
         if (_uiState.value.running) return
-        _uiState.update { it.copy(selectedKo = name) }
+        val name =
+            uri.lastPathSegment
+                ?.substringAfterLast('/')
+                ?.takeIf { it.isNotBlank() }
+                ?: "nksu.ko"
+        _uiState.update {
+            it.copy(
+                lkmSelection = LkmSelection.Local(uri, name),
+                done = false,
+                success = null,
+                message = "",
+            )
+        }
+    }
+
+    /** 选择某个 KMI（弹窗确认后调用），使用对应的打包模块。 */
+    fun selectKmi(kmi: String) {
+        if (_uiState.value.running) return
+        _uiState.update {
+            it.copy(
+                lkmSelection = LkmSelection.Kmi(kmi),
+                done = false,
+                success = null,
+                message = "",
+            )
+        }
+    }
+
+    /** 清除本地 .ko，回到按 KMI 自动匹配。 */
+    fun clearLocalKo() {
+        if (_uiState.value.running) return
+        _uiState.update {
+            it.copy(
+                lkmSelection = LkmSelection.Auto,
+                done = false,
+                success = null,
+                message = "",
+            )
+        }
     }
 
     fun selectMethod(method: InstallMethod) {
@@ -182,8 +246,10 @@ class InstallViewModel(app: Application) : AndroidViewModel(app) {
     fun install() {
         val current = _uiState.value
         if (current.running || current.done) return
-        val ko = current.selectedKo ?: return
         if (!current.canInstall) return
+
+        val koName = resolveKoName(current)
+        val koUri = (current.lkmSelection as? LkmSelection.Local)?.uri
 
         _uiState.update { it.copy(running = true, done = false, success = null, message = "") }
 
@@ -191,9 +257,9 @@ class InstallViewModel(app: Application) : AndroidViewModel(app) {
             val log = StringBuilder()
             val exit =
                 when (current.method) {
-                    InstallMethod.FILE -> runFileInstall(current, ko, log)
-                    InstallMethod.DIRECT -> runDirectInstall(current.directTarget.orEmpty(), ko, log)
-                    InstallMethod.INACTIVE -> runDirectInstall(current.inactiveTarget.orEmpty(), ko, log)
+                    InstallMethod.FILE -> runFileInstall(current, koName, koUri, log)
+                    InstallMethod.DIRECT -> runDirectInstall(current.directTarget.orEmpty(), koName, koUri, log)
+                    InstallMethod.INACTIVE -> runDirectInstall(current.inactiveTarget.orEmpty(), koName, koUri, log)
                 }
 
             val ok = exit == 0
@@ -210,14 +276,15 @@ class InstallViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun runFileInstall(
         current: InstallUiState,
-        ko: String,
+        koName: String?,
+        koUri: Uri?,
         log: StringBuilder,
     ): Int {
         val uri = current.vendorBootUri ?: return -1
         return runCatching {
             val ctx = i18nContext()
             val staged = withContext(Dispatchers.IO) { VendorBootInstaller.stageVendorBoot(ctx, uri) }
-            VendorBootInstaller.install(ctx, staged, ko) { line -> appendLog(log, line) }
+            VendorBootInstaller.install(ctx, staged, koName, koUri) { line -> appendLog(log, line) }
         }.getOrElse { e ->
             appendError(log, e)
             -1
@@ -226,11 +293,12 @@ class InstallViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun runDirectInstall(
         partition: String,
-        ko: String,
+        koName: String?,
+        koUri: Uri?,
         log: StringBuilder,
     ): Int =
         runCatching {
-            VendorBootInstaller.directInstall(i18nContext(), ko, partition) { line -> appendLog(log, line) }
+            VendorBootInstaller.directInstall(i18nContext(), koName, koUri, partition) { line -> appendLog(log, line) }
         }.getOrElse { e ->
             appendError(log, e)
             -1
@@ -251,6 +319,14 @@ class InstallViewModel(app: Application) : AndroidViewModel(app) {
         log.append("ERROR: ").append(e.message).append('\n')
         _uiState.update { it.copy(message = log.toString()) }
     }
+
+    /** 把当前选择解析成随包模块名（本地文件返回 null，改用 koUri）。 */
+    private fun resolveKoName(state: InstallUiState): String? =
+        when (val selection = state.lkmSelection) {
+            is LkmSelection.Kmi -> state.koCandidates.firstOrNull { KernelInfo.kmiOf(it) == selection.kmi }
+            LkmSelection.Auto -> state.autoKo
+            is LkmSelection.Local -> null
+        }
 
     private data class LoadedKernelInfo(
         val kernelVersion: String?,

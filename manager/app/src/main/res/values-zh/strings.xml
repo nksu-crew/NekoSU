@@ -232,7 +232,12 @@
     <string name="install_method_file">选择 vendor_boot 镜像</string>
     <string name="install_recommended">推荐</string>
     <string name="install_pick_vendor_boot_desc">选择从本机提取的 vendor_boot 镜像</string>
-    <string name="install_select_ko">内核模块 (KMI)</string>
+    <string name="install_select_ko">内核模块 (LKM)</string>
+    <string name="install_select_kmi">选择 KMI</string>
+    <string name="install_use_local_lkm">使用本地 LKM 文件</string>
+    <string name="install_selected_lkm">已选择 LKM:%1$s</string>
+    <string name="install_auto_lkm">自动匹配 (%1$s)</string>
+    <string name="install_err_ko_missing">未找到内核模块</string>
     <string name="install_start">开始安装</string>
     <string name="install_working">正在安装…</string>
     <string name="install_success">已生成补丁镜像 Download/nekosu_…_vendor_boot.img</string>

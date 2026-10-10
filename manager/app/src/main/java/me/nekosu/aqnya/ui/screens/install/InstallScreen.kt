@@ -24,8 +24,10 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Memory
@@ -61,6 +63,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
@@ -99,9 +102,30 @@ fun InstallScreen(navController: NavController) {
             if (uri != null) installViewModel.selectVendorBoot(uri)
         }
 
+    val pickLocalKo =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenDocument(),
+        ) { uri ->
+            if (uri != null) installViewModel.selectLocalKo(uri)
+        }
+
     LaunchedEffect(Unit) { installViewModel.load() }
 
     var confirmMethod by remember { mutableStateOf<InstallMethod?>(null) }
+    var showKmiDialog by remember { mutableStateOf(false) }
+
+    if (showKmiDialog) {
+        ChooseKmiDialog(
+            kmis = state.koCandidates.map { KernelInfo.kmiOf(it) },
+            currentKmi = state.currentKmi,
+            selected = (state.lkmSelection as? LkmSelection.Kmi)?.kmi ?: state.autoKo?.let { KernelInfo.kmiOf(it) },
+            onDismiss = { showKmiDialog = false },
+            onConfirm = { kmi ->
+                showKmiDialog = false
+                installViewModel.selectKmi(kmi)
+            },
+        )
+    }
 
     confirmMethod?.let { method ->
         val inactive = method == InstallMethod.INACTIVE
@@ -202,8 +226,13 @@ fun InstallScreen(navController: NavController) {
                     onSelectMethod = installViewModel::selectMethod,
                     onRetryRoot = installViewModel::checkRoot,
                 )
-                KernelModuleSection(state = state, onSelect = installViewModel::selectKo)
-                if (state.candidates.isEmpty()) {
+                KernelModuleSection(
+                    state = state,
+                    onSelectKmi = { showKmiDialog = true },
+                    onPickLocal = { pickLocalKo.launch(arrayOf("*/*")) },
+                    onClearLocal = installViewModel::clearLocalKo,
+                )
+                if (state.koCandidates.isEmpty()) {
                     Text(
                         text = stringResource(R.string.install_ko_missing),
                         style = MaterialTheme.typography.bodyMedium,
@@ -366,52 +395,170 @@ private fun InstallMethodRow(
 @Composable
 private fun KernelModuleSection(
     state: InstallUiState,
-    onSelect: (String) -> Unit,
+    onSelectKmi: () -> Unit,
+    onPickLocal: () -> Unit,
+    onClearLocal: () -> Unit,
 ) {
-    if (state.candidates.isEmpty()) return
+    val kmis = state.koCandidates.map { KernelInfo.kmiOf(it) }
+    val local = state.lkmSelection as? LkmSelection.Local
+    val selectedKmi = (state.lkmSelection as? LkmSelection.Kmi)?.kmi ?: state.autoKo?.let { KernelInfo.kmiOf(it) }
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SectionTitle(stringResource(R.string.install_select_ko))
         CardGroup {
-            state.candidates.forEachIndexed { index, ko ->
-                CardItem(index = index, total = state.candidates.size) {
-                    val selected = ko == state.selectedKo
-                    val recommended = ko == state.recommendedKo
+            val total = if (kmis.isNotEmpty()) 2 else 1
+            var index = 0
+
+            if (kmis.isNotEmpty()) {
+                CardItem(index = index++, total = total) {
                     ListItem(
                         modifier =
                             Modifier
                                 .fillMaxWidth()
-                                .clickable(enabled = !state.running) { onSelect(ko) },
+                                .clickable(enabled = !state.running) { onSelectKmi() },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         leadingContent = {
-                            RadioButton(selected = selected, onClick = { onSelect(ko) })
+                            Icon(Icons.Filled.Memory, contentDescription = null)
                         },
                         headlineContent = {
-                            Text(
-                                text = KernelInfo.kmiOf(ko),
-                                fontWeight = FontWeight.SemiBold,
-                            )
+                            Text(stringResource(R.string.install_select_kmi))
                         },
                         supportingContent = {
-                            Text(
-                                text =
-                                    if (recommended) {
-                                        "${stringResource(R.string.install_recommended)} · $ko"
-                                    } else {
-                                        ko
-                                    },
-                                color =
-                                    if (recommended) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
+                            val text =
+                                when {
+                                    state.lkmSelection is LkmSelection.Kmi -> selectedKmi.orEmpty()
+                                    selectedKmi != null -> stringResource(R.string.install_auto_lkm, selectedKmi)
+                                    else -> stringResource(R.string.install_ko_missing)
+                                }
+                            val tint =
+                                if (state.lkmSelection is LkmSelection.Auto && selectedKmi != null) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            Text(text = text, color = tint)
+                        },
+                        trailingContent = {
+                            Icon(
+                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                             )
                         },
                     )
                 }
             }
+
+            CardItem(index = index, total = total) {
+                ListItem(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = !state.running) { onPickLocal() },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    leadingContent = {
+                        Icon(Icons.Filled.InsertDriveFile, contentDescription = null)
+                    },
+                    headlineContent = {
+                        Text(stringResource(R.string.install_use_local_lkm))
+                    },
+                    supportingContent = {
+                        if (local != null) {
+                            Text(stringResource(R.string.install_selected_lkm, local.name))
+                        }
+                    },
+                    trailingContent = {
+                        if (local != null) {
+                            IconButton(onClick = onClearLocal) {
+                                Icon(
+                                    Icons.Filled.Close,
+                                    contentDescription = stringResource(R.string.dialog_cancel),
+                                )
+                            }
+                        } else {
+                            Icon(
+                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            )
+                        }
+                    },
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun ChooseKmiDialog(
+    kmis: List<String>,
+    currentKmi: String?,
+    selected: String?,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    if (kmis.isEmpty()) return
+    var choice by remember { mutableStateOf(selected?.takeIf { it in kmis } ?: kmis.first()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = stringResource(R.string.install_select_kmi),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+        },
+        text = {
+            Column(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 380.dp)
+                        .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                kmis.forEach { kmi ->
+                    Row(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { choice = kmi }
+                                .padding(horizontal = 4.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        RadioButton(selected = choice == kmi, onClick = null)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = kmi,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            if (kmi == currentKmi) {
+                                Text(
+                                    text = stringResource(R.string.install_current_kmi),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(choice) }) {
+                Text(stringResource(R.string.dialog_confirm), fontWeight = FontWeight.SemiBold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.dialog_cancel))
+            }
+        },
+    )
 }
 
 @Composable

@@ -22,6 +22,9 @@ object VendorBootInstaller {
 
     private const val NCORE_LIB_NAME = "libncore.so"
 
+    /** 本地 LKM 在安装目录中暂存的文件名。 */
+    private const val LOCAL_KO_NAME = "local_nksu.ko"
+
     /** 安装输出文件名: nekosu_<随机串>_vendor_boot.img。 */
     private const val OUTPUT_PREFIX = "nekosu_"
     private const val OUTPUT_SUFFIX = "_vendor_boot.img"
@@ -36,7 +39,7 @@ object VendorBootInstaller {
     fun ncorePath(context: Context): File =
         File(context.applicationInfo.nativeLibraryDir, NCORE_LIB_NAME)
 
-    fun prepare(context: Context, koName: String?): File {
+    fun prepare(context: Context): File {
         val dir = installDir(context)
         val script = File(dir, SCRIPT_NAME)
 
@@ -44,13 +47,36 @@ object VendorBootInstaller {
         script.setReadable(true, false)
         script.setExecutable(true, false)
 
-        if (koName != null) {
-            val koFile = File(dir, koName)
-            copyAsset(context, "$KO_ASSET_DIR/$koName", koFile)
-            koFile.setReadable(true, false)
-        }
-
         return script
+    }
+
+    /**
+     * 把内核模块放到安装目录并返回其文件：
+     *  - 传了 [koUri] 时复制用户选择的本地 .ko；
+     *  - 否则从 assets/ko 复制打包的 [koName]。
+     */
+    private fun resolveKo(
+        context: Context,
+        koName: String?,
+        koUri: Uri?,
+    ): File? {
+        val dir = installDir(context)
+        if (koUri != null) {
+            val out = File(dir, LOCAL_KO_NAME)
+            out.delete()
+            context.contentResolver.openInputStream(koUri)?.use { input ->
+                out.outputStream().use { input.copyTo(it) }
+            } ?: return null
+            out.setReadable(true, false)
+            return out
+        }
+        if (koName != null) {
+            val out = File(dir, koName)
+            copyAsset(context, "$KO_ASSET_DIR/$koName", out)
+            out.setReadable(true, false)
+            return out
+        }
+        return null
     }
 
     private fun copyAsset(context: Context, assetName: String, dest: File) {
@@ -92,10 +118,11 @@ object VendorBootInstaller {
         context: Context,
         vendorBoot: File,
         koName: String?,
+        koUri: Uri? = null,
         onOutput: (String) -> Unit,
     ): Int =
         withContext(Dispatchers.IO) {
-            val script = prepare(context, koName)
+            val script = prepare(context)
             val dir = installDir(context)
 
             val ncore = ncorePath(context)
@@ -105,19 +132,15 @@ object VendorBootInstaller {
                 )
             }
 
-            val koFile = koName?.let { name ->
-                File(dir, name).also { out ->
-                    if (!out.exists()) {
-                        throw IllegalStateException(context.getString(R.string.install_err_ko_asset, name))
-                    }
-                }
-            }
+            val koFile =
+                resolveKo(context, koName, koUri)
+                    ?: throw IllegalStateException(context.getString(R.string.install_err_ko_missing))
 
             val cmd = buildList {
                 add("sh")
                 add(script.absolutePath)
                 add(vendorBoot.absolutePath)
-                if (koFile != null) add(koFile.absolutePath)
+                add(koFile.absolutePath)
             }
 
             val produced = File(dir, outputImageName())
@@ -227,12 +250,13 @@ object VendorBootInstaller {
      */
     suspend fun directInstall(
         context: Context,
-        koName: String,
+        koName: String?,
+        koUri: Uri? = null,
         partition: String,
         onOutput: (String) -> Unit,
     ): Int =
         withContext(Dispatchers.IO) {
-            val script = prepare(context, koName)
+            val script = prepare(context)
             val dir = installDir(context)
             val ncore = ncorePath(context)
 
@@ -240,9 +264,9 @@ object VendorBootInstaller {
                 onOutput(context.getString(R.string.install_log_err_ncore, ncore.absolutePath))
                 return@withContext -1
             }
-            val koFile = File(dir, koName)
-            if (!koFile.exists()) {
-                onOutput(context.getString(R.string.install_log_err_ko, koName))
+            val koFile = resolveKo(context, koName, koUri)
+            if (koFile == null || !koFile.exists()) {
+                onOutput(context.getString(R.string.install_log_err_ko, koName ?: koUri?.toString().orEmpty()))
                 return@withContext -1
             }
             if (partition.isBlank()) {
