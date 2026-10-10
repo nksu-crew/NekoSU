@@ -184,7 +184,7 @@ fun ModuleScreen() {
                 WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
             ),
     ) { innerPadding ->
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
             // 日志界面显示时消费音量键，避免系统音量条盖住提示；脚本仍从
             // /dev/input 读到按键，因此不影响「按音量键选择」。
             if (installVisible || actionVisible) {
@@ -193,11 +193,11 @@ fun ModuleScreen() {
 
             when {
                 installVisible -> {
-                    LogPane(text = state.installLog, running = state.installing, contentPadding = innerPadding)
+                    LogPane(text = state.installLog, running = state.installing)
                 }
 
                 actionVisible -> {
-                    LogPane(text = state.actionOutput, running = state.actionRunning, contentPadding = innerPadding)
+                    LogPane(text = state.actionOutput, running = state.actionRunning)
                 }
 
                 state.modules.isEmpty() -> {
@@ -207,7 +207,14 @@ fun ModuleScreen() {
                 else -> {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                        contentPadding =
+                            PaddingValues(
+                                start = 16.dp,
+                                end = 16.dp,
+                                top = 12.dp,
+                                // 底部留出空间，避免最后一张卡被安装 FAB / 悬浮导航栏挡住。
+                                bottom = 88.dp,
+                            ),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         items(state.modules, key = { it.id }) { module ->
@@ -267,7 +274,6 @@ private fun LogTopBar(
 private fun LogPane(
     text: String,
     running: Boolean,
-    contentPadding: PaddingValues,
 ) {
     val scrollState = rememberScrollState()
 
@@ -275,7 +281,7 @@ private fun LogPane(
         scrollState.animateScrollTo(scrollState.maxValue)
     }
 
-    Box(modifier = Modifier.fillMaxSize().padding(contentPadding)) {
+    Box(modifier = Modifier.fillMaxSize()) {
         // 安装走一次性 root 命令，日志要等结束才回填；此时先给一个进度指示。
         if (text.isBlank() && running) {
             CircularProgressIndicator(
