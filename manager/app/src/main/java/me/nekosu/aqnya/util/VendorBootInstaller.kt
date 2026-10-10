@@ -55,6 +55,9 @@ object VendorBootInstaller {
 
     private fun copyAsset(context: Context, assetName: String, dest: File) {
         try {
+            // Asset names may contain a directory prefix (e.g. "scripts/vendor-boot.sh");
+            // FileOutputStream does not create parents, so make them first.
+            dest.parentFile?.mkdirs()
             context.assets.open(assetName).use { input ->
                 dest.outputStream().use { output ->
                     input.copyTo(output)
