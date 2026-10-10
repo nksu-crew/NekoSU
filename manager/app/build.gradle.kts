@@ -98,6 +98,9 @@ android {
             useLegacyPackaging = true
         }
     }
+    packagingOptions {
+    exclude "DebugProbesKt.bin"
+    }
 }
 
 dependencies {
