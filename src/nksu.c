@@ -13,6 +13,7 @@
 #include "symbol_compat.h"
 #include "nksu.h"
 #include "nksu_module.h"
+#include "init.h"
 
 #ifndef NKSU_GIT_COMMIT
 #define NKSU_GIT_COMMIT "unknown"
@@ -210,7 +211,7 @@ static int __init nekosu_init(void)
     }
 
     if (!late_load) {
-        ret = init_nksu();
+        ret = hook_init();
     } else {
         ret = nekosu_init_all_components();
     }
@@ -229,7 +230,7 @@ static void __exit nekosu_exit(void)
 {
     pr_info("Unloading nekosu module...\n");
     if (!late_load)
-        exit_nksu();
+        hook_exit();
     else
         nekosu_cleanup_all_components();
 

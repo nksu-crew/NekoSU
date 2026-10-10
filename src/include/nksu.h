@@ -1,9 +1,6 @@
 #ifndef NKSU_H
 #define NKSU_H
 
-int init_nksu(void);
-void exit_nksu(void);
-
 /*
  * Component groups.  Late load runs both at once; a first-stage (vendor_boot)
  * load stages them: SELinux once the policy exists, the rest once /data and
