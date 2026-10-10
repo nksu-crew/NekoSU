@@ -285,7 +285,10 @@ private fun InstallMethodSection(
     val options =
         buildList {
             add(InstallMethod.FILE)
-            if (state.isGki && state.rootAvailable) {
+            // NekoSU 直接安装打的是 vendor_boot（不依赖 GKI 标签），只要拿到 root
+            // 并找到分区就可用；不能再要求 isGki，否则自定义内核（无 -androidNN
+            // 标签）的设备会被错误地隐藏这两个选项。
+            if (state.rootAvailable) {
                 if (state.directTarget != null) add(InstallMethod.DIRECT)
                 if (state.inactiveTarget != null) add(InstallMethod.INACTIVE)
             }
@@ -307,7 +310,7 @@ private fun InstallMethodSection(
         }
 
         when {
-            state.isGki && state.rootChecked && !state.rootAvailable -> {
+            state.rootChecked && !state.rootAvailable -> {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 4.dp)) {
                     Text(
                         text = stringResource(R.string.install_direct_no_root),
