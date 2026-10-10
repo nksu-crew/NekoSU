@@ -67,7 +67,10 @@ NKSU_GIT_COMMIT := unknown
 endif
 ccflags-y += -DNKSU_GIT_COMMIT=\"$(NKSU_GIT_COMMIT)\"
 
-ccflags-y += -std=gnu99
+# GNU C11.  The kernel headers use GNU extensions (typeof, statement
+# expressions, ...), so the GNU dialect is required; a strict -std=c11
+# would not compile them.  This overrides the kernel's own -std=gnu89.
+ccflags-y += -std=gnu11
 ccflags-y += -Wno-unused-variable
 ccflags-y += -Wno-declaration-after-statement
 ccflags-y += -Wno-unused-function
