@@ -8,6 +8,7 @@
 #ifndef __NKSU_PROFILE_H
 #define __NKSU_PROFILE_H
 
+#include <linux/build_bug.h>
 #include <linux/capability.h>
 #include <linux/rcupdate.h>
 #include <linux/stddef.h>
@@ -52,6 +53,24 @@ struct nksu_profile_entry {
 	u16 domain_len;
 	u16 _pad;
 };
+
+/*
+ * Entries are carved out of the blob tail by casting, and the ioctl path
+ * builds on these fixed offsets, so keep the layout and the bitmap capacity
+ * honest at compile time (C11 static_assert).
+ */
+static_assert(sizeof(struct nksu_profile_entry) == 20,
+	      "nksu_profile_entry must stay 20 bytes");
+static_assert(offsetof(struct nksu_profile_entry, ns) == 12,
+	      "nksu_profile_entry.ns moved");
+static_assert(offsetof(struct nksu_profile_entry, domain_off) == 14,
+	      "nksu_profile_entry.domain_off moved");
+static_assert(sizeof(((struct nksu_profile_entry *)0)->caps_fields) == sizeof(u64),
+	      "caps storage must hold a 64-bit capability set");
+static_assert(sizeof(((struct nksu_profile_blob *)0)->bitmap) * 8 == NKSU_BITMAP_MAX_UID,
+	      "bitmap must cover NKSU_BITMAP_MAX_UID uids");
+static_assert(sizeof(struct nksu_profile_blob) % _Alignof(struct nksu_profile_entry) == 0,
+	      "blob header must leave the entry array aligned");
 
 /* Arena accessors — arena lives right after the entry array */
 static inline struct nksu_profile_entry *blob_entries(struct nksu_profile_blob *b)

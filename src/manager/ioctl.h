@@ -3,6 +3,7 @@
 #include <linux/ioctl.h>
 #include <linux/capability.h>
 #include <linux/version.h>
+#include <linux/build_bug.h>
 
 /*
  * 统一的控制接口：所有操作通过同一个 IOC_CMD 下发，
@@ -62,6 +63,28 @@ struct fmac_ioc {
 #define FMAC_OFF_PERM    192
 #define FMAC_OFF_EFFECT  256
 #define FMAC_OFF_INVERT  260
+
+/*
+ * The flag payloads are a wire contract shared with the manager, and the
+ * offsets are hand-written, so pin them against the element sizes at compile
+ * time (C11 static_assert).  Any drift here changes the on-wire ABI.
+ */
+static_assert(sizeof(struct fmac_ioc) == 2 * sizeof(unsigned int),
+	      "fmac_ioc header must be two u32s");
+static_assert(FMAC_DATA_UID == sizeof(unsigned int), "IOC uid is a u32");
+static_assert(FMAC_DATA_EFD == sizeof(int), "IOC eventfd is an int");
+static_assert(FMAC_DATA_CHKWRITE == sizeof(int), "IOC chkwrite is an int");
+static_assert(FMAC_OFF_CAPS == FMAC_OFF_UID + FMAC_DATA_UID, "uid/caps layout");
+static_assert(FMAC_DATA_CAP == FMAC_OFF_CAPS + sizeof(u64), "cap payload size");
+static_assert(FMAC_OFF_DOMAIN == FMAC_OFF_CAPS + sizeof(u64), "caps/domain layout");
+static_assert(FMAC_OFF_NS == FMAC_OFF_DOMAIN + 64, "domain/ns layout");
+static_assert(FMAC_DATA_PROFILE == FMAC_OFF_NS + sizeof(int), "profile payload size");
+static_assert(FMAC_OFF_TGT == FMAC_OFF_UID + 64, "rule src/tgt layout");
+static_assert(FMAC_OFF_CLS == FMAC_OFF_TGT + 64, "rule tgt/cls layout");
+static_assert(FMAC_OFF_PERM == FMAC_OFF_CLS + 64, "rule cls/perm layout");
+static_assert(FMAC_OFF_EFFECT == FMAC_OFF_PERM + 64, "rule perm/effect layout");
+static_assert(FMAC_OFF_INVERT == FMAC_OFF_EFFECT + sizeof(int), "rule effect/invert layout");
+static_assert(FMAC_DATA_SELRULE == FMAC_OFF_INVERT + sizeof(int), "selrule payload size");
 
 static inline kernel_cap_t u64_to_cap(u64 v)
 {
