@@ -36,7 +36,7 @@ class ModulePathHandler(
 
         val root = webRoot.toPath().normalize()
         var target = File(webRoot, path).toPath().normalize()
-        if (!target.startsWith(root)) return notFound()
+        if (!target.startsWith(root)) return notFound(path)
 
         // 目录（或根路径）→ index.html
         if (path.isBlank() || path.endsWith('/')) {
@@ -51,7 +51,7 @@ class ModulePathHandler(
         }
         if (bytes == null) {
             Log.w("NksuWebUI", "404 webui:$path (root=$webRoot)")
-            return notFound()
+            return notFound(path)
         }
 
         Log.d("NksuWebUI", "serve webui:$path (${bytes.size} bytes)")
@@ -65,13 +65,27 @@ class ModulePathHandler(
     private fun css(text: String): WebResourceResponse =
         WebResourceResponse("text/css", "utf-8", ByteArrayInputStream(text.toByteArray(Charsets.UTF_8)))
 
-    private fun notFound(): WebResourceResponse =
-        WebResourceResponse(
-            "text/plain",
+    /**
+     * 404 时返回一小段可见的 HTML（而不是空白），这样即使不抓 logcat，
+     * 页面也会直接显示是哪个文件没读到、webroot 是什么。
+     */
+    private fun notFound(path: String): WebResourceResponse {
+        val html =
+            "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+                "<body style=\"font-family:monospace;padding:16px;line-height:1.6\">" +
+                "<h3>NekoSU WebUI</h3><p>404: ${escapeHtml(path.ifBlank { "index.html" })}</p>" +
+                "<p>webroot: ${escapeHtml(webRoot.absolutePath)}</p>" +
+                "<p>请确认模块存在 webroot/index.html，且管理器已获得 root。</p></body>"
+        return WebResourceResponse(
+            "text/html",
             "utf-8",
             404,
             "Not Found",
             emptyMap(),
-            ByteArrayInputStream(ByteArray(0)),
+            ByteArrayInputStream(html.toByteArray(Charsets.UTF_8)),
         )
+    }
+
+    private fun escapeHtml(s: String): String =
+        s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 }
