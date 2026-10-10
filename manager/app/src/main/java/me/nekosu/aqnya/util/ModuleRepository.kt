@@ -66,6 +66,9 @@ object ModuleRepository {
 
     fun markRemove(id: String): Result = exec("touch ${quote("/data/adb/modules/$id")}/remove")
 
+    /** 撤销「下次启动时移除」的标记。 */
+    fun undoRemove(id: String): Result = exec("rm -f ${quote("/data/adb/modules/$id")}/remove")
+
     fun uninstall(id: String): Result = exec("rm -rf ${quote("/data/adb/modules/$id")}")
 
     fun install(zipPath: String): Result = exec(installCommand(zipPath))

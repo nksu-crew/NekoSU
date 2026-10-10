@@ -298,9 +298,11 @@
     <string name="modules_install">Install module</string>
     <string name="modules_metamodule">Meta</string>
     <string name="modules_update">Update</string>
-    <string name="modules_action_enable">Enable</string>
-    <string name="modules_action_disable">Disable</string>
-    <string name="modules_action_remove">Remove on reboot</string>
+    <string name="modules_version">Version</string>
+    <string name="modules_author">Author</string>
+    <string name="modules_action">Action</string>
+    <string name="modules_remove">Remove</string>
+    <string name="modules_undo">Undo</string>
     <string name="modules_action_uninstall">Uninstall now</string>
     <string name="modules_install_running">Installing…</string>
     <string name="modules_install_done">Module installed</string>
@@ -309,7 +311,6 @@
     <string name="cd_more">More</string>
 
     <!-- Modules - action script -->
-    <string name="modules_action_run">Run action</string>
     <string name="modules_action_running">Running action…</string>
     <string name="modules_action_done">Action finished</string>
     <string name="modules_action_failed">Action failed</string>

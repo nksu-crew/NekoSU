@@ -25,12 +25,5 @@ data class ModuleInfo(
 ) {
     val title: String get() = name.ifBlank { id }
 
-    val subtitle: String
-        get() =
-            buildList {
-                if (version.isNotBlank()) add(version)
-                if (author.isNotBlank()) add(author)
-            }.joinToString(" · ")
-
     val installDir: String get() = "/data/adb/modules/$id"
 }

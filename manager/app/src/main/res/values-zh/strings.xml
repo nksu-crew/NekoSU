@@ -292,9 +292,11 @@
     <string name="modules_install">安装模块</string>
     <string name="modules_metamodule">元</string>
     <string name="modules_update">待更新</string>
-    <string name="modules_action_enable">启用</string>
-    <string name="modules_action_disable">禁用</string>
-    <string name="modules_action_remove">重启后移除</string>
+    <string name="modules_version">版本</string>
+    <string name="modules_author">作者</string>
+    <string name="modules_action">执行</string>
+    <string name="modules_remove">移除</string>
+    <string name="modules_undo">撤销</string>
     <string name="modules_action_uninstall">立即卸载</string>
     <string name="modules_install_running">正在安装…</string>
     <string name="modules_install_done">模块已安装</string>
@@ -303,7 +305,6 @@
     <string name="cd_more">更多</string>
 
     <!-- Modules - action script -->
-    <string name="modules_action_run">执行操作</string>
     <string name="modules_action_running">正在执行…</string>
     <string name="modules_action_done">操作已完成</string>
     <string name="modules_action_failed">操作失败</string>

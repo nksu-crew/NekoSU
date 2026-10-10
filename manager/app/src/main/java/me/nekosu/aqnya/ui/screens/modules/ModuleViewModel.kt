@@ -80,6 +80,16 @@ class ModuleViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun undoRemove(module: ModuleInfo) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { ModuleRepository.undoRemove(module.id) }
+            if (!result.ok) {
+                _uiState.update { it.copy(message = result.output.ifBlank { "failed" }) }
+            }
+            refresh()
+        }
+    }
+
     fun uninstall(module: ModuleInfo) {
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { ModuleRepository.uninstall(module.id) }
