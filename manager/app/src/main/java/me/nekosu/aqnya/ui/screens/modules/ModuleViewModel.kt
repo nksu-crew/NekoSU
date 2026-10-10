@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.nekosu.aqnya.util.ModuleInfo
 import me.nekosu.aqnya.util.ModuleRepository
+import me.nekosu.aqnya.util.RootShell
 import java.io.File
 
 data class ModulesUiState(
@@ -25,6 +26,12 @@ data class ModulesUiState(
     val installLog: String = "",
     val installDone: Boolean = false,
     val installSuccess: Boolean? = null,
+    val actionModuleId: String? = null,
+    val actionName: String = "",
+    val actionRunning: Boolean = false,
+    val actionOutput: String = "",
+    val actionDone: Boolean = false,
+    val actionSuccess: Boolean = true,
     val message: String? = null,
 )
 
@@ -117,6 +124,55 @@ class ModuleViewModel(app: Application) : AndroidViewModel(app) {
 
     fun resetInstall() {
         _uiState.update { it.copy(installDone = false, installSuccess = null, installLog = "") }
+    }
+
+    /**
+     * 执行模块的 `action.sh`，把输出实时回填到 [ModulesUiState.actionOutput]。
+     *
+     * 输出回调来自 root shell 的读取线程；[MutableStateFlow] 本身线程安全，因此可直接 update。
+     */
+    fun runAction(module: ModuleInfo) {
+        if (_uiState.value.actionRunning) return
+        _uiState.update {
+            it.copy(
+                actionModuleId = module.id,
+                actionName = module.title,
+                actionRunning = true,
+                actionOutput = "",
+                actionDone = false,
+                actionSuccess = true,
+            )
+        }
+        viewModelScope.launch {
+            val buffer = StringBuilder()
+            val code =
+                withContext(Dispatchers.IO) {
+                    RootShell.execStreaming(ModuleRepository.actionCommand(appContext, module.id)) { line ->
+                        buffer.append(line).append('\n')
+                        _uiState.update { state -> state.copy(actionOutput = buffer.toString()) }
+                    }
+                }
+            _uiState.update {
+                it.copy(
+                    actionRunning = false,
+                    actionDone = true,
+                    actionSuccess = code == 0,
+                    actionOutput = buffer.toString(),
+                )
+            }
+        }
+    }
+
+    fun resetAction() {
+        _uiState.update {
+            it.copy(
+                actionModuleId = null,
+                actionName = "",
+                actionOutput = "",
+                actionDone = false,
+                actionRunning = false,
+            )
+        }
     }
 
     fun consumeMessage() {

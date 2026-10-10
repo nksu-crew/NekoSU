@@ -10,6 +10,8 @@ import kotlinx.serialization.json.Json
  * 与 KernelSU 管理器依赖 ksud 守护进程不同，这里没有用户态守护进程：
  *  - 模块枚举由用户态的 ncore 完成，管理器以 root 运行
  *    `ncore module list --json` 并解析其输出的 JSON（见 [list]）；
+ *  - action 脚本的存在性由该 JSON 的 `hasActionScript` 给出，执行同样交给
+ *    ncore（`ncore module action <id>`，见 [actionCommand]）；
  *  - 安装 / 启用 / 移除通过 root shell 执行。
  */
 object ModuleRepository {
@@ -67,6 +69,15 @@ object ModuleRepository {
     fun uninstall(id: String): Result = exec("rm -rf ${quote("/data/adb/modules/$id")}")
 
     fun install(zipPath: String): Result = exec(installCommand(zipPath))
+
+    /** 用 ncore 执行模块的 `action.sh`：`ncore module action <id>`。 */
+    fun actionCommand(
+        context: Context,
+        id: String,
+    ): String {
+        val ncore = VendorBootInstaller.ncorePath(context)
+        return "${quote(ncore.absolutePath)} module action ${quote(id)}"
+    }
 
     /** 执行任意 root 命令，返回退出码与合并输出。 */
     fun exec(cmd: String): Result {

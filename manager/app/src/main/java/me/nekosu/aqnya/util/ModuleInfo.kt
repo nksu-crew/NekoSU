@@ -21,6 +21,7 @@ data class ModuleInfo(
     val remove: Boolean = false,
     val skipMount: Boolean = false,
     val hasSystem: Boolean = false,
+    val hasActionScript: Boolean = false,
 ) {
     val title: String get() = name.ifBlank { id }
 

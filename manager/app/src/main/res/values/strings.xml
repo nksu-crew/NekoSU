@@ -307,4 +307,11 @@
     <string name="modules_install_failed">Install failed</string>
     <string name="modules_install_close">Done</string>
     <string name="cd_more">More</string>
+
+    <!-- Modules - action script -->
+    <string name="modules_action_run">Run action</string>
+    <string name="modules_action_running">Running action…</string>
+    <string name="modules_action_done">Action finished</string>
+    <string name="modules_action_failed">Action failed</string>
+    <string name="modules_action_close">Close</string>
 </resources>

@@ -112,7 +112,7 @@ fun ModuleScreen() {
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
-            if (!state.installing && !state.installDone) {
+            if (!state.installing && !state.installDone && state.actionModuleId == null) {
                 FloatingActionButton(
                     onClick = { pickZip.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
                 ) {
@@ -131,6 +131,10 @@ fun ModuleScreen() {
                     InstallSection(state = state, onClose = moduleViewModel::resetInstall)
                 }
 
+                state.actionModuleId != null -> {
+                    ActionSection(state = state, onClose = moduleViewModel::resetAction)
+                }
+
                 state.modules.isEmpty() -> {
                     EmptyState(loading = state.loading)
                 }
@@ -145,6 +149,7 @@ fun ModuleScreen() {
                             ModuleCard(
                                 module = module,
                                 onToggle = { enabled -> moduleViewModel.setEnabled(module, enabled) },
+                                onAction = { moduleViewModel.runAction(module) },
                                 onRemove = { moduleViewModel.remove(module) },
                                 onUninstall = { moduleViewModel.uninstall(module) },
                             )
@@ -160,6 +165,7 @@ fun ModuleScreen() {
 private fun ModuleCard(
     module: ModuleInfo,
     onToggle: (Boolean) -> Unit,
+    onAction: () -> Unit,
     onRemove: () -> Unit,
     onUninstall: () -> Unit,
 ) {
@@ -215,6 +221,15 @@ private fun ModuleCard(
                     Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.cd_more))
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    if (module.hasActionScript && module.enabled && !module.remove) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.modules_action_run)) },
+                            onClick = {
+                                menuOpen = false
+                                onAction()
+                            },
+                        )
+                    }
                     DropdownMenuItem(
                         text = {
                             Text(
@@ -356,6 +371,84 @@ private fun InstallSection(
         if (state.installDone) {
             Button(onClick = onClose, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.modules_install_close))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActionSection(
+    state: ModulesUiState,
+    onClose: () -> Unit,
+) {
+    val scrollState = rememberScrollState()
+    val accent =
+        when {
+            state.actionRunning -> MaterialTheme.colorScheme.primary
+            state.actionSuccess -> MaterialTheme.colorScheme.primary
+            else -> MaterialTheme.colorScheme.error
+        }
+
+    LaunchedEffect(state.actionOutput) {
+        scrollState.animateScrollTo(scrollState.maxValue)
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        ) {
+            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    when {
+                        state.actionRunning -> CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.5.dp)
+                        state.actionSuccess -> Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = accent)
+                        else -> Icon(Icons.Filled.Error, contentDescription = null, tint = accent)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        text =
+                            when {
+                                state.actionRunning -> stringResource(R.string.modules_action_running)
+                                state.actionSuccess -> stringResource(R.string.modules_action_done)
+                                else -> stringResource(R.string.modules_action_failed)
+                            },
+                        style = MaterialTheme.typography.titleMedium,
+                        color = accent,
+                    )
+                }
+
+                if (state.actionOutput.isNotBlank()) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    ) {
+                        SelectionContainer {
+                            Text(
+                                text = state.actionOutput,
+                                modifier =
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .verticalScroll(scrollState)
+                                        .padding(12.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (state.actionDone) {
+            Button(onClick = onClose, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.modules_action_close))
             }
         }
     }

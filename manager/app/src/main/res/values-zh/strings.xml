@@ -301,4 +301,11 @@
     <string name="modules_install_failed">安装失败</string>
     <string name="modules_install_close">完成</string>
     <string name="cd_more">更多</string>
+
+    <!-- Modules - action script -->
+    <string name="modules_action_run">执行操作</string>
+    <string name="modules_action_running">正在执行…</string>
+    <string name="modules_action_done">操作已完成</string>
+    <string name="modules_action_failed">操作失败</string>
+    <string name="modules_action_close">关闭</string>
 </resources>
