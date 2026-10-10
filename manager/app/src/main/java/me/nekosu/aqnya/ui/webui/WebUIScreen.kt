@@ -166,7 +166,9 @@ internal fun WebUIScreen(
                                 ) {
                                     return iconResponse(context, url.path?.trimStart('/').orEmpty())
                                 }
-                                return assetLoader.shouldInterceptRequest(url)
+                                val response = assetLoader.shouldInterceptRequest(url)
+                                if (response == null) Log.w("NksuWebUI", "asset loader miss: $url")
+                                return response
                             }
 
                             override fun onPageFinished(
