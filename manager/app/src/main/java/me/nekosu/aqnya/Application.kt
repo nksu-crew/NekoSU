@@ -7,8 +7,7 @@ import me.nekosu.aqnya.util.LocaleHelper
 
 class Application : Application() {
     override fun attachBaseContext(base: Context) {
-        super.attachBaseContext(base)
-        val wrappedContext = LocaleHelper.wrap(base, LocaleHelper.savedLanguageTag(base))
+        super.attachBaseContext(LocaleHelper.wrap(base, LocaleHelper.savedLanguageTag(base)))
     }
 
     override fun onCreate() {

@@ -16,7 +16,7 @@ object KernelInfo {
      * 规范化后的内核版本（major.minor），例如 "5.10"、"6.1"。
      *
      * JNI 侧使用 "%d.%02d" 格式化，会把 6.1 输出为 "6.01"，这里统一修正为 "6.1"，
-     * 以便与 assets 中的 KMI 命名（android14-6.1_nksu.ko）对应。
+     * 以便与 assets/ko 中的 KMI 命名（android14-6.1_nksu.ko）对应。
      */
     fun version(): String? {
         val fromJni = runCatching { ncore.kernelVersion() }.getOrNull()
@@ -29,7 +29,7 @@ object KernelInfo {
     /** 设备当前 KMI，例如 "android14-6.1"。kernel version 不可用时返回 null。 */
     fun currentKmi(): String? = version()?.let { "android${androidVersion()}-$it" }
 
-    /** 从 assets 中的 "<kmi>_nksu.ko" 文件名提取 KMI。 */
+    /** 从 assets/ko 中的 "<kmi>_nksu.ko" 文件名提取 KMI。 */
     fun kmiOf(koName: String): String = koName.removeSuffix("_nksu.ko")
 
     /**

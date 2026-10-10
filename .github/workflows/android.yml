@@ -65,8 +65,9 @@ jobs:
 
     - name: Prepare KOs (assets)
       run: |
-        find lkm-artifacts -name '*_nksu.ko' -exec cp {} manager/app/src/main/assets/ \;
-        ls -la manager/app/src/main/assets/
+        mkdir -p manager/app/src/main/assets/ko
+        find lkm-artifacts -name '*_nksu.ko' -exec cp {} manager/app/src/main/assets/ko/ \;
+        ls -la manager/app/src/main/assets/ko/
 
     - name: Download latest ncore CI artifact
       env:

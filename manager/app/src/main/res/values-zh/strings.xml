@@ -220,35 +220,28 @@
     <string name="status_card_not_installed">未安装</string>
     <string name="status_card_click_to_install">点击安装</string>
     <string name="about_card_description">了解 nekosu 更多功能及使用方法</string>
-<string name="about_card_title">了解 nekosu</string>
-<string name="finger_print">指纹</string>
+    <string name="about_card_title">了解 nekosu</string>
+    <string name="finger_print">指纹</string>
 
     <!-- 安装 (vendor_boot / LKM) -->
     <string name="install_title">安装 nksu</string>
-    <string name="install_desc">将 nksu.ko 打入 vendor_boot 镜像后刷入。</string>
     <string name="install_device_info">设备与内核</string>
     <string name="install_mode">安装模式</string>
     <string name="install_current_kmi">当前 KMI</string>
     <string name="install_method">安装方式</string>
     <string name="install_method_file">选择 vendor_boot 镜像</string>
     <string name="install_recommended">推荐</string>
-    <string name="install_pick_vendor_boot">选择 vendor_boot.img</string>
     <string name="install_pick_vendor_boot_desc">选择从本机提取的 vendor_boot 镜像</string>
     <string name="install_select_ko">内核模块 (KMI)</string>
     <string name="install_start">开始安装</string>
     <string name="install_working">正在安装…</string>
-    <string name="install_progress">进度</string>
     <string name="install_success">已生成补丁镜像 Download/nekosu_…_vendor_boot.img</string>
     <string name="install_failed">安装失败</string>
-    <string name="install_no_su">安装需要 Root (su) 权限</string>
-    <string name="install_pick_first">请先选择 vendor_boot 镜像</string>
-    <string name="install_ko_missing">assets 中未打包内核模块 (nksu.ko)</string>
+    <string name="install_ko_missing">assets/ko 中未打包内核模块 (nksu.ko)</string>
     <string name="install_done">完成</string>
     <string name="install_method_direct">直接安装（Root）</string>
     <string name="install_method_direct_desc">自动提取本机 vendor_boot，打补丁后刷回，无需手动 fastboot</string>
-    <string name="install_direct_checking">正在检测 Root 与 vendor_boot 分区…</string>
     <string name="install_direct_no_root">未检测到 Root，请先获取 root（Magisk/KernelSU 等）</string>
-    <string name="install_direct_no_part">未在本机找到 vendor_boot 分区</string>
     <string name="install_direct_retry">重试</string>
     <string name="install_direct_confirm_title">直接刷入 vendor_boot？</string>
     <string name="install_direct_confirm_message">补丁镜像将写入：\n%1$s\n\n原镜像会先备份到 Download，且需要设备已解锁 bootloader。是否继续？</string>
@@ -260,6 +253,36 @@
     <string name="install_inactive_confirm_title">安装到非活动分区？</string>
     <string name="install_inactive_confirm_message">补丁镜像将写入非活动分区的 vendor_boot：\n%1$s\n\n请在 OTA 之后、重启之前使用。需要设备已解锁 bootloader。是否继续？</string>
     <string name="install_inactive_success">已安装到非活动分区，切槽后生效</string>
+
+    <!-- 安装日志 / 错误信息 -->
+    <string name="install_log_partition">[nksu] vendor_boot: %1$s</string>
+    <string name="install_log_ncore_installed">[nksu] ncore 已安装到 %1$s</string>
+    <string name="install_log_ncore_warn">[nksu] WARN: ncore 安装失败，模块将在下次启动由管理器重试</string>
+    <string name="install_log_exported">[nksu] 已导出到: %1$s</string>
+    <string name="install_log_export_failed">[nksu] 导出到 Download 失败: %1$s</string>
+    <string name="install_log_patched_missing">[nksu] 未找到补丁镜像: %1$s</string>
+    <string name="install_log_backup_exported">[nksu] 原镜像备份已导出: %1$s</string>
+    <string name="install_log_backup_failed">[nksu] 备份导出失败: %1$s</string>
+    <string name="install_log_patched_exported">[nksu] 补丁镜像已导出: %1$s</string>
+    <string name="install_log_patched_export_failed">[nksu] 补丁镜像导出失败: %1$s</string>
+    <string name="install_log_verify_ok">[nksu] 写入校验通过</string>
+    <string name="install_log_verify_failed">[nksu] 写入校验失败，正在回滚原镜像</string>
+    <string name="install_log_direct_done">[nksu] 直接安装完成，重启后生效</string>
+    <string name="install_log_err_ncore">[nksu] ERROR: ncore 不可执行: %1$s</string>
+    <string name="install_log_err_ko">[nksu] ERROR: assets/%1$s 未找到或复制失败</string>
+    <string name="install_log_err_no_part">[nksu] ERROR: 未找到 vendor_boot 分区</string>
+    <string name="install_log_err_no_root">[nksu] ERROR: 未检测到 root（需要 Magisk/KernelSU 等 su，或已安装 nksu）</string>
+    <string name="install_log_err_dump">[nksu] ERROR: 读取 vendor_boot 失败</string>
+    <string name="install_log_err_patch">[nksu] ERROR: 补丁失败</string>
+    <string name="install_log_err_too_large">[nksu] ERROR: 补丁镜像 (%1$d 字节) 超过 vendor_boot 分区容量 (%2$d 字节)</string>
+    <string name="install_log_err_flash">[nksu] ERROR: 刷入 vendor_boot 失败</string>
+    <string name="install_err_copy_asset">复制 assets/%1$s 失败: %2$s</string>
+    <string name="install_err_read_file">无法读取所选文件</string>
+    <string name="install_err_ncore">ncore 不可执行: %1$s\n请确认:\n  1) jniLibs/&lt;abi&gt;/libncore.so 已随 APK 打包;\n  2) AndroidManifest 打开 extractNativeLibs (useLegacyPackaging=true);\n  3) 设备 ABI 与打包的 lib 目录匹配。</string>
+    <string name="install_err_ko_asset">assets/%1$s 未找到或复制失败</string>
+    <string name="install_err_mkdir">无法创建目录 %1$s</string>
+    <string name="install_err_mediastore_insert">MediaStore 插入失败</string>
+    <string name="install_err_open_stream">无法打开输出流</string>
 
     <!-- 模块 -->
     <string name="nav_modules">模块</string>

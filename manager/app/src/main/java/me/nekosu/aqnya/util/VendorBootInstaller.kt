@@ -11,10 +11,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.random.Random
+import me.nekosu.aqnya.R
 
 object VendorBootInstaller {
 
-    private const val SCRIPT_NAME = "vendor-boot.sh"
+    private const val SCRIPT_NAME = "scripts/vendor-boot.sh"
+
+    /** 内核模块在 assets 中的存放目录，例如 assets/ko/android14-6.1_nksu.ko。 */
+    private const val KO_ASSET_DIR = "ko"
 
     private const val NCORE_LIB_NAME = "libncore.so"
 
@@ -42,7 +46,7 @@ object VendorBootInstaller {
 
         if (koName != null) {
             val koFile = File(dir, koName)
-            copyAsset(context, koName, koFile)
+            copyAsset(context, "$KO_ASSET_DIR/$koName", koFile)
             koFile.setReadable(true, false)
         }
 
@@ -57,12 +61,15 @@ object VendorBootInstaller {
                 }
             }
         } catch (e: Exception) {
-            throw IllegalStateException("复制 assets/$assetName 失败: ${e.message}", e)
+            throw IllegalStateException(
+                context.getString(R.string.install_err_copy_asset, assetName, e.message.orEmpty()),
+                e,
+            )
         }
     }
 
     fun koCandidates(context: Context): List<String> =
-        (context.assets.list("") ?: emptyArray())
+        (context.assets.list(KO_ASSET_DIR) ?: emptyArray())
             .filter { it.endsWith("_nksu.ko") }
             .sorted()
 
@@ -74,7 +81,7 @@ object VendorBootInstaller {
         val out = File(dir, "vendor_boot.img")
         context.contentResolver.openInputStream(uri)?.use { input ->
             out.outputStream().use { input.copyTo(it) }
-        } ?: throw IllegalStateException("无法读取所选文件")
+        } ?: throw IllegalStateException(context.getString(R.string.install_err_read_file))
         return out
     }
 
@@ -91,18 +98,14 @@ object VendorBootInstaller {
             val ncore = ncorePath(context)
             if (!ncore.exists() || !ncore.canExecute()) {
                 throw IllegalStateException(
-                    "ncore 不可执行: ${ncore.absolutePath}\n" +
-                        "请确认:\n" +
-                        "  1) jniLibs/<abi>/$NCORE_LIB_NAME 已随 APK 打包;\n" +
-                        "  2) AndroidManifest 打开 extractNativeLibs (useLegacyPackaging=true);\n" +
-                        "  3) 设备 ABI 与打包的 lib 目录匹配。"
+                    context.getString(R.string.install_err_ncore, ncore.absolutePath),
                 )
             }
 
             val koFile = koName?.let { name ->
                 File(dir, name).also { out ->
                     if (!out.exists()) {
-                        throw IllegalStateException("assets/$name 未找到或复制失败")
+                        throw IllegalStateException(context.getString(R.string.install_err_ko_asset, name))
                     }
                 }
             }
@@ -114,7 +117,6 @@ object VendorBootInstaller {
                 if (koFile != null) add(koFile.absolutePath)
             }
 
-            // 每次安装生成随机文件名: nekosu_<随机串>_vendor_boot.img
             val produced = File(dir, outputImageName())
             produced.delete()
 
@@ -136,21 +138,17 @@ object VendorBootInstaller {
             if (exit == 0) {
                 if (produced.exists()) {
                     runCatching { exportToDownload(context, produced) }
-                        .onSuccess { onOutput("[nksu] 已导出到: ${it.absolutePath}") }
-                        .onFailure { onOutput("[nksu] 导出到 Download 失败: ${it.message}") }
+                        .onSuccess { onOutput(context.getString(R.string.install_log_exported, it.absolutePath)) }
+                        .onFailure { onOutput(context.getString(R.string.install_log_export_failed, it.message.orEmpty())) }
                 } else {
-                    onOutput("[nksu] 未找到补丁镜像: ${produced.absolutePath}")
+                    onOutput(context.getString(R.string.install_log_patched_missing, produced.absolutePath))
                 }
             }
             exit
         }
 
-    /**
-     * 定位本机当前 slot 的 vendor_boot 分区；找不到返回 null。
-     */
     fun detectVendorBootPartition(): String? = findVendorBoot(currentSlotSuffix(), allowSlotless = true)
 
-    /** 定位非活动 slot 的 vendor_boot 分区；非 A/B 设备返回 null。 */
     fun detectInactiveVendorBootPartition(): String? {
         val inactive = inactiveSlotSuffix() ?: return null
         return findVendorBoot(inactive, allowSlotless = false)
@@ -236,32 +234,32 @@ object VendorBootInstaller {
             val ncore = ncorePath(context)
 
             if (!ncore.exists() || !ncore.canExecute()) {
-                onOutput("[nksu] ERROR: ncore 不可执行: ${ncore.absolutePath}")
+                onOutput(context.getString(R.string.install_log_err_ncore, ncore.absolutePath))
                 return@withContext -1
             }
             val koFile = File(dir, koName)
             if (!koFile.exists()) {
-                onOutput("[nksu] ERROR: assets/$koName 未找到或复制失败")
+                onOutput(context.getString(R.string.install_log_err_ko, koName))
                 return@withContext -1
             }
             if (partition.isBlank()) {
-                onOutput("[nksu] ERROR: 未找到 vendor_boot 分区")
+                onOutput(context.getString(R.string.install_log_err_no_part))
                 return@withContext -1
             }
             if (!RootShell.available()) {
-                onOutput("[nksu] ERROR: 未检测到 root（需要 Magisk/KernelSU 等 su，或已安装 nksu）")
+                onOutput(context.getString(R.string.install_log_err_no_root))
                 return@withContext -1
             }
 
             val part = partition
-            onOutput("[nksu] vendor_boot: ${part}")
+            onOutput(context.getString(R.string.install_log_partition, part))
 
             // 已具备 root：顺便把 ncore 放到 init.rc 会 exec 的固定路径，
             // 免去“首次重启后再由管理器补装、需二次重启”的往返。
             if (NcoreBoot.install(context)) {
-                onOutput("[nksu] ncore 已安装到 ${NcoreBoot.BOOT_PATH}")
+                onOutput(context.getString(R.string.install_log_ncore_installed, NcoreBoot.BOOT_PATH))
             } else {
-                onOutput("[nksu] WARN: ncore 安装失败，模块将在下次启动由管理器重试")
+                onOutput(context.getString(R.string.install_log_ncore_warn))
             }
 
             // 1) dump 当前分区作为源镜像，同时作为回滚备份。
@@ -270,14 +268,13 @@ object VendorBootInstaller {
             if (RootShell.execStreaming("dd if=${quote(part)} of=${quote(dump.absolutePath)} bs=4096", onOutput) != 0 ||
                 !dump.exists()
             ) {
-                onOutput("[nksu] ERROR: 读取 vendor_boot 失败")
+                onOutput(context.getString(R.string.install_log_err_dump))
                 return@withContext -1
             }
             runCatching { exportToDownload(context, dump) }
-                .onSuccess { onOutput("[nksu] 原镜像备份已导出: ${it.absolutePath}") }
-                .onFailure { onOutput("[nksu] 备份导出失败: ${it.message}") }
+                .onSuccess { onOutput(context.getString(R.string.install_log_backup_exported, it.absolutePath)) }
+                .onFailure { onOutput(context.getString(R.string.install_log_backup_failed, it.message.orEmpty())) }
 
-            // 2) 打入 nksu.ko（复用 vendor-boot.sh）。
             val produced = File(dir, outputImageName())
             produced.delete()
             val patchCmd =
@@ -288,12 +285,12 @@ object VendorBootInstaller {
                     append("sh ${quote(script.absolutePath)} ${quote(dump.absolutePath)} ${quote(koFile.absolutePath)}")
                 }
             if (RootShell.execStreaming(patchCmd, onOutput) != 0 || !produced.exists()) {
-                onOutput("[nksu] ERROR: 补丁失败")
+                onOutput(context.getString(R.string.install_log_err_patch))
                 return@withContext -1
             }
             runCatching { exportToDownload(context, produced) }
-                .onSuccess { onOutput("[nksu] 补丁镜像已导出: ${it.absolutePath}") }
-                .onFailure { onOutput("[nksu] 补丁镜像导出失败: ${it.message}") }
+                .onSuccess { onOutput(context.getString(R.string.install_log_patched_exported, it.absolutePath)) }
+                .onFailure { onOutput(context.getString(R.string.install_log_patched_export_failed, it.message.orEmpty())) }
 
             // 3) 写回分区并读回校验；不一致则回滚原镜像。
             val size = produced.length()
@@ -303,7 +300,7 @@ object VendorBootInstaller {
             val sizeCmd = "cat /sys/class/block/${'$'}(basename ${'$'}(readlink -f ${quote(part)}))/size"
             val partSectors = RootShell.exec(sizeCmd).output.trim().toLongOrNull()
             if (partSectors != null && size > partSectors * 512L) {
-                onOutput("[nksu] ERROR: 补丁镜像 ($size 字节) 超过 vendor_boot 分区容量 (${partSectors * 512L} 字节)")
+                onOutput(context.getString(R.string.install_log_err_too_large, size, partSectors * 512L))
                 return@withContext -1
             }
 
@@ -316,9 +313,9 @@ object VendorBootInstaller {
                     append("dd if=${quote(part)} of=${quote(readback.absolutePath)} bs=4096 count=$blocks || exit 1\n")
                     append("head -c $size ${quote(readback.absolutePath)} > ${quote(trimmed.absolutePath)} || exit 1\n")
                     append("if cmp ${quote(produced.absolutePath)} ${quote(trimmed.absolutePath)} >/dev/null 2>&1; then\n")
-                    append("  echo '[nksu] 写入校验通过'\n")
+                    append("  echo ${quote(context.getString(R.string.install_log_verify_ok))}\n")
                     append("else\n")
-                    append("  echo '[nksu] 写入校验失败，正在回滚原镜像'\n")
+                    append("  echo ${quote(context.getString(R.string.install_log_verify_failed))}\n")
                     append("  dd if=${quote(dump.absolutePath)} of=${quote(part)} bs=4096\n")
                     append("  sync\n")
                     append("  exit 1\n")
@@ -328,11 +325,11 @@ object VendorBootInstaller {
             readback.delete()
             trimmed.delete()
             if (flashExit != 0) {
-                onOutput("[nksu] ERROR: 刷入 vendor_boot 失败")
+                onOutput(context.getString(R.string.install_log_err_flash))
                 return@withContext -1
             }
 
-            onOutput("[nksu] 直接安装完成，重启后生效")
+            onOutput(context.getString(R.string.install_log_direct_done))
             0
         }
 
@@ -372,7 +369,7 @@ object VendorBootInstaller {
         }
 
         if (!downloads.exists() && !downloads.mkdirs()) {
-            throw IllegalStateException("无法创建目录 ${downloads.absolutePath}")
+            throw IllegalStateException(context.getString(R.string.install_err_mkdir, downloads.absolutePath))
         }
         val dest = File(downloads, source.name)
         source.copyTo(dest, overwrite = true)
@@ -404,11 +401,11 @@ object VendorBootInstaller {
             }
         val uri =
             resolver.insert(collection, values)
-                ?: throw IllegalStateException("MediaStore 插入失败")
+                ?: throw IllegalStateException(context.getString(R.string.install_err_mediastore_insert))
         try {
             resolver.openOutputStream(uri)?.use { out ->
                 source.inputStream().use { it.copyTo(out) }
-            } ?: throw IllegalStateException("无法打开输出流")
+            } ?: throw IllegalStateException(context.getString(R.string.install_err_open_stream))
         } catch (e: Exception) {
             resolver.delete(uri, null, null)
             throw e

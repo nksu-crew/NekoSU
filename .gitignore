@@ -12,4 +12,4 @@ ktlint
 app/src/main/jniLibs/
 .kotlin/
 userspace/ncore/
-manager/app/src/main/assets/nksu/
+manager/app/src/main/assets/ko/

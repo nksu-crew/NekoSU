@@ -1,6 +1,7 @@
 package me.nekosu.aqnya.ui.screens.install
 
 import android.app.Application
+import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.nekosu.aqnya.util.KernelInfo
+import me.nekosu.aqnya.util.LocaleHelper
 import me.nekosu.aqnya.util.RootShell
 import me.nekosu.aqnya.util.VendorBootInstaller
 
@@ -75,6 +77,15 @@ class InstallViewModel(app: Application) : AndroidViewModel(app) {
     val uiState: StateFlow<InstallUiState> = _uiState.asStateFlow()
 
     private val appContext = app.applicationContext
+
+    /**
+     * 按应用内当前所选语言解析字符串，供安装日志/错误本地化使用。
+     *
+     * 语言切换只会重建 Activity 而不会重建进程，因此这里每次安装时重新读取
+     * 已保存的语言标签，避免沿用旧的 [android.content.res.Resources] 配置。
+     */
+    private fun i18nContext(): Context =
+        LocaleHelper.wrap(appContext, LocaleHelper.savedLanguageTag(appContext))
 
     /** 载入内核信息与可用的内核模块，只执行一次。 */
     fun load() {
@@ -204,8 +215,9 @@ class InstallViewModel(app: Application) : AndroidViewModel(app) {
     ): Int {
         val uri = current.vendorBootUri ?: return -1
         return runCatching {
-            val staged = withContext(Dispatchers.IO) { VendorBootInstaller.stageVendorBoot(appContext, uri) }
-            VendorBootInstaller.install(appContext, staged, ko) { line -> appendLog(log, line) }
+            val ctx = i18nContext()
+            val staged = withContext(Dispatchers.IO) { VendorBootInstaller.stageVendorBoot(ctx, uri) }
+            VendorBootInstaller.install(ctx, staged, ko) { line -> appendLog(log, line) }
         }.getOrElse { e ->
             appendError(log, e)
             -1
@@ -218,7 +230,7 @@ class InstallViewModel(app: Application) : AndroidViewModel(app) {
         log: StringBuilder,
     ): Int =
         runCatching {
-            VendorBootInstaller.directInstall(appContext, ko, partition) { line -> appendLog(log, line) }
+            VendorBootInstaller.directInstall(i18nContext(), ko, partition) { line -> appendLog(log, line) }
         }.getOrElse { e ->
             appendError(log, e)
             -1
