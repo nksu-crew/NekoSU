@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.core.content.FileProvider
+import me.nekosu.aqnya.R
 import java.io.File
 
 object LogUtils {
