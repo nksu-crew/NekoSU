@@ -4,6 +4,7 @@
 #include <linux/version.h>
 #include <linux/capability.h>
 #include <linux/kernel.h>
+#include <linux/mm.h>
 #include <linux/slab.h>
 
 #include "fmac.h"

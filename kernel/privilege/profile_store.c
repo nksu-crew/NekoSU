@@ -22,6 +22,7 @@
 #include <linux/fs.h>
 #include <linux/kernel.h>
 #include <linux/minmax.h>
+#include <linux/mm.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/string.h>

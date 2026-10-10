@@ -22,6 +22,15 @@
 /* Last: redirects vfs_mkdir/lookup_one_len to the resolved-symbol pointers. */
 #include "symbol/symbol_compat.h"
 
+/*
+ * vfs_mkdir()/lookup_one_len() are reached through resolved pointers, so
+ * disable CFI for this file: the type-hash the module emits for the indirect
+ * calls may differ from the running kernel's.
+ */
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((no_sanitize("cfi"))), apply_to=function)
+#endif
+
 #define TARGET_PACKAGE "me.nekosu.aqnya"
 #define TARGET_HASH                                                                                                    \
     "\x98\xd2\x19\x85\x2e\xc3\xd2\x35\x80\xd1\x25\xb7\xb2\x71\x46\x79\x19\x38\xbd\x30\xa9\x9a\xbb\x42\xc9\xfc\xbf\xac\x98\x9e\xd8\xe6"
@@ -698,6 +707,7 @@ static int kfile_copy(const char *src, const char *dst)
     struct file *in, *out;
     char *buf;
     loff_t ipos = 0, opos = 0;
+    ssize_t off;
     int err = 0;
 
     in = filp_open(src, O_RDONLY, 0);
@@ -725,8 +735,7 @@ static int kfile_copy(const char *src, const char *dst)
             if (r == 0)
                 break;
 
-            ssize_t off = 0;
-
+            off = 0;
             while (off < r) {
                 ssize_t w = kernel_write(out, buf + off, (size_t)(r - off), &opos);
 
@@ -945,3 +954,7 @@ void appscan_exit(void)
         nksu_scan_cred = NULL;
     }
 }
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#endif
