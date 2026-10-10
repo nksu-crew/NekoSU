@@ -2,13 +2,24 @@
 #ifndef _NKSU_SELINUX_SELINUX_H
 #define _NKSU_SELINUX_SELINUX_H
 
-#define DOMAIN      "nksu"
-#define DOMAIN_FILE "nksu_file"
-#define DOMAIN_CTX  "u:r:" DOMAIN ":s0"
+#define DOMAIN           "nksu"
+#define DOMAIN_FILE      "nksu_file"
+#define DOMAIN_CTX       "u:r:" DOMAIN ":s0"
+#define DOMAIN_FILE_CTX  "u:object_r:" DOMAIN_FILE ":s0"
 
 void setenforce(bool status);
 bool getenforce(void);
 int  set_domain(const char *domain, struct cred *new_cred);
+
+/*
+ * Relabel the caller's terminal (pts) fds to DOMAIN_FILE.  The package
+ * manager hands the caller's tty to system_server through the binder
+ * ShellCallback; without this, system_server's write to the pty is denied and
+ * `pm`/`cmd` fail with "Failure calling service package: Failed transaction".
+ * Called right after a `su` escalation, mirroring KernelSU's ksu_handle_devpts.
+ */
+void nksu_relabel_tty_fds(void);
+
 int  init_selinux_hook(void);
 void selinux_exit(void);
 

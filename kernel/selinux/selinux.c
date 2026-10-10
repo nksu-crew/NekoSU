@@ -17,6 +17,9 @@
 #include <linux/kthread.h>
 #include <linux/wait.h>
 #include <linux/delay.h>
+#include <linux/fs.h>
+#include <linux/file.h>
+#include <linux/magic.h>
 
 #include <fmac.h>
 #include "symbol/symbol_compat.h"
@@ -86,6 +89,66 @@ int set_domain(const char *domain, struct cred *new_cred)
 	}
 
 	return -EPERM;
+}
+
+/* SID of DOMAIN_FILE (u:object_r:nksu_file:s0); 0 until policy is loaded. */
+static u32 nksu_file_sid;
+
+static void resolve_file_sid(void)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+	int rc = security_context_to_sid(DOMAIN_FILE_CTX,
+					  strlen(DOMAIN_FILE_CTX),
+					  &nksu_file_sid, GFP_KERNEL);
+#else
+	int rc = security_context_to_sid(&selinux_state, DOMAIN_FILE_CTX,
+					  strlen(DOMAIN_FILE_CTX),
+					  &nksu_file_sid, GFP_KERNEL);
+#endif
+
+	if (rc) {
+		pr_err("nksu: failed to get SID for %s: %d\n",
+		       DOMAIN_FILE_CTX, rc);
+		nksu_file_sid = 0;
+	}
+}
+
+/*
+ * Relabel the process's tty (pts) fds to DOMAIN_FILE.  `cmd`/`pm` hand the
+ * caller's terminal to system_server via the binder ShellCallback; without
+ * this system_server's write to the pty is denied and the command fails with
+ * "Failed transaction (2147483646)".  All domains may access DOMAIN_FILE
+ * (see load_policy()), so this is safe and mirrors KernelSU's
+ * ksu_handle_devpts().
+ */
+void nksu_relabel_tty_fds(void)
+{
+	int i;
+
+	if (!nksu_file_sid)
+		return;
+
+	for (i = 0; i < 3; i++) {
+		struct file *file = fget(i);
+		struct inode *inode;
+
+		if (!file)
+			continue;
+
+		inode = file_inode(file);
+		if (inode && inode->i_sb &&
+		    inode->i_sb->s_magic == DEVPTS_SUPER_MAGIC) {
+			struct inode_security_struct *sec =
+				(struct inode_security_struct *)inode->i_security;
+
+			if (sec) {
+				sec->sid = nksu_file_sid;
+				inode->i_uid.val = 0;
+				inode->i_gid.val = 0;
+			}
+		}
+		fput(file);
+	}
 }
 
 /*
@@ -163,6 +226,9 @@ int load_hook(void)
 		       DOMAIN, rc);
 		return rc;
 	}
+
+	/* Cache the SID used to relabel the root shell's tty. */
+	resolve_file_sid();
 
 #ifdef CONFIG_NKSU_DEBUG
 	pr_info("[selinux]: debug mode, setting permissive for '%s'\n",

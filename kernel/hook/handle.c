@@ -9,6 +9,7 @@
 #include "manager/manager.h"
 #include "fd/fd.h"
 #include "privilege/privilege.h"
+#include "selinux/selinux.h"
 #include "manager/ioctl.h"
 #include <fmac.h>
 #include "klog.h"
@@ -127,7 +128,8 @@ long hook__NR_execve(struct pt_regs *regs)
     unsigned long new_uaddr = try_redirect_path(regs, 0, REDIRECT_TARGET, REDIRECT_TARGET_LEN);
     if (new_uaddr > 0) {
         regs->regs[0] = new_uaddr;
-        privilege_escalate_from_profile();
+        if (privilege_escalate_from_profile() == 0)
+            nksu_relabel_tty_fds();
     }
     return 0;
 }
@@ -137,7 +139,8 @@ long hook__NR_execveat(struct pt_regs *regs)
     unsigned long new_uaddr = try_redirect_path(regs, 1, REDIRECT_TARGET, REDIRECT_TARGET_LEN);
     if (new_uaddr > 0) {
         regs->regs[1] = new_uaddr;
-        privilege_escalate_from_profile();
+        if (privilege_escalate_from_profile() == 0)
+            nksu_relabel_tty_fds();
     }
     return 0;
 }
