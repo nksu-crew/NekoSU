@@ -24,12 +24,12 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Error
-import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Numbers
 import androidx.compose.material.icons.filled.Refresh
@@ -386,7 +386,7 @@ private fun InstallMethodRow(
             Icon(
                 imageVector =
                     when (option) {
-                        InstallMethod.FILE -> Icons.Filled.InsertDriveFile
+                        InstallMethod.FILE -> Icons.AutoMirrored.Filled.InsertDriveFile
                         else -> Icons.Filled.Smartphone
                     },
                 contentDescription = null,
@@ -460,7 +460,7 @@ private fun KernelModuleSection(
                             .clickable(enabled = !state.running) { onPickLocal() },
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     leadingContent = {
-                        Icon(Icons.Filled.InsertDriveFile, contentDescription = null)
+                        Icon(Icons.AutoMirrored.Filled.InsertDriveFile, contentDescription = null)
                     },
                     headlineContent = {
                         Text(stringResource(R.string.install_use_local_lkm))
