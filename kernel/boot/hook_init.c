@@ -32,7 +32,7 @@ int boot_stage = INIT_FIRST_STAGE;
  *   execve(id, "selinux_setup")  -> logged; the policy is loaded next
  *   execve(id, "second_stage")   -> SELinux Hook (domain + rules); the
  *                                   init.rc proxy is installed from the
- *                                   first init.rc read (see src/boot/init_rc.c)
+ *                                   first init.rc read (see kernel/boot/init_rc.c)
  *   execve(app_process -Xzygote) -> feature components (profile, tracepoint,
  *                                   manager scan...).  Module loading is not
  *                                   started here: it is driven entirely by

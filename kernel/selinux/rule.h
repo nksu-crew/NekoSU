@@ -47,7 +47,7 @@ int sepolicy_allow_all_types(const char *sname, const char *cname);
 int sepolicy_add_domain(const char *name);
 
 /*
- * Decode and apply a KernelSU-format sepolicy batch (src/selinux/rule_file.c).
+ * Decode and apply a KernelSU-format sepolicy batch (kernel/selinux/rule_file.c).
  * Returns the number of commands applied, or a negative errno.
  */
 int sepolicy_apply_batch(const void __user *data, size_t len);

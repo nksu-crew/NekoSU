@@ -18,7 +18,7 @@
  * ncore (userspace/ of the ncore project, shipped by the manager as
  * /data/adb/nksu/ncore) is the KernelSU-compatible module runtime.  The kernel
  * only edits init's view of init.rc and provides the sepolicy sink ncore writes
- * to (src/selinux/rule_file.c).  Because init's `exec` is synchronous, the
+ * to (kernel/selinux/rule_file.c).  Because init's `exec` is synchronous, the
  * post-fs-data hooks (metamodule mount included) finish before init continues,
  * so modules are mounted before zygote/system_server start.
  *

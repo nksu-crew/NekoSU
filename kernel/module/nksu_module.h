@@ -8,7 +8,7 @@
  * Magisk/KernelSU-style module loading.
  *
  * Module loading lives in userspace: the rc nksu injects into init.rc (see
- * src/boot/init_rc.c) execs ncore (shipped by the manager as /data/adb/nksu/ncore)
+ * kernel/boot/init_rc.c) execs ncore (shipped by the manager as /data/adb/nksu/ncore)
  * at the well-defined boot stages, and ncore runs the KernelSU-compatible
  * module runtime -- enumerate /data/adb/modules, run the boot hooks, drive the
  * metamodule mount, and push each sepolicy.rule through /proc/nksu/sepolicy.

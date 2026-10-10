@@ -30,7 +30,7 @@ jobs:
 
         echo "=== Building nksu for KMI: ${{ inputs.kmi }} ==="
 
-        make CONFIG_NKSU=m CONFIG_NKSU_DEBUG=y
+        make -C kernel CONFIG_NKSU=m CONFIG_NKSU_DEBUG=y
         
         echo "=== Build completed ==="
 
@@ -39,7 +39,7 @@ jobs:
 
         # Copy with KMI-specific naming
         OUTPUT_NAME="${{ inputs.kmi }}_nksu.ko"
-        cp nksu.ko "/github/workspace/out/$OUTPUT_NAME"
+        cp kernel/nksu.ko "/github/workspace/out/$OUTPUT_NAME"
         
         echo "Copied to: /github/workspace/out/$OUTPUT_NAME"
         ls -la "/github/workspace/out/$OUTPUT_NAME"

@@ -81,7 +81,7 @@ extern typeof(__hashtab_insert) *nksu___hashtab_insert;
 extern typeof(security_context_to_sid) *nksu_security_context_to_sid;
 
 /*
- * spawn primitives (src/spawn/spawn.c). None of these is exported on GKI, and they
+ * spawn primitives (kernel/spawn/spawn.c). None of these is exported on GKI, and they
  * are exactly what a self-contained call_usermodehelper replacement needs:
  * spawn a task, exec a program in it, wait for it, reset its handlers.
  */

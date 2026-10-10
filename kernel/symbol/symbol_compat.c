@@ -100,7 +100,7 @@ int nksu_symbol_compat_init(void)
 	NKSU_RESOLVE(nksu_hashtab_map, "hashtab_map");
 	NKSU_RESOLVE(nksu___hashtab_insert, "__hashtab_insert");
 
-	/* src/spawn/spawn.c primitives -- no direct relocation against these */
+	/* kernel/spawn/spawn.c primitives -- no direct relocation against these */
 	NKSU_RESOLVE(nksu_kernel_thread, "kernel_thread");
 	NKSU_RESOLVE(nksu_kernel_execve, "kernel_execve");
 	NKSU_RESOLVE(nksu_kernel_wait, "kernel_wait");

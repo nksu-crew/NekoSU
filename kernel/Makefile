@@ -1,5 +1,5 @@
 MDIR := $(realpath $(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
-IDIR := $(MDIR)/src/include
+IDIR := $(MDIR)/include
 
 $(info -- KDIR: $(KDIR))
 $(info -- MDIR: $(MDIR))

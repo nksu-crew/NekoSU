@@ -5,7 +5,7 @@
  * The wire format is the same as KernelSU's (uapi/selinux.h): a stream of
  * { cmd, subcmd } headers, each followed by N length-prefixed arguments where a
  * zero length encodes the wildcard.  Every decoded command is dispatched to
- * the NekoSU rule engine (src/selinux/rule.c).
+ * the NekoSU rule engine (kernel/selinux/rule.c).
  */
 
 #include <linux/build_bug.h>
