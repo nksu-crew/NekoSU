@@ -2,27 +2,32 @@ name: Android CI
 
 on:
   workflow_dispatch:
+  # Rebuild the APK whenever a new LKM is produced, so it tracks the latest KO.
+  workflow_run:
+    workflows: [ "Build LKM for nksu" ]
+    types: [ completed ]
   push:
     branches: [ "main" ]
     paths:
       - "manager/app/src/**/*.kt"
+      - "manager/app/src/**/*.c"
       - "manager/build.gradle.kts"
       - "manager/gradle/libs.versions.toml"
-      - "manager/app/src/**/*.c"
   pull_request:
     branches: [ "main" ]
     paths:
       - "manager/app/src/**/*.kt"
+      - "manager/app/src/**/*.c"
       - "manager/build.gradle.kts"
       - "manager/gradle/libs.versions.toml"
-      - "manager/app/src/**/*.c"
+
+permissions:
+  contents: read
+  actions: read
 
 jobs:
-  build-lkm:
-    uses: ./.github/workflows/build-lkm.yml
-
   build:
-    needs: build-lkm
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     env:
       NDK_VERSION: r29
@@ -58,10 +63,38 @@ jobs:
         mv android-ndk-"$NDK_VERSION" "$ANDROID_NDK_HOME"
         rm -f ndk.zip
 
-    - name: Download LKM artifacts
-      uses: actions/download-artifact@v8
-      with:
-        path: lkm-artifacts
+    - name: Download latest LKM artifacts
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        set -euo pipefail
+
+        repo="${GITHUB_REPOSITORY}"
+        workflow="build-lkm.yml"
+
+        echo "::group::Locating the latest successful LKM run"
+        run_id="$(gh run list \
+          --repo "$repo" \
+          --workflow "$workflow" \
+          --branch main \
+          --status success \
+          --limit 1 \
+          --json databaseId \
+          --jq '.[0].databaseId')"
+        if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
+          echo "::error::no successful '$workflow' run found in $repo"
+          exit 1
+        fi
+        echo "latest successful LKM run: $run_id"
+        echo "::endgroup::"
+
+        rm -rf lkm-artifacts
+        mkdir -p lkm-artifacts
+        gh run download "$run_id" \
+          --repo "$repo" \
+          --dir lkm-artifacts \
+          --pattern '*-lkm'
+        find lkm-artifacts -name '*_nksu.ko' -print
 
     - name: Prepare KOs (assets)
       run: |
