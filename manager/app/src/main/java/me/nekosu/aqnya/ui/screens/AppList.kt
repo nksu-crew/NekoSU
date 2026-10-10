@@ -3,9 +3,11 @@
 package me.nekosu.aqnya.ui.screens
 
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.os.Build
 import android.util.LruCache
 import androidx.annotation.StringRes
 import androidx.compose.animation.*
@@ -108,6 +110,10 @@ class AppViewModel(
     var allApps by mutableStateOf<List<AppInfo>>(emptyList())
         private set
 
+    // 预计算的小写名字：(app, name.lowercase())，过滤 / 排序时直接复用，
+    // 避免每次比较都重新 lowercase 分配一堆字符串。
+    private var allAppsLower: List<Pair<AppInfo, String>> = emptyList()
+
     var isLoaded by mutableStateOf(false)
         private set
 
@@ -129,12 +135,17 @@ class AppViewModel(
         }
     }
 
+    private fun setAllApps(apps: List<AppInfo>) {
+        allApps = apps
+        allAppsLower = apps.map { it to it.name.lowercase() }
+    }
+
     private fun updateFilteredApps() {
         val q = searchQuery.trim().lowercase()
         val configs = appConfigs
         filteredApps =
-            allApps
-                .filter { app ->
+            allAppsLower
+                .filter { (app, nameLower) ->
                     val passFilter =
                         when (filterMode) {
                             FilterMode.ALL -> true
@@ -145,10 +156,15 @@ class AppViewModel(
                     passFilter &&
                         (
                             q.isEmpty() ||
-                                app.name.lowercase().contains(q) ||
+                                nameLower.contains(q) ||
                                 app.packageName.contains(q, ignoreCase = true)
                         )
-                }.sortedWith(compareBy({ app -> if (app.packageName in configs) 0 else 1 }, { it.name.lowercase() }))
+                }.sortedWith(
+                    compareBy(
+                        { (app, _) -> if (app.packageName in configs) 0 else 1 },
+                        { (_, nameLower) -> nameLower },
+                    ),
+                ).map { it.first }
     }
 
     // 内核保存的是 UID → profile；这里映射回包名供界面使用。
@@ -184,22 +200,24 @@ class AppViewModel(
             withContext(Dispatchers.Main) { updateFilteredApps() }
         }
 
-    private fun installedHash(): String =
-        context.packageManager
-            .getInstalledPackages(0)
-            .joinToString("|") {
-                "${it.packageName}:${it.longVersionCode}"
-            }.hashCode()
-            .toString()
-
     private fun appsCacheFile(hash: String) = File(context.cacheDir, "apps_cache_$hash.pb")
 
     suspend fun loadApps(forceRefresh: Boolean = false) =
         withContext(Dispatchers.IO) {
-            val hash = installedHash()
+            val pm = context.packageManager
+            // 只枚举一次：既用来算缓存 key，也用来建列表。0 表示不需要 metaData
+            // （我们用不到），比 GET_META_DATA 少一次 parcel 展开。
+            val packages = pm.getInstalledPackages(0)
+
+            // 与顺序无关的滚动哈希：PM 返回顺序不保证稳定。
+            var hash = packages.size
+            for (p in packages) {
+                hash = hash xor (p.packageName.hashCode() * 31 + p.longVersionCode.hashCode())
+            }
+            val cacheKey = hash.toString()
 
             if (!forceRefresh) {
-                val cacheFile = appsCacheFile(hash)
+                val cacheFile = appsCacheFile(cacheKey)
                 if (cacheFile.exists()) {
                     try {
                         val cached =
@@ -208,7 +226,7 @@ class AppViewModel(
                                 cacheFile.readBytes(),
                             )
                         if (cached.isNotEmpty()) {
-                            allApps = cached
+                            setAllApps(cached)
                             isLoaded = true
                             loadAppConfigs()
                             return@withContext
@@ -219,35 +237,50 @@ class AppViewModel(
                 }
             }
 
-            val pm = context.packageManager
-            allApps =
-                pm
-                    .getInstalledPackages(PackageManager.GET_META_DATA)
-                    .mapNotNull { pkg ->
-                        pkg.applicationInfo?.let { ai ->
-                            AppInfo(
-                                name = ai.loadLabel(pm).toString().takeIf { it.isNotBlank() } ?: pkg.packageName,
-                                packageName = pkg.packageName,
-                                uid = ai.uid,
-                                isSystem = (ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0,
-                                isLaunchable = pm.getLaunchIntentForPackage(pkg.packageName) != null,
-                            )
-                        }
-                    }.sortedBy { it.name.lowercase() }
+            // 一次 queryIntentActivities 拿到所有可启动包名，避免对每个包都调用
+            // getLaunchIntentForPackage（每个都要查 PM，几百个包会明显卡顿）。
+            val launcherIntent =
+                Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            val resolved =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    pm.queryIntentActivities(launcherIntent, PackageManager.ResolveInfoFlags.of(0))
+                } else {
+                    @Suppress("DEPRECATION")
+                    pm.queryIntentActivities(launcherIntent, 0)
+                }
+            val launchable = resolved.mapNotNullTo(HashSet<String>()) { it.activityInfo?.packageName }
+
+            val apps = ArrayList<AppInfo>(packages.size)
+            for (pkg in packages) {
+                val ai = pkg.applicationInfo ?: continue
+                val label = runCatching { ai.loadLabel(pm).toString() }.getOrNull()
+                apps +=
+                    AppInfo(
+                        name = label?.takeIf { it.isNotBlank() } ?: pkg.packageName,
+                        packageName = pkg.packageName,
+                        uid = ai.uid,
+                        isSystem = (ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0,
+                        isLaunchable = pkg.packageName in launchable,
+                    )
+            }
+            apps.sortBy { it.name.lowercase() }
+            setAllApps(apps)
             isLoaded = true
 
             context.cacheDir
                 .listFiles { f ->
                     f.name.startsWith("apps_cache_") &&
                         f.name.endsWith(".pb") &&
-                        f.name != "apps_cache_$hash.pb"
+                        f.name != "apps_cache_$cacheKey.pb"
                 }?.forEach(File::delete)
-            appsCacheFile(hash).writeBytes(
-                proto.encodeToByteArray(
-                    ListSerializer(AppInfo.serializer()),
-                    allApps,
-                ),
-            )
+            runCatching {
+                appsCacheFile(cacheKey).writeBytes(
+                    proto.encodeToByteArray(
+                        ListSerializer(AppInfo.serializer()),
+                        apps,
+                    ),
+                )
+            }
             loadAppConfigs()
         }
 
@@ -643,6 +676,9 @@ private val iconCache =
         ): Int = value.width * value.height * 4
     }
 
+/** 图标最多画到 42dp，超过这个尺寸解码没有意义。 */
+private const val ICON_MAX_PX = 160
+
 @Composable
 fun AppIcon(
     packageName: String,
@@ -655,12 +691,17 @@ fun AppIcon(
         if (iconBitmap == null) {
             withContext(Dispatchers.IO) {
                 try {
-                    val bitmap =
-                        context.packageManager
-                            .getApplicationIcon(packageName)
-                            .toBitmap()
-                            .copy(Bitmap.Config.ARGB_8888, false)
-                            .asImageBitmap()
+                    val drawable = context.packageManager.getApplicationIcon(packageName)
+                    // 按需降采样，避免把大图标整张解到内存里再缩小显示。
+                    val scaled =
+                        if (drawable.intrinsicWidth > ICON_MAX_PX ||
+                            drawable.intrinsicHeight > ICON_MAX_PX
+                        ) {
+                            drawable.toBitmap(ICON_MAX_PX, ICON_MAX_PX)
+                        } else {
+                            drawable.toBitmap()
+                        }
+                    val bitmap = scaled.copy(Bitmap.Config.ARGB_8888, false).asImageBitmap()
                     iconCache.put(packageName, bitmap)
                     iconBitmap = bitmap
                 } catch (_: Exception) {

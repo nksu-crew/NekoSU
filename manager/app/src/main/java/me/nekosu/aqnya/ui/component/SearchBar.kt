@@ -42,6 +42,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeInput
+import dev.chrisbanes.haze.HazePerformanceMode
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.blur.hazeBlur
 
@@ -88,7 +89,11 @@ fun SearchAppBar(
     val hazeStyle = rememberHazeAppBarStyle()
     val hazeModifier =
         if (hazeState != null) {
-            Modifier.hazeBlur(input = HazeInput.Sources(hazeState), style = hazeStyle)
+            Modifier.hazeBlur(
+                input = HazeInput.Sources(hazeState),
+                style = hazeStyle,
+                performanceMode = HazePerformanceMode.Performance,
+            )
         } else {
             Modifier
         }

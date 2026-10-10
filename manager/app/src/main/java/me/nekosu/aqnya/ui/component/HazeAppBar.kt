@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeInput
+import dev.chrisbanes.haze.HazePerformanceMode
 import dev.chrisbanes.haze.HazeProgressive
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.blur.HazeBlurStyle
@@ -65,7 +66,13 @@ fun HazeTopAppBar(
     val style = rememberHazeAppBarStyle()
     TopAppBar(
         title = title,
-        modifier = modifier.hazeBlur(input = HazeInput.Sources(state), style = style),
+        modifier =
+            modifier.hazeBlur(
+                input = HazeInput.Sources(state),
+                style = style,
+                // 顶栏模糊每帧都要抓一层全屏内容，用低保真档换帧率。
+                performanceMode = HazePerformanceMode.Performance,
+            ),
         navigationIcon = navigationIcon,
         actions = actions,
         scrollBehavior = scrollBehavior,

@@ -27,6 +27,8 @@ object NcoreBoot {
     const val BUSYBOX_PATH = "$BIN_DIR/busybox"
 
     private const val BUSYBOX_LIB_NAME = "libbusybox.so"
+    private const val PREFS_NAME = "ncore_boot"
+    private const val KEY_INSTALLED_VERSION = "installed_version"
 
     /** 让 ncore 与自带 busybox 就位；全部成功返回 true。 */
     fun install(context: Context): Boolean {
@@ -36,12 +38,23 @@ object NcoreBoot {
         val busybox = File(context.applicationInfo.nativeLibraryDir, BUSYBOX_LIB_NAME)
         if (!busybox.exists()) return false
 
+        // APK 没升级就不用每次启动都再跑一遍 root 安装：内核在开机时已用管理器
+        // 引导过一次，这里只是升级后刷新二进制，避免每开一次管理器就 fork 一次 su
+        // 并复制约 2MB。
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val version = getAppVersionCode(context)
+        if (version != 0L && prefs.getLong(KEY_INSTALLED_VERSION, -1L) == version) return true
+
         val cmd =
             "${quote(ncore.absolutePath)} install" +
                 " && mkdir -p ${quote(BIN_DIR)}" +
                 " && cp ${quote(busybox.absolutePath)} ${quote(BUSYBOX_PATH)}" +
                 " && chmod 0755 ${quote(BUSYBOX_PATH)}"
-        return RootShell.exec(cmd).code == 0
+        val ok = RootShell.exec(cmd).code == 0
+        if (ok && version != 0L) {
+            prefs.edit().putLong(KEY_INSTALLED_VERSION, version).apply()
+        }
+        return ok
     }
 
     private fun quote(s: String) = "'" + s.replace("'", "'\\''") + "'"

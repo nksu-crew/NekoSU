@@ -1,9 +1,7 @@
 package me.nekosu.aqnya.ui.screens
 
 import android.os.Build
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -36,10 +34,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -149,35 +143,19 @@ fun DeviceInfoCard(modifier: Modifier = Modifier) {
             Triple(Icons.Outlined.Fingerprint,stringResource(id = R.string.finger_print),Build.FINGERPRINT),
         )
 
-    Box(modifier = modifier.clip(RoundedCornerShape(28.dp))) {
-        Box(
-            modifier =
-                Modifier
-                    .matchParentSize()
-                    .background(
-                        brush =
-                            Brush.verticalGradient(
-                                colors =
-                                    listOf(
-                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
-                                        Color.Transparent,
-                                    ),
-                            ),
-                    ).blur(24.dp),
-        )
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(28.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-            colors =
-                CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                ),
-        ) {
-                items.forEach { (icon, title, value) ->
-                    DeviceInfoItem(icon = icon, title = title, value = value)
-                }
+    // 以前卡片背后叠了一层模糊渐变，但卡片本身不透明，那层永远看不见，
+    // 白白每帧跑一次 RenderEffect；这里直接去掉。
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        colors =
+            CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            ),
+    ) {
+        items.forEach { (icon, title, value) ->
+            DeviceInfoItem(icon = icon, title = title, value = value)
         }
     }
 }
