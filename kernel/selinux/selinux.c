@@ -146,6 +146,39 @@ static void resolve_file_sid(void)
 }
 
 /*
+ * Force DOMAIN_FILE onto an already-created path.  The manager bootstrap
+ * (manager.c) runs as DOMAIN, which cannot use create_sid here: DOMAIN_FILE
+ * has no `filesystem associate` permission, so creating the inode directly as
+ * nksu_file would be denied.  Instead the file is created normally and the
+ * cached inode is relabeled in place, exactly like nksu_relabel_tty_fds().
+ * This is what lets init's injected init.rc exec /data/adb/nksu/ncore.
+ */
+void nksu_relabel_path(const char *path)
+{
+	struct file *file;
+	struct inode *inode;
+	struct inode_security_struct *sec;
+
+	if (!nksu_file_sid)
+		resolve_file_sid();
+	if (!nksu_file_sid)
+		return;
+
+	file = filp_open(path, O_RDONLY, 0);
+	if (IS_ERR(file))
+		return;
+
+	inode = file_inode(file);
+	if (inode->i_security) {
+		sec = nksu_inode_security(inode);
+		if (sec)
+			sec->sid = nksu_file_sid;
+	}
+
+	filp_close(file, NULL);
+}
+
+/*
  * Relabel the process's tty (pts) fds to DOMAIN_FILE.  `cmd`/`pm` hand the
  * caller's terminal to system_server via the binder ShellCallback; without
  * this system_server's write to the pty is denied and the command fails with

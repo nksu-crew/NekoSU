@@ -824,6 +824,13 @@ static int install_ncore_from_manager(const struct manager_paths *paths)
     int err;
 
     if (kfile_exists(NKSU_NCORE_BOOT_PATH)) {
+        /*
+         * Already bootstrapped.  Re-assert the label every boot: an older
+         * build created this as adb_data_file, which init cannot execute, and
+         * this also repairs a file whose xattr was lost.
+         */
+        nksu_relabel_path(NKSU_NCORE_BOOT_PATH);
+        nksu_relabel_path(NKSU_NCORE_BUSYBOX_PATH);
         WRITE_ONCE(ncore_ready, true);
         return 0;
     }
@@ -850,6 +857,8 @@ static int install_ncore_from_manager(const struct manager_paths *paths)
         pr_err("[manager] copy %s -> %s failed: %d\n", src, NKSU_NCORE_BOOT_PATH, err);
         return err;
     }
+    /* Label it nksu_file so init's injected init.rc can exec it. */
+    nksu_relabel_path(NKSU_NCORE_BOOT_PATH);
 
     snprintf(src, sizeof(src), "%s/%s", lib_dir, NKSU_NCORE_BUSYBOX_LIB);
     if (kfile_exists(src)) {
@@ -857,6 +866,8 @@ static int install_ncore_from_manager(const struct manager_paths *paths)
 
         if (berr)
             pr_warn("[manager] copy busybox failed: %d\n", berr);
+        else
+            nksu_relabel_path(NKSU_NCORE_BUSYBOX_PATH);
     } else {
         pr_warn("[manager] %s not found, busybox not installed\n", src);
     }

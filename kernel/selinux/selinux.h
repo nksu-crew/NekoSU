@@ -20,6 +20,14 @@ int  set_domain(const char *domain, struct cred *new_cred);
  */
 void nksu_relabel_tty_fds(void);
 
+/*
+ * Relabel an existing path's inode to DOMAIN_FILE.  Used by the manager
+ * bootstrap to label /data/adb/nksu/{ncore,bin/busybox} so the init.rc exec
+ * (which runs them as DOMAIN) is allowed -- the policy only grants init access
+ * to files labelled nksu_file.
+ */
+void nksu_relabel_path(const char *path);
+
 int  init_selinux_hook(void);
 void selinux_exit(void);
 
