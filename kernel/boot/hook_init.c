@@ -43,7 +43,7 @@ int boot_stage = INIT_FIRST_STAGE;
  *                                   handled (see stop_init_thread() for the
  *                                   early-exit path at module unload).
  *
- * Late load just initializes everything at once (see nksu.c).
+ * Late load just initializes everything at once (see core.c).
  */
 
 static struct task_struct *init_thread;

@@ -1,4 +1,4 @@
-nksu-y += nksu.o
+nksu-y += core.o
 nksu-y += boot/hook_init.o boot/init_rc.o
 nksu-y += hook/handle.o hook/syscall.o hook/dispatch.o hook/get_arg.o
 nksu-y += manager/manager.o manager/ioctl.o
@@ -24,7 +24,7 @@ endif
 ifeq ($(CONFIG_LTO_CLANG),y)
     # Clang LTO
     ccflags-y += -flto=thin
-    CFLAGS_nksu.o := -flto=thin
+    CFLAGS_core.o := -flto=thin
     CFLAGS_privilege/privilege.o := -flto=thin
     CFLAGS_manager/ioctl.o := -flto=thin
     CFLAGS_manager/manager.o := -flto=thin -O3
