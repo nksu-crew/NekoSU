@@ -117,7 +117,7 @@ class ModuleViewModel(app: Application) : AndroidViewModel(app) {
                     if (zip == null) {
                         ModuleRepository.Result(-1, "unable to read the selected file")
                     } else {
-                        ModuleRepository.install(zip.absolutePath)
+                        ModuleRepository.install(appContext, zip.absolutePath)
                     }
                 }
             _uiState.update {

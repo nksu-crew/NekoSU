@@ -12,7 +12,10 @@ import kotlinx.serialization.json.Json
  *    `ncore module list --json` 并解析其输出的 JSON（见 [list]）；
  *  - action 脚本的存在性由该 JSON 的 `hasActionScript` 给出，执行同样交给
  *    ncore（`ncore module action <id>`，见 [actionCommand]）；
- *  - 安装 / 启用 / 移除通过 root shell 执行。
+ *  - 安装交给 ncore（`ncore module install <zip>`，见 [install]）：由 ncore
+ *    校验 module.prop、解压到 modules_update/、运行 customize.sh、处理
+ *    metamodule，并在下次开机生效；管理器只负责把所选 zip 交给 ncore。
+ *  - 启用 / 移除通过 root shell 操作标记文件。
  */
 object ModuleRepository {
     private val json =
@@ -71,7 +74,20 @@ object ModuleRepository {
 
     fun uninstall(id: String): Result = exec("rm -rf ${quote("/data/adb/modules/$id")}")
 
-    fun install(zipPath: String): Result = exec(installCommand(zipPath))
+    /**
+     * 用 ncore 安装模块：`ncore module install <zip>`。
+     *
+     * ncore 会完成校验、解压、customize.sh、metamodule 处理与 modules.rc 刷新，
+     * 模块在下次开机生效。输出即 ncore 的进度/错误信息。
+     */
+    fun install(
+        context: Context,
+        zipPath: String,
+    ): Result {
+        val ncore = VendorBootInstaller.ncorePath(context)
+        if (!ncore.exists()) return Result(-1, "ncore not found")
+        return exec("${quote(ncore.absolutePath)} module install ${quote(zipPath)}")
+    }
 
     /** 用 ncore 执行模块的 `action.sh`：`ncore module action <id>`。 */
     fun actionCommand(
@@ -89,33 +105,4 @@ object ModuleRepository {
     }
 
     private fun quote(s: String) = "'" + s.replace("'", "'\\''") + "'"
-
-    private fun installCommand(zipPath: String): String {
-        val zip = quote(zipPath)
-        return """
-            set -e
-            ZIP=$zip
-            TMP=/data/adb/nksu-install
-            MODROOT=/data/adb/modules
-            rm -rf "${'$'}TMP"
-            mkdir -p "${'$'}TMP"
-            unzip -o "${'$'}ZIP" -d "${'$'}TMP" >/dev/null 2>&1
-            [ -f "${'$'}TMP/module.prop" ] || { echo "invalid module: missing module.prop"; exit 1; }
-            ID=$(sed -n 's/^id=//p' "${'$'}TMP/module.prop" | head -n1 | tr -d '\r')
-            [ -n "${'$'}ID" ] || { echo "invalid module: missing id"; exit 1; }
-            case "${'$'}ID" in *[!A-Za-z0-9._-]*) echo "invalid module id: ${'$'}ID"; exit 1;; esac
-            if [ -f "${'$'}TMP/customize.sh" ]; then
-              echo "running customize.sh"
-              ( cd "${'$'}TMP" && MODPATH="${'$'}TMP" sh "${'$'}TMP/customize.sh" ) || { echo "customize.sh failed"; exit 1; }
-            fi
-            DEST="${'$'}MODROOT/${'$'}ID"
-            rm -rf "${'$'}DEST"
-            mkdir -p "${'$'}DEST"
-            cp -a "${'$'}TMP/." "${'$'}DEST/"
-            chmod -R 0755 "${'$'}DEST" 2>/dev/null || true
-            chcon -R u:object_r:system_file:s0 "${'$'}DEST" 2>/dev/null || true
-            rm -rf "${'$'}TMP"
-            echo "module ${'$'}ID installed"
-        """.trimIndent()
-    }
 }
