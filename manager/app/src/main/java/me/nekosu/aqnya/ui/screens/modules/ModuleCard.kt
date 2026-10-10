@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.ButtonDefaults
@@ -102,6 +103,9 @@ internal fun ModuleCard(
     val pendingRemoval = module.remove
     val actionEnabled = !pendingRemoval && module.enabled
     val textDecoration = if (pendingRemoval) TextDecoration.LineThrough else null
+    // 操作按钮多于一个时只留图标，避免底栏被文字撑满（与 KernelSU 一致）。
+    val actionCount = listOf(module.hasActionScript, module.hasWebUi, updateInfo != null).count { it }
+    val showActionText = actionCount <= 1
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -216,14 +220,16 @@ internal fun ModuleCard(
                             ) {
                                 Icon(
                                     modifier = Modifier.size(20.dp),
-                                    imageVector = Icons.Outlined.Refresh,
+                                    imageVector = Icons.Outlined.Download,
                                     contentDescription = null,
                                 )
-                                Text(
-                                    modifier = Modifier.padding(start = 7.dp),
-                                    text = stringResource(R.string.modules_update_action),
-                                    style = MaterialTheme.typography.labelMedium,
-                                )
+                                if (showActionText) {
+                                    Text(
+                                        modifier = Modifier.padding(start = 7.dp),
+                                        text = stringResource(R.string.modules_update_action),
+                                        style = MaterialTheme.typography.labelMedium,
+                                    )
+                                }
                             }
                         }
                         if (module.hasActionScript) {
@@ -237,11 +243,13 @@ internal fun ModuleCard(
                                     imageVector = Icons.Outlined.PlayArrow,
                                     contentDescription = null,
                                 )
-                                Text(
-                                    modifier = Modifier.padding(start = 7.dp),
-                                    text = stringResource(R.string.modules_action),
-                                    style = MaterialTheme.typography.labelMedium,
-                                )
+                                if (showActionText) {
+                                    Text(
+                                        modifier = Modifier.padding(start = 7.dp),
+                                        text = stringResource(R.string.modules_action),
+                                        style = MaterialTheme.typography.labelMedium,
+                                    )
+                                }
                             }
                         }
                         if (module.hasWebUi) {
@@ -255,11 +263,13 @@ internal fun ModuleCard(
                                     imageVector = Icons.Outlined.Code,
                                     contentDescription = null,
                                 )
-                                Text(
-                                    modifier = Modifier.padding(start = 7.dp),
-                                    text = stringResource(R.string.modules_webui),
-                                    style = MaterialTheme.typography.labelMedium,
-                                )
+                                if (showActionText) {
+                                    Text(
+                                        modifier = Modifier.padding(start = 7.dp),
+                                        text = stringResource(R.string.modules_webui),
+                                        style = MaterialTheme.typography.labelMedium,
+                                    )
+                                }
                             }
                         }
                     }
