@@ -121,7 +121,9 @@ object RootShell {
         val writer = shellWriter ?: return null
         val queue = shellQueue ?: return null
         return try {
-            writer.write("echo $B64_BEGIN; base64 -w0 ${quote(path)} 2>/dev/null; __rc=\$?; echo; echo ${B64_END}\$__rc\n")
+            writer.write(
+                withPath("echo $B64_BEGIN; base64 -w0 ${quote(path)} 2>/dev/null; __rc=\$?; echo; echo ${B64_END}\$__rc") + "\n",
+            )
             writer.flush()
 
             val payload = StringBuilder()
@@ -155,7 +157,7 @@ object RootShell {
     private fun oneShotRead(path: String): ByteArray? =
         try {
             val process =
-                ProcessBuilder(SU_PATH, "-c", "cat ${quote(path)}")
+                ProcessBuilder(SU_PATH, "-c", withPath("cat ${quote(path)}"))
                     .redirectErrorStream(false)
                     .start()
             val bytes = process.inputStream.readBytes()
