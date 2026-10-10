@@ -2,8 +2,9 @@
 #ifndef _NKSU_SELINUX_SELINUX_H
 #define _NKSU_SELINUX_SELINUX_H
 
-#define DOMAIN     "nksu"
-#define DOMAIN_CTX "u:r:" DOMAIN ":s0"
+#define DOMAIN      "nksu"
+#define DOMAIN_FILE "nksu_file"
+#define DOMAIN_CTX  "u:r:" DOMAIN ":s0"
 
 void setenforce(bool status);
 bool getenforce(void);

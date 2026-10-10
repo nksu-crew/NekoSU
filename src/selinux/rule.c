@@ -21,10 +21,10 @@
 #include <linux/errno.h>
 #include <linux/version.h>
 #include <linux/slab.h>
+#include <linux/mm.h>
 #include <linux/kernel.h>
 #include <linux/mutex.h>
 #include <linux/rcupdate.h>
-#include <linux/sort.h>
 #include <fmac.h>
 
 #include "ss/policydb.h"
