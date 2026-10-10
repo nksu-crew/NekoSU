@@ -15,7 +15,9 @@
 #include <sys/poll.h>
 #include <sys/prctl.h>
 #include <sys/utsname.h>
+#include <sys/wait.h>
 #include <unistd.h>
+#include <string>
 #include <vector>
 
 #include "ioctl.h"
@@ -512,6 +514,93 @@ static jstring listProfiles(JNIEnv *env, jobject thiz) {
   return env->NewStringUTF(reinterpret_cast<const char *>(msg->data));
 }
 
+/*
+ * Read a file with root privileges, purely in userspace: fork `su -c cat` and
+ * return its stdout as a byte array.  Used by the module WebUI to serve
+ * root-only files without a shell round-trip in Kotlin.  Returns null on
+ * failure (missing file, no root, ...).
+ */
+static jbyteArray readFile(JNIEnv *env, jobject thiz, jstring pathStr) {
+  (void)thiz;
+  if (pathStr == nullptr)
+    return nullptr;
+
+  const char *path = env->GetStringUTFChars(pathStr, nullptr);
+  if (path == nullptr)
+    return nullptr;
+
+  std::string escaped;
+  for (const char *p = path; *p != '\0'; ++p) {
+    if (*p == '\'')
+      escaped += "'\\''";
+    else
+      escaped += *p;
+  }
+  env->ReleaseStringUTFChars(pathStr, path);
+
+  const std::string command =
+      "PATH=/sbin:/system/sbin:/system/bin:/system/xbin; export PATH; cat '" +
+      escaped + "'";
+
+  int pipefd[2];
+  if (pipe(pipefd) != 0)
+    return nullptr;
+
+  const pid_t pid = fork();
+  if (pid < 0) {
+    close(pipefd[0]);
+    close(pipefd[1]);
+    return nullptr;
+  }
+
+  if (pid == 0) {
+    // Only async-signal-safe calls here, before exec.
+    dup2(pipefd[1], STDOUT_FILENO);
+    close(pipefd[0]);
+    close(pipefd[1]);
+    const int devnull = open("/dev/null", O_WRONLY | O_CLOEXEC);
+    if (devnull >= 0) {
+      dup2(devnull, STDERR_FILENO);
+      close(devnull);
+    }
+    execl("/system/bin/su", "su", "-c", command.c_str(),
+          static_cast<char *>(nullptr));
+    _exit(127);
+  }
+
+  close(pipefd[1]);
+
+  std::vector<uint8_t> data;
+  uint8_t buffer[65536];
+  for (;;) {
+    const ssize_t n = read(pipefd[0], buffer, sizeof(buffer));
+    if (n > 0) {
+      data.insert(data.end(), buffer, buffer + n);
+    } else if (n == 0) {
+      break;
+    } else if (errno == EINTR) {
+      continue;
+    } else {
+      break;
+    }
+  }
+  close(pipefd[0]);
+
+  int status = 0;
+  while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+  }
+
+  if (!WIFEXITED(status) || WEXITSTATUS(status) != 0 || data.empty())
+    return nullptr;
+
+  jbyteArray result = env->NewByteArray(static_cast<jsize>(data.size()));
+  if (result != nullptr) {
+    env->SetByteArrayRegion(result, 0, static_cast<jsize>(data.size()),
+                            reinterpret_cast<const jbyte *>(data.data()));
+  }
+  return result;
+}
+
 static void helloLog(JNIEnv *env, jobject thiz) {
   (void)env;
   (void)thiz;
@@ -553,6 +642,7 @@ const JNINativeMethod gMethods[] = {
     {"addRule", "(Ljava/lang/String;J)I", (void *)ncore::addRule},
     {"delRule", "(Ljava/lang/String;)I", (void *)ncore::delRule},
     {"listProfiles", "()Ljava/lang/String;", (void *)ncore::listProfiles},
+    {"readFile", "(Ljava/lang/String;)[B", (void *)ncore::readFile},
     {"helloLog", "()V", (void *)ncore::helloLog},
     {"isGki", "()Z", (void *)ncore::isGki},
     {"kernelVersion", "()Ljava/lang/String;", (void *)ncore::kernelVersion},

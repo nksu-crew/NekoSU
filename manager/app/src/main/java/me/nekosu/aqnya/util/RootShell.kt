@@ -1,5 +1,6 @@
 package me.nekosu.aqnya.util
 
+import me.nekosu.aqnya.ncore
 import java.util.concurrent.TimeUnit
 
 /**
@@ -42,10 +43,17 @@ object RootShell {
     /**
      * 以 root 读取一个文件的原始字节（供模块 WebUI 提供静态资源）。
      *
-     * 直接 `su -c cat` 拿 stdout 的字节流即可，二进制安全；不要走 [exec]（那条
-     * 路径按文本解码会破坏二进制资源）。
+     * 优先走 JNI（[ncore.readFile]，在 native 侧 fork `su -c cat`，省去 JVM 的
+     * 进程封装）；native 不可用时退回 Kotlin 的 `su -c cat`。两条路径都返回原始
+     * 字节，二进制安全。
      */
-    fun readFileBytes(path: String): ByteArray? =
+    fun readFileBytes(path: String): ByteArray? {
+        val fromJni = runCatching { ncore.readFile(path) }.getOrNull()
+        if (fromJni != null && fromJni.isNotEmpty()) return fromJni
+        return readFileBytesShell(path)
+    }
+
+    private fun readFileBytesShell(path: String): ByteArray? =
         try {
             val process =
                 ProcessBuilder(SU_PATH, "-c", withPath("cat ${quote(path)}"))

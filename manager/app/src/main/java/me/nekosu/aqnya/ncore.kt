@@ -63,6 +63,8 @@ object ncore {
 
     external fun listProfiles(): String?
 
+    external fun readFile(path: String): ByteArray?
+
     external fun isGki(): Boolean
     external fun kernelVersion(): String?
 }
