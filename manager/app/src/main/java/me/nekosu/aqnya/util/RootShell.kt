@@ -99,6 +99,7 @@ object RootShell {
 
             val payload = StringBuilder()
             var started = false
+            var result: ByteArray? = null
             while (true) {
                 val line = reader.readLine() ?: return null
                 if (!started) {
@@ -108,11 +109,12 @@ object RootShell {
                 if (line.startsWith(B64_END)) {
                     val code = line.removePrefix(B64_END).trim().toIntOrNull() ?: return null
                     if (code != 0) return null
-                    if (payload.isEmpty()) return ByteArray(0)
-                    return Base64.decode(payload.toString(), Base64.DEFAULT)
+                    result = if (payload.isEmpty()) ByteArray(0) else Base64.decode(payload.toString(), Base64.DEFAULT)
+                    break
                 }
                 payload.append(line)
             }
+            result
         } catch (e: Exception) {
             killShell()
             null
