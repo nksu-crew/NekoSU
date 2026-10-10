@@ -8,6 +8,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
 import android.util.Log
+import android.view.View
 import android.webkit.ConsoleMessage
 import android.webkit.JsPromptResult
 import android.webkit.JsResult
@@ -262,8 +263,36 @@ internal fun WebUIScreen(
                         "ksu",
                     )
 
-                    loadUrl("https://$WEBUI_DOMAIN/index.html")
                     currentWebView = this
+
+                    // AndroidView 的 factory 在测量之前运行，此时 WebView 尺寸为
+                    // 0×0；若立刻 loadUrl，SPA 会按 0×0 视口渲染成空白。等拿到非零
+                    // 尺寸再加载（与 KernelSU 相同）。
+                    val homePage = "https://$WEBUI_DOMAIN/index.html"
+                    if (width > 0 && height > 0) {
+                        loadUrl(homePage)
+                    } else {
+                        addOnLayoutChangeListener(
+                            object : View.OnLayoutChangeListener {
+                                override fun onLayoutChange(
+                                    v: View,
+                                    left: Int,
+                                    top: Int,
+                                    right: Int,
+                                    bottom: Int,
+                                    oldLeft: Int,
+                                    oldTop: Int,
+                                    oldRight: Int,
+                                    oldBottom: Int,
+                                ) {
+                                    if (v.width > 0 && v.height > 0) {
+                                        v.removeOnLayoutChangeListener(this)
+                                        (v as WebView).loadUrl(homePage)
+                                    }
+                                }
+                            },
+                        )
+                    }
                 }
             },
         )
