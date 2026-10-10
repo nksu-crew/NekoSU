@@ -7,6 +7,8 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
+import android.util.Log
+import android.webkit.ConsoleMessage
 import android.webkit.JsPromptResult
 import android.webkit.JsResult
 import android.webkit.ValueCallback
@@ -179,7 +181,10 @@ internal fun WebUIScreen(
                                 request: WebResourceRequest,
                                 error: WebResourceError,
                             ) {
-                                if (request.isForMainFrame) loading = false
+                                if (request.isForMainFrame) {
+                                    loading = false
+                                    Log.w("NksuWebUI", "load error: ${error.description} for ${request.url}")
+                                }
                             }
                         }
 
@@ -235,6 +240,14 @@ internal fun WebUIScreen(
                                 fileLauncher.launch(intent)
                                 return true
                             }
+
+                            override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
+                                Log.d(
+                                    "NksuWebUI",
+                                    "${consoleMessage?.message()} @ ${consoleMessage?.sourceId()}:${consoleMessage?.lineNumber()}",
+                                )
+                                return true
+                            }
                         }
 
                     addJavascriptInterface(
@@ -247,7 +260,7 @@ internal fun WebUIScreen(
                         "ksu",
                     )
 
-                    loadUrl("https://$WEBUI_DOMAIN/")
+                    loadUrl("https://$WEBUI_DOMAIN/index.html")
                     currentWebView = this
                 }
             },

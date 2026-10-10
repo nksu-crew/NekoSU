@@ -1,5 +1,6 @@
 package me.nekosu.aqnya.ui.webui
 
+import android.util.Log
 import android.webkit.WebResourceResponse
 import androidx.webkit.WebViewAssetLoader
 import me.nekosu.aqnya.util.RootShell
@@ -48,8 +49,12 @@ class ModulePathHandler(
             target = target.resolve("index.html")
             bytes = RootShell.readFileBytes(target.toFile().absolutePath)
         }
-        if (bytes == null) return notFound()
+        if (bytes == null) {
+            Log.w("NksuWebUI", "404 webui:$path (root=$webRoot)")
+            return notFound()
+        }
 
+        Log.d("NksuWebUI", "serve webui:$path (${bytes.size} bytes)")
         return WebResourceResponse(
             MimeUtil.guess(target.fileName?.toString().orEmpty()),
             null,

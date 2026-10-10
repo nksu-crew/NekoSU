@@ -31,5 +31,12 @@
 
 -keep class me.nekosu.aqnya.ncore { *; }
 
+# WebUI: the module page calls `window.ksu.*` through the WebView JavaBridge,
+# which resolves the annotated methods reflectively.  Keep them from R8.
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+-keep class me.nekosu.aqnya.ui.webui.WebViewBridge { *; }
+
 -keepattributes RuntimeVisibleAnnotations, RuntimeVisibleParameterAnnotations
 -keepattributes AnnotationDefault, Signature, InnerClasses, EnclosingMethod

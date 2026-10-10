@@ -30,7 +30,9 @@ class WebViewBridge(
 
     private fun eval(js: String) {
         val webView = webViewProvider() ?: return
-        mainHandler.post { webView.evaluateJavascript(js, null) }
+        // evaluateJavascript() 期望纯 JS，去掉 `javascript:` 前缀（保留它只是个 label，能跑但不规范）。
+        val code = if (js.startsWith("javascript:")) js.substring("javascript:".length) else js
+        mainHandler.post { webView.evaluateJavascript(code, null) }
     }
 
     /** 同步执行一条 root 命令，返回合并输出。 */

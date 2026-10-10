@@ -6,6 +6,8 @@ import java.io.BufferedWriter
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.io.Writer
+import java.util.concurrent.BlockingQueue
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 
 /**
@@ -61,20 +63,40 @@ object RootShell {
 
     private const val B64_BEGIN = "__NKSU_B64_BEGIN__"
     private const val B64_END = "__NKSU_B64_END__"
+    private const val SHELL_EOF = "__NKSU_SHELL_EOF__"
+    private const val SHELL_READ_TIMEOUT_MS = 5000L
 
     private val shellLock = Any()
     private var shellProcess: Process? = null
     private var shellWriter: Writer? = null
-    private var shellReader: BufferedReader? = null
+    private var shellQueue: BlockingQueue<String>? = null
 
     private fun ensureShell(): Boolean {
         val existing = shellProcess
         if (existing != null && existing.isAlive) return true
         return try {
             val process = ProcessBuilder(SU_PATH).redirectErrorStream(true).start()
+            val queue = LinkedBlockingQueue<String>()
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            val thread =
+                Thread {
+                    try {
+                        while (true) {
+                            val line = reader.readLine() ?: break
+                            queue.put(line)
+                        }
+                    } catch (_: Exception) {
+                        // stream closed
+                    } finally {
+                        runCatching { queue.put(SHELL_EOF) }
+                    }
+                }
+            thread.isDaemon = true
+            thread.start()
+
             shellProcess = process
             shellWriter = BufferedWriter(OutputStreamWriter(process.outputStream))
-            shellReader = BufferedReader(InputStreamReader(process.inputStream))
+            shellQueue = queue
             true
         } catch (e: Exception) {
             killShell()
@@ -86,22 +108,25 @@ object RootShell {
         runCatching { shellProcess?.destroy() }
         shellProcess = null
         shellWriter = null
-        shellReader = null
+        shellQueue = null
     }
 
     private fun persistentRead(path: String): ByteArray? {
         if (!ensureShell()) return null
         val writer = shellWriter ?: return null
-        val reader = shellReader ?: return null
+        val queue = shellQueue ?: return null
         return try {
             writer.write("echo $B64_BEGIN; base64 -w0 ${quote(path)} 2>/dev/null; __rc=\$?; echo; echo ${B64_END}\$__rc\n")
             writer.flush()
 
             val payload = StringBuilder()
             var started = false
-            var result: ByteArray? = null
             while (true) {
-                val line = reader.readLine() ?: return null
+                val line = queue.poll(SHELL_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                if (line == null || line == SHELL_EOF) {
+                    killShell()
+                    return null
+                }
                 if (!started) {
                     if (line == B64_BEGIN) started = true
                     continue
@@ -109,12 +134,10 @@ object RootShell {
                 if (line.startsWith(B64_END)) {
                     val code = line.removePrefix(B64_END).trim().toIntOrNull() ?: return null
                     if (code != 0) return null
-                    result = if (payload.isEmpty()) ByteArray(0) else Base64.decode(payload.toString(), Base64.DEFAULT)
-                    break
+                    return if (payload.isEmpty()) ByteArray(0) else Base64.decode(payload.toString(), Base64.DEFAULT)
                 }
                 payload.append(line)
             }
-            result
         } catch (e: Exception) {
             killShell()
             null
