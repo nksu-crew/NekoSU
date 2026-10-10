@@ -3,15 +3,19 @@
 
 #include <linux/types.h>
 #include <linux/sched.h>
+#include <linux/string.h>
 #include <asm/ptrace.h>
 
-// tools/get_arg.c
+// hook/get_arg.c
 
 #define MAX_ARG_CNT   64
 #define MAX_ARG_LEN   256
 
-#define argv_eq(buf, n, buflen, target) \
-    ((n) > 0 && (size_t)(n) < (buflen) && strcmp((buf), (target)) == 0)
+static inline bool argv_eq(const char *buf, int n, size_t buflen,
+                           const char *target)
+{
+    return n > 0 && (size_t)n < buflen && strcmp(buf, target) == 0;
+}
 
 int get_argvx(struct pt_regs *regs, unsigned int argno,
               unsigned int idx, char *buf, size_t len);

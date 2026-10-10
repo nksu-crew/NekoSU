@@ -194,7 +194,10 @@ static bool rule_remove_avtab_node(struct policydb *db, struct avtab_node *node)
 }
 
 /* invert is adding rules for auditdeny; in other cases it removes rules */
-#define rule_strip_av(effect, invert) ((effect == AVTAB_AUDITDENY) == !(invert))
+static inline bool rule_strip_av(int effect, bool invert)
+{
+	return (effect == AVTAB_AUDITDENY) == !invert;
+}
 
 #define for_each_htable(htab, cur)                       \
 	for (int _i = 0; _i < (htab).size; _i++)         \
@@ -306,10 +309,25 @@ static bool rule_add(struct policydb *db, const char *s, const char *t,
 
 /* ---- xperms ---- */
 
-#define ioctl_driver(x) ((x) >> 8 & 0xFF)
-#define ioctl_func(x) ((x) & 0xFF)
-#define xperm_set(x, p) ((p)[(x) >> 5] |= (1 << ((x) & 0x1f)))
-#define xperm_clear(x, p) ((p)[(x) >> 5] &= ~(1 << ((x) & 0x1f)))
+static inline u32 ioctl_driver(u32 x)
+{
+	return (x >> 8) & 0xFF;
+}
+
+static inline u32 ioctl_func(u32 x)
+{
+	return x & 0xFF;
+}
+
+static inline void xperm_set(u32 x, u32 *p)
+{
+	p[x >> 5] |= 1U << (x & 0x1f);
+}
+
+static inline void xperm_clear(u32 x, u32 *p)
+{
+	p[x >> 5] &= ~(1U << (x & 0x1f));
+}
 
 static void rule_add_xperm_raw(struct policydb *db, struct type_datum *src,
 			       struct type_datum *tgt, struct class_datum *cls,
