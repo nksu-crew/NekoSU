@@ -48,6 +48,9 @@ typeof(kernel_wait) *nksu_kernel_wait;
 typeof(flush_signal_handlers) *nksu_flush_signal_handlers;
 
 typeof(selinux_state) *nksu_selinux_state;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
+typeof(selinux_blob_sizes) *nksu_selinux_blob_sizes;
+#endif
 typeof(init_nsproxy) *nksu_init_nsproxy;
 typeof(__set_fixmap) *nksu___set_fixmap;
 typeof(copy_to_kernel_nofault) *nksu_copy_to_kernel_nofault;
@@ -77,6 +80,9 @@ int nksu_symbol_compat_init(void)
 		     "selinux_status_update_policyload");
 	NKSU_RESOLVE(nksu_security_context_to_sid, "security_context_to_sid");
 	NKSU_RESOLVE(nksu_selinux_state, "selinux_state");
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
+	NKSU_RESOLVE(nksu_selinux_blob_sizes, "selinux_blob_sizes");
+#endif
 	NKSU_RESOLVE(nksu_init_nsproxy, "init_nsproxy");
 
 	NKSU_RESOLVE(nksu_symtab_search, "symtab_search");
@@ -131,6 +137,9 @@ void nksu_symbol_compat_exit(void)
 	nksu_selinux_status_update_policyload = NULL;
 	nksu_security_context_to_sid = NULL;
 	nksu_selinux_state = NULL;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
+	nksu_selinux_blob_sizes = NULL;
+#endif
 	nksu_init_nsproxy = NULL;
 	nksu_symtab_search = NULL;
 	nksu_symtab_insert = NULL;

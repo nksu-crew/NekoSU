@@ -92,6 +92,9 @@ extern typeof(flush_signal_handlers) *nksu_flush_signal_handlers;
 
 /* data symbol (pointer, dereferenced by the macro) */
 extern typeof(selinux_state) *nksu_selinux_state;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
+extern typeof(selinux_blob_sizes) *nksu_selinux_blob_sizes;
+#endif
 extern typeof(init_nsproxy) *nksu_init_nsproxy;
 
 extern typeof(__set_fixmap) *nksu___set_fixmap;
@@ -135,6 +138,9 @@ extern typeof(copy_to_kernel_nofault) *nksu_copy_to_kernel_nofault;
 #define kernel_wait                      nksu_kernel_wait
 #define flush_signal_handlers            nksu_flush_signal_handlers
 #define selinux_state                    (*nksu_selinux_state)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
+#define selinux_blob_sizes               (*nksu_selinux_blob_sizes)
+#endif
 #define init_nsproxy                     (*nksu_init_nsproxy)
 #define __set_fixmap nksu___set_fixmap
 #define copy_to_kernel_nofault           nksu_copy_to_kernel_nofault

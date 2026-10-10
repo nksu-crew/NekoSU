@@ -55,6 +55,38 @@ bool getenforce(void)
 }
 
 /*
+ * SELinux stores its structs at an LSM offset inside cred->security /
+ * inode->i_security, not at the start.  The kernel's selinux_cred() /
+ * selinux_inode() accessors add selinux_blob_sizes.lbs_*, but using them
+ * would create a relocation against the unexported selinux_blob_sizes and
+ * the module would fail to load.  Resolve the symbol through the compat
+ * layer and add the offsets ourselves.
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
+static struct task_security_struct *nksu_cred_security(const struct cred *cred)
+{
+	return (struct task_security_struct *)((char *)cred->security +
+					       selinux_blob_sizes.lbs_cred);
+}
+
+static struct inode_security_struct *nksu_inode_security(const struct inode *inode)
+{
+	return (struct inode_security_struct *)((char *)inode->i_security +
+						selinux_blob_sizes.lbs_inode);
+}
+#else
+static struct task_security_struct *nksu_cred_security(const struct cred *cred)
+{
+	return (struct task_security_struct *)cred->security;
+}
+
+static struct inode_security_struct *nksu_inode_security(const struct inode *inode)
+{
+	return (struct inode_security_struct *)inode->i_security;
+}
+#endif
+
+/*
  * Switch a cred's security context to the given domain.
  * Old SID is saved in ->osid so we can restore it later.
  * See selinux_bprm_committing_creds() for the canonical pattern.
@@ -77,11 +109,7 @@ int set_domain(const char *domain, struct cred *new_cred)
 	}
 
 	if (new_cred->security) {
-		/*
-		 * Address the SELinux blob through the accessor: it lives at
-		 * an LSM offset inside cred->security, not at the start.
-		 */
-		struct task_security_struct *tsec = selinux_cred(new_cred);
+		struct task_security_struct *tsec = nksu_cred_security(new_cred);
 
 		tsec->osid          = tsec->sid;
 		tsec->sid           = newsid;
@@ -142,19 +170,10 @@ void nksu_relabel_tty_fds(void)
 		inode = file_inode(file);
 		if (inode && inode->i_sb &&
 		    inode->i_sb->s_magic == DEVPTS_SUPER_MAGIC) {
-			/*
-			 * The SELinux inode blob lives at an LSM offset inside
-			 * inode->i_security; addressing it directly would write
-			 * past the struct and corrupt isec->list (a later
-			 * inode free then hits list_del corruption).  Use the
-			 * accessor, as KernelSU's ksu_handle_devpts does.
-			 */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
-			struct inode_security_struct *sec = selinux_inode(inode);
-#else
-			struct inode_security_struct *sec =
-				(struct inode_security_struct *)inode->i_security;
-#endif
+			struct inode_security_struct *sec = NULL;
+
+			if (inode->i_security)
+				sec = nksu_inode_security(inode);
 
 			if (sec) {
 				sec->sid = nksu_file_sid;
