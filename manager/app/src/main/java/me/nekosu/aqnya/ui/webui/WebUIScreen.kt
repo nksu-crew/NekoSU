@@ -52,6 +52,8 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.graphics.drawable.toBitmap
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.webkit.WebViewAssetLoader
 import me.nekosu.aqnya.R
 import java.io.ByteArrayInputStream
@@ -244,6 +246,8 @@ internal fun WebUIScreen(
                         moduleId = moduleId,
                         webViewProvider = { webViewRef[0] },
                         onExit = onExit,
+                        onEdgeToEdge = { insetsEnabled.value = it },
+                        onFullScreen = { enable -> applyFullScreen(context as? Activity, enable) },
                     ),
                     "ksu",
                 )
@@ -420,6 +424,21 @@ private fun JsDialogHost(
                 },
             )
         }
+    }
+}
+
+/** `ksu.fullScreen(true/false)`：显示/隐藏系统栏。 */
+private fun applyFullScreen(
+    activity: Activity?,
+    enable: Boolean,
+) {
+    val window = activity?.window ?: return
+    val controller = WindowInsetsControllerCompat(window, window.decorView)
+    if (enable) {
+        controller.hide(WindowInsetsCompat.Type.systemBars())
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+    } else {
+        controller.show(WindowInsetsCompat.Type.systemBars())
     }
 }
 

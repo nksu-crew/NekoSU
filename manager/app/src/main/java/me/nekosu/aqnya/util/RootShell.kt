@@ -67,6 +67,76 @@ object RootShell {
         }
     }
 
+    /** 一次 root 命令的结果，stdout / stderr 分开。 */
+    data class Output(
+        val code: Int,
+        val stdout: String,
+        val stderr: String,
+    )
+
+    /** 执行 root 命令，stdout / stderr 分开返回（供 WebUI 的 exec API）。 */
+    fun execSplit(cmd: String): Output {
+        val full = withPath(cmd)
+        return try {
+            val process = ProcessBuilder(SU_PATH, "-c", full).redirectErrorStream(false).start()
+            val stdout = StringBuilder()
+            val stderr = StringBuilder()
+            val outThread =
+                Thread {
+                    runCatching {
+                        process.inputStream.bufferedReader().useLines { it.forEach { l -> stdout.append(l).append('\n') } }
+                    }
+                }
+            val errThread =
+                Thread {
+                    runCatching {
+                        process.errorStream.bufferedReader().useLines { it.forEach { l -> stderr.append(l).append('\n') } }
+                    }
+                }
+            outThread.start()
+            errThread.start()
+            val code = process.waitFor()
+            outThread.join(2000)
+            errThread.join(2000)
+            Output(code, stdout.toString(), stderr.toString())
+        } catch (e: Exception) {
+            Output(-1, "", e.message.orEmpty())
+        }
+    }
+
+    /** 执行 root 命令，stdout / stderr 分开逐行回调，返回退出码（供 WebUI 的 spawn API）。 */
+    fun execStreamingSplit(
+        cmd: String,
+        onStdout: (String) -> Unit,
+        onStderr: (String) -> Unit,
+    ): Int {
+        val full = withPath(cmd)
+        return try {
+            val process = ProcessBuilder(SU_PATH, "-c", full).redirectErrorStream(false).start()
+            val outThread =
+                Thread {
+                    runCatching {
+                        process.inputStream.bufferedReader().useLines { it.forEach(onStdout) }
+                    }
+                }
+            val errThread =
+                Thread {
+                    runCatching {
+                        process.errorStream.bufferedReader().useLines { it.forEach(onStderr) }
+                    }
+                }
+            outThread.start()
+            errThread.start()
+            val code = process.waitFor()
+            outThread.join(2000)
+            errThread.join(2000)
+            code
+        } catch (e: Exception) {
+            onStderr("ERROR: ${e.message}")
+            -1
+        }
+    }
+
     /** su 环境可能没有可用的 PATH，显式补齐 toybox 等系统工具。 */
     private fun withPath(cmd: String): String =
         "PATH=/sbin:/system/sbin:/system/bin:/system/xbin; export PATH; $cmd"

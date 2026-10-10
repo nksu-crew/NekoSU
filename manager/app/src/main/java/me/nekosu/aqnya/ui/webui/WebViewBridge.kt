@@ -25,6 +25,8 @@ class WebViewBridge(
     private val moduleId: String,
     private val webViewProvider: () -> WebView?,
     private val onExit: () -> Unit,
+    private val onEdgeToEdge: (Boolean) -> Unit = {},
+    private val onFullScreen: (Boolean) -> Unit = {},
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -45,12 +47,7 @@ class WebViewBridge(
         cmd: String,
         callbackFunc: String,
     ) {
-        val result = RootShell.exec(cmd)
-        eval(
-            "javascript:(function(){try{${callbackFunc}(${result.code},${
-                JSONObject.quote(result.output)
-            },'');}catch(e){console.error(e);}})();",
-        )
+        execCallback(cmd, callbackFunc)
     }
 
     @JavascriptInterface
@@ -62,15 +59,22 @@ class WebViewBridge(
         val sb = StringBuilder()
         applyOptions(sb, options)
         sb.append(cmd)
-        val result = RootShell.exec(sb.toString())
+        execCallback(sb.toString(), callbackFunc)
+    }
+
+    private fun execCallback(
+        cmd: String,
+        callbackFunc: String,
+    ) {
+        val result = RootShell.execSplit(cmd)
         eval(
             "javascript:(function(){try{${callbackFunc}(${result.code},${
-                JSONObject.quote(result.output)
-            },'');}catch(e){console.error(e);}})();",
+                JSONObject.quote(result.stdout)
+            },${JSONObject.quote(result.stderr)});}catch(e){console.error(e);}})();",
         )
     }
 
-    /** 后台执行并流式回填 stdout/stderr，最后发出 exit。 */
+    /** 后台执行并流式回填 stdout/stderr，最后发出 exit（失败再发 error）。 */
     @JavascriptInterface
     fun spawn(
         command: String,
@@ -90,16 +94,38 @@ class WebViewBridge(
         val full = sb.toString()
 
         Thread {
+            val stderr = StringBuilder()
             val code =
-                RootShell.execStreaming(full) { line ->
-                    eval(
-                        "javascript:(function(){try{${callbackFunc}.stdout.emit('data',${
-                            JSONObject.quote(line)
-                        });}catch(e){console.error(e);}})();",
-                    )
-                }
+                RootShell.execStreamingSplit(
+                    full,
+                    onStdout = { line -> emitStream(callbackFunc, "stdout", line) },
+                    onStderr = { line ->
+                        stderr.append(line).append('\n')
+                        emitStream(callbackFunc, "stderr", line)
+                    },
+                )
             eval("javascript:(function(){try{${callbackFunc}.emit('exit',${code});}catch(e){console.error(e);}})();")
+            if (code != 0) {
+                val quoted = JSONObject.quote(stderr.toString())
+                eval(
+                    "javascript:(function(){try{var err=new Error($quoted);" +
+                        "err.exitCode=${code};err.message=$quoted;" +
+                        "${callbackFunc}.emit('error',err);}catch(e){console.error(e);}})();",
+                )
+            }
         }.start()
+    }
+
+    private fun emitStream(
+        callbackFunc: String,
+        stream: String,
+        line: String,
+    ) {
+        eval(
+            "javascript:(function(){try{${callbackFunc}.${stream}.emit('data',${
+                JSONObject.quote(line)
+            });}catch(e){console.error(e);}})();",
+        )
     }
 
     private fun applyOptions(
@@ -186,14 +212,14 @@ class WebViewBridge(
         mainHandler.post { onExit() }
     }
 
-    /** KernelSU 的边到边开关；这里保持 no-op，仅保证接口存在。 */
+    /** KernelSU 的边到边开关：把页面的 insets.css 请求/开关状态同步给宿主。 */
     @JavascriptInterface
     fun enableEdgeToEdge(enable: Boolean) {
-        // no-op
+        mainHandler.post { onEdgeToEdge(enable) }
     }
 
     @JavascriptInterface
     fun fullScreen(enable: Boolean) {
-        // no-op
+        mainHandler.post { onFullScreen(enable) }
     }
 }
