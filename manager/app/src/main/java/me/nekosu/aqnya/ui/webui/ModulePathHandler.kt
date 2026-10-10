@@ -12,11 +12,27 @@ import java.io.File
  * 移植自 KernelSU 的 `SuFilePathHandler`：KernelSU 用 libsu 的 `SuFile` 持久 root
  * shell 读文件，这里直接对每个文件跑 `su -c cat`（NekoSU 没有常驻 root shell）。
  * 路径做了词法归一化，禁止 `..` 逃逸出 webroot。
+ *
+ * 另外实现 KernelSU 的两个内建资源：
+ *  - `internal/insets.css`：安全区 CSS 变量，并通知宿主启用边距；
+ *  - `internal/colors.css`：当前 Material 3 配色的 CSS 变量。
  */
 class ModulePathHandler(
     private val webRoot: File,
+    private val insetsProvider: () -> Insets,
+    private val onInsetsRequested: () -> Unit,
+    private val colorsProvider: () -> String,
 ) : WebViewAssetLoader.PathHandler {
     override fun handle(path: String): WebResourceResponse {
+        when (path) {
+            "internal/insets.css" -> {
+                onInsetsRequested()
+                return css(insetsProvider().css)
+            }
+
+            "internal/colors.css" -> return css(colorsProvider())
+        }
+
         val root = webRoot.toPath().normalize()
         var target = File(webRoot, path).toPath().normalize()
         if (!target.startsWith(root)) return notFound()
@@ -40,6 +56,9 @@ class ModulePathHandler(
             ByteArrayInputStream(bytes),
         )
     }
+
+    private fun css(text: String): WebResourceResponse =
+        WebResourceResponse("text/css", "utf-8", ByteArrayInputStream(text.toByteArray(Charsets.UTF_8)))
 
     private fun notFound(): WebResourceResponse =
         WebResourceResponse(
