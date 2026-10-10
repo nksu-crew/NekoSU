@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import me.nekosu.aqnya.ui.screens.MainScreen
 import me.nekosu.aqnya.ui.theme.NekosuTheme
+import me.nekosu.aqnya.util.DisplayRefreshRate
 import me.nekosu.aqnya.util.LocaleHelper
 
 class MainActivity : ComponentActivity() {
@@ -17,6 +18,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        DisplayRefreshRate.requestHighest(this)
         setContent {
             NekosuTheme {
                 MainScreen()

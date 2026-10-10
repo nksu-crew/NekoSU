@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.material3.MaterialTheme
+import me.nekosu.aqnya.util.DisplayRefreshRate
 
 /**
  * 承载模块 WebUI 的独立 Activity —— 参照 KernelSU 的 `WebUIActivity`。
@@ -21,6 +22,7 @@ class WebUIActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        DisplayRefreshRate.requestHighest(this)
         val moduleId = intent.getStringExtra(EXTRA_ID) ?: intent.data?.getQueryParameter("id")
         if (moduleId.isNullOrBlank()) {
             finish()
