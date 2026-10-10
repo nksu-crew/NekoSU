@@ -19,6 +19,11 @@ object DisplayRefreshRate {
             activity.window.attributes =
                 activity.window.attributes.apply {
                     preferredRefreshRate = best.refreshRate
+                    // 只在同分辨率下切模式，避免顺带改变分辨率。
+                    val current = display.mode
+                    if (current == null || (best.width == current.width && best.height == current.height)) {
+                        preferredDisplayModeId = best.modeId
+                    }
                 }
         }
     }
