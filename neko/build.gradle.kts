@@ -1,47 +1,51 @@
+import javax.inject.Inject
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.Internal
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.TaskAction
+import org.gradle.process.ExecOperations
+
 plugins {
     alias(libs.plugins.android.library)
 }
 
-android {
-    namespace = "me.nekosu.neko"
-    compileSdk {
-        version =
-            release(37) {
-                minorApiLevel = 1
-            }
-    }
-
-    defaultConfig {
-        minSdk = 31
-        ndk {
-            abiFilters += listOf("arm64-v8a")
-        }
-    }
-
-    sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("rust/jniLibs"))
-}
-
 // Build the Rust userspace runtime with cargo-ndk and expose the executables
-// as jniLibs, exactly like NeoZygisk's zygiskd module.  Android extracts them
-// to nativeLibraryDir, where the app and the kernel can execute them.
-val buildRust by tasks.registering {
-    group = "rust"
-    description = "Build ksud and neko-boot for Android arm64"
+// through AGP's generated jniLibs source directory.  Android extracts them to
+// nativeLibraryDir, where the app and the kernel can execute them.
+abstract class BuildRustTask : DefaultTask() {
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
 
-    doLast {
-        val ndk =
-            System.getenv("ANDROID_NDK_HOME")?.let(::File)
-                ?: androidComponents.sdkComponents.ndkDirectory.get().asFile
+    @get:Input
+    abstract val repositoryRoot: Property<String>
+
+    @get:Input
+    abstract val ndkHome: Property<String>
+
+    @get:Input
+    abstract val packageName: Property<String>
+
+    @get:Internal
+    abstract val execOperations: ExecOperations
+
+    @TaskAction
+    fun build() {
+        val root = File(repositoryRoot.get())
+        val ndk = File(ndkHome.get())
         require(ndk.isDirectory) { "Android NDK not found (set ANDROID_NDK_HOME)" }
 
-        val targetDir = layout.buildDirectory.dir("rust/target").get().asFile
-        val jniDir = layout.buildDirectory.dir("rust/jniLibs/arm64-v8a").get().asFile
-        jniDir.mkdirs()
+        val jniRoot = outputDir.get().asFile
+        val targetDir = File(jniRoot.parentFile, "target")
+        val abiDir = File(jniRoot, "arm64-v8a")
+        abiDir.mkdirs()
 
-        providers.exec {
-            workingDir = rootProject.projectDir
+        execOperations.exec {
+            workingDir = root
             environment("ANDROID_NDK_HOME", ndk.absolutePath)
-            environment("KSU_PACKAGE_NAME", "me.aqnya.nekosu")
+            environment("KSU_PACKAGE_NAME", packageName.get())
             commandLine(
                 "cargo",
                 "ndk",
@@ -60,7 +64,7 @@ val buildRust by tasks.registering {
                 "-p",
                 "neko-boot",
             )
-        }.result.get().assertNormalExitValue()
+        }
 
         val prebuilt =
             File(ndk, "toolchains/llvm/prebuilt").listFiles()?.firstOrNull()
@@ -70,15 +74,46 @@ val buildRust by tasks.registering {
         listOf("ksud" to "libksud.so", "neko-boot" to "libneko-boot.so").forEach { (binary, name) ->
             val built = File(targetDir, "aarch64-linux-android/release/$binary")
             require(built.isFile) { "Rust binary not found: $built" }
-            val output = File(jniDir, name)
+            val output = File(abiDir, name)
             built.copyTo(output, overwrite = true)
-            providers.exec {
+            execOperations.exec {
                 commandLine(strip.absolutePath, "--strip-all", output.absolutePath)
-            }.result.get().assertNormalExitValue()
+            }
         }
     }
 }
 
-tasks.named("preBuild").configure { dependsOn(buildRust) }
-tasks.matching { it.name.startsWith("merge") && it.name.contains("JniLibFolders") }
-    .configureEach { dependsOn(buildRust) }
+android {
+    namespace = "me.nekosu.neko"
+    compileSdk {
+        version =
+            release(37) {
+                minorApiLevel = 1
+            }
+    }
+
+    defaultConfig {
+        minSdk = 31
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
+    }
+}
+
+val ndkHome =
+    System.getenv("ANDROID_NDK_HOME")
+        ?: androidComponents.sdkComponents.ndkDirectory.get().asFile.absolutePath
+
+val buildRust =
+    tasks.register<BuildRustTask>("buildRust") {
+        group = "rust"
+        description = "Build ksud and neko-boot for Android arm64"
+        outputDir.set(layout.buildDirectory.dir("rust/jniLibs"))
+        repositoryRoot.set(rootProject.projectDir.absolutePath)
+        this.ndkHome.set(ndkHome)
+        packageName.set("me.aqnya.nekosu")
+    }
+
+androidComponents.onVariants { variant ->
+    variant.sources.jniLibs?.addGeneratedSourceDirectory(buildRust) { it.outputDir }
+}
