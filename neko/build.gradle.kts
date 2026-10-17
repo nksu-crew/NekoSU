@@ -77,9 +77,9 @@ abstract class BuildRustTask : DefaultTask() {
         }
     }
 
-    private fun run(root: File, command: List<String>, environment: Map<String, String> = emptyMap()) {
+    private fun run(root: File, command: List<String>, extraEnvironment: Map<String, String> = emptyMap()) {
         val process = ProcessBuilder(command).directory(root).redirectErrorStream(true).start()
-        process.environment().putAll(environment)
+        process.environment.putAll(extraEnvironment)
         val output = ArrayDeque<String>()
         process.inputStream.bufferedReader().useLines { lines ->
             lines.forEach { line ->
