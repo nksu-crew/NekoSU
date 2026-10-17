@@ -195,7 +195,7 @@ fn main() {
     // embedded LKM bootstrap.  Keep the include_bytes! input present, but do
     // not require a host/NDK assembler for it.
     let bootstrap = PathBuf::from(env::var("OUT_DIR").unwrap()).join(BOOTSTRAP_OBJECT);
-    fs::write(&bootstrap, []).expect("create empty bootstrap object");
+    fs::write(&bootstrap, [0u8; 0]).expect("create empty bootstrap object");
 
     let (code, name) = match get_git_version() {
         Ok((code, name)) => (code, name),
