@@ -1,3 +1,5 @@
+import org.gradle.api.GradleException
+
 // Builds ksud and neko-boot with cargo-ndk.  This module deliberately has no
 // Android plugin: the app consumes the generated jniLibs directory, following
 // the same pattern as LSPosed-cirno's dex2oat module.
@@ -38,21 +40,35 @@ val buildRust =
                     "neko-boot",
                 )
 
-            providers.exec {
-                workingDir = rootProject.projectDir
-                environment("ANDROID_NDK_HOME", ndkFile.absolutePath)
-                environment("KSU_PACKAGE_NAME", "me.aqnya.nekosu")
-                commandLine(cargoArgs)
-            }.result.get().assertNormalExitValue()
+            runCommand(
+                rootProject.projectDir,
+                cargoArgs,
+                mapOf(
+                    "ANDROID_NDK_HOME" to ndkFile.absolutePath,
+                    "KSU_PACKAGE_NAME" to "me.aqnya.nekosu",
+                ),
+            )
 
             listOf("ksud" to "libksud.so", "neko-boot" to "libneko-boot.so").forEach { (binary, name) ->
                 val source = File(targetDir, "aarch64-linux-android/release/$binary")
                 check(source.isFile) { "Rust binary not found: $source" }
                 val target = File(abiDir, name)
                 source.copyTo(target, overwrite = true)
-                providers.exec {
-                    commandLine(strip.absolutePath, "--strip-all", target.absolutePath)
-                }.result.get().assertNormalExitValue()
+                runCommand(rootProject.projectDir, listOf(strip.absolutePath, "--strip-all", target.absolutePath))
             }
         }
     }
+
+fun runCommand(root: File, command: List<String>, extraEnvironment: Map<String, String> = emptyMap()) {
+    val process = ProcessBuilder(command).directory(root).redirectErrorStream(true).start()
+    process.environment.putAll(extraEnvironment)
+    val output = process.inputStream.bufferedReader().readLines()
+    val code = process.waitFor()
+    output.forEach { println(it) }
+    if (code != 0) {
+        throw GradleException(
+            "command failed with exit code $code: ${command.joinToString(" ")}\n" +
+                output.takeLast(300).joinToString("\n"),
+        )
+    }
+}
