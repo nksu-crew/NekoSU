@@ -142,8 +142,16 @@ android {
     }
 }
 
+// ksud and neko-boot are produced by :neko:buildRust; merge them with the
+// app's native libraries like any other jniLibs directory.
+android.sourceSets.getByName("main").jniLibs.srcDir(
+    project(":neko").layout.buildDirectory.dir("generated/rust/jniLibs").get().asFile,
+)
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("JniLibFolders") }.configureEach {
+    dependsOn(":neko:buildRust")
+}
+
 dependencies {
-    implementation(project(":neko"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
