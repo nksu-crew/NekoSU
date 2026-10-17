@@ -1,12 +1,9 @@
-import javax.inject.Inject
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Input
-import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.TaskAction
-import org.gradle.process.ExecOperations
 
 plugins {
     alias(libs.plugins.android.library)
@@ -28,9 +25,6 @@ abstract class BuildRustTask : DefaultTask() {
     @get:Input
     abstract val packageName: Property<String>
 
-    @get:Internal
-    abstract val execOperations: ExecOperations
-
     @TaskAction
     fun build() {
         val root = File(repositoryRoot.get())
@@ -42,11 +36,9 @@ abstract class BuildRustTask : DefaultTask() {
         val abiDir = File(jniRoot, "arm64-v8a")
         abiDir.mkdirs()
 
-        execOperations.exec {
-            workingDir = root
-            environment("ANDROID_NDK_HOME", ndk.absolutePath)
-            environment("KSU_PACKAGE_NAME", packageName.get())
-            commandLine(
+        run(
+            root,
+            listOf(
                 "cargo",
                 "ndk",
                 "--platform",
@@ -63,8 +55,12 @@ abstract class BuildRustTask : DefaultTask() {
                 "ksud",
                 "-p",
                 "neko-boot",
-            )
-        }
+            ),
+            mapOf(
+                "ANDROID_NDK_HOME" to ndk.absolutePath,
+                "KSU_PACKAGE_NAME" to packageName.get(),
+            ),
+        )
 
         val prebuilt =
             File(ndk, "toolchains/llvm/prebuilt").listFiles()?.firstOrNull()
@@ -76,10 +72,15 @@ abstract class BuildRustTask : DefaultTask() {
             require(built.isFile) { "Rust binary not found: $built" }
             val output = File(abiDir, name)
             built.copyTo(output, overwrite = true)
-            execOperations.exec {
-                commandLine(strip.absolutePath, "--strip-all", output.absolutePath)
-            }
+            run(root, listOf(strip.absolutePath, "--strip-all", output.absolutePath))
         }
+    }
+
+    private fun run(root: File, command: List<String>, environment: Map<String, String> = emptyMap()) {
+        val process = ProcessBuilder(command).directory(root).inheritIO()
+        process.environment().putAll(environment)
+        val code = process.start().waitFor()
+        check(code == 0) { "command failed with exit code $code: ${command.joinToString(" ")}" }
     }
 }
 
