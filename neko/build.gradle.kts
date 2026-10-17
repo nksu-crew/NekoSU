@@ -101,7 +101,7 @@ android {
     }
 }
 
-val ndkHome =
+val resolvedNdkHome =
     System.getenv("ANDROID_NDK_HOME")
         ?: androidComponents.sdkComponents.ndkDirectory.get().asFile.absolutePath
 
@@ -111,7 +111,7 @@ val buildRust =
         description = "Build ksud and neko-boot for Android arm64"
         outputDir.set(layout.buildDirectory.dir("rust/jniLibs"))
         repositoryRoot.set(rootProject.projectDir.absolutePath)
-        this.ndkHome.set(ndkHome)
+        this.ndkHome.set(resolvedNdkHome)
         packageName.set("me.aqnya.nekosu")
     }
 
