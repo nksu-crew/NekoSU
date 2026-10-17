@@ -67,14 +67,14 @@ bool is_manager_uid(uid_t uid)
 }
 
 /*
- * Whether /data/adb/nksu/ncore is known to be present.  Set by the (sleepable)
+ * Whether /data/adb/nksu/ksud is known to be present.  Set by the (sleepable)
  * manager scan; read by the su tracepoint hook, which must not sleep.
  */
-static bool ncore_ready;
+static bool daemon_ready;
 
-bool is_ncore_ready(void)
+bool is_daemon_ready(void)
 {
-    return READ_ONCE(ncore_ready);
+    return READ_ONCE(daemon_ready);
 }
 
 /* The ABX (Android Binary XML) parser lives in manager/abx.c. */
@@ -328,21 +328,21 @@ next:
  */
 
 /*
- * Bootstrap /data/adb/nksu/{ncore,bin/busybox} straight from the verified
+ * Bootstrap /data/adb/nksu/{ksud,bin/busybox} straight from the verified
  * manager package, so root works on the very first boot without the manager
- * having to run `ncore install` from a root shell it does not have yet.
+ * having to run `ksud install` from a root shell it does not have yet.
  *
- * The manager ships both binaries as jniLibs (libncore.so and libbusybox.so);
+ * The manager ships both binaries as jniLibs (libksud.so and libbusybox.so);
  * the kernel only sees the extracted nativeLibraryPath directory from
  * packages.xml.  This mirrors KernelSU's `is_ksud_exists()` gate and the
  * manager-provided libksud.so, but installs from the kernel so no userspace
  * round-trip is needed.
  */
-#define NKSU_NCORE_BOOT_PATH    "/data/adb/nksu/ncore"
-#define NKSU_NCORE_BIN_DIR      "/data/adb/nksu/bin"
-#define NKSU_NCORE_BUSYBOX_PATH NKSU_NCORE_BIN_DIR "/busybox"
-#define NKSU_NCORE_LIB_NAME     "libncore.so"
-#define NKSU_NCORE_BUSYBOX_LIB  "libbusybox.so"
+#define NKSU_DAEMON_BOOT_PATH    "/data/adb/nksu/ksud"
+#define NKSU_DAEMON_BIN_DIR      "/data/adb/nksu/bin"
+#define NKSU_DAEMON_BUSYBOX_PATH NKSU_DAEMON_BIN_DIR "/busybox"
+#define NKSU_DAEMON_LIB_NAME     "libksud.so"
+#define NKSU_DAEMON_BUSYBOX_LIB  "libbusybox.so"
 
 static bool kfile_exists(const char *path)
 {
@@ -503,7 +503,7 @@ static bool resolve_lib_dir(const struct abx_package *paths, char *out, size_t c
     char base[256];
 
     if (paths->native_lib_path[0]) {
-        snprintf(cand, sizeof(cand), "%s/%s", paths->native_lib_path, NKSU_NCORE_LIB_NAME);
+        snprintf(cand, sizeof(cand), "%s/%s", paths->native_lib_path, NKSU_DAEMON_LIB_NAME);
         if (kfile_exists(cand)) {
             strscpy(out, paths->native_lib_path, cap);
             return true;
@@ -513,12 +513,12 @@ static bool resolve_lib_dir(const struct abx_package *paths, char *out, size_t c
     if (paths->code_path[0]) {
         code_path_base(paths->code_path, base, sizeof(base));
 
-        snprintf(cand, sizeof(cand), "%s/lib/arm64/%s", base, NKSU_NCORE_LIB_NAME);
+        snprintf(cand, sizeof(cand), "%s/lib/arm64/%s", base, NKSU_DAEMON_LIB_NAME);
         if (kfile_exists(cand)) {
             snprintf(out, cap, "%s/lib/arm64", base);
             return true;
         }
-        snprintf(cand, sizeof(cand), "%s/lib/arm/%s", base, NKSU_NCORE_LIB_NAME);
+        snprintf(cand, sizeof(cand), "%s/lib/arm/%s", base, NKSU_DAEMON_LIB_NAME);
         if (kfile_exists(cand)) {
             snprintf(out, cap, "%s/lib/arm", base);
             return true;
@@ -527,26 +527,26 @@ static bool resolve_lib_dir(const struct abx_package *paths, char *out, size_t c
     return false;
 }
 
-static int install_ncore_from_manager(const struct abx_package *paths)
+static int install_daemon_from_manager(const struct abx_package *paths)
 {
     char lib_dir[256];
     char src[320];
     int err;
 
-    if (kfile_exists(NKSU_NCORE_BOOT_PATH)) {
+    if (kfile_exists(NKSU_DAEMON_BOOT_PATH)) {
         /*
          * Already bootstrapped.  Re-assert the label every boot: an older
          * build created this as adb_data_file, which init cannot execute, and
          * this also repairs a file whose xattr was lost.
          */
-        nksu_relabel_path(NKSU_NCORE_BOOT_PATH);
-        nksu_relabel_path(NKSU_NCORE_BUSYBOX_PATH);
-        WRITE_ONCE(ncore_ready, true);
+        nksu_relabel_path(NKSU_DAEMON_BOOT_PATH);
+        nksu_relabel_path(NKSU_DAEMON_BUSYBOX_PATH);
+        WRITE_ONCE(daemon_ready, true);
         return 0;
     }
 
     if (!resolve_lib_dir(paths, lib_dir, sizeof(lib_dir))) {
-        pr_err("[manager] cannot locate %s in the manager install\n", NKSU_NCORE_LIB_NAME);
+        pr_err("[manager] cannot locate %s in the manager install\n", NKSU_DAEMON_LIB_NAME);
         return -ENOENT;
     }
 
@@ -555,35 +555,35 @@ static int install_ncore_from_manager(const struct abx_package *paths)
         pr_err("[manager] mkdir /data/adb/nksu failed: %d\n", err);
         return err;
     }
-    err = kdir_mkdir_p(NKSU_NCORE_BIN_DIR);
+    err = kdir_mkdir_p(NKSU_DAEMON_BIN_DIR);
     if (err && err != -EEXIST) {
-        pr_err("[manager] mkdir %s failed: %d\n", NKSU_NCORE_BIN_DIR, err);
+        pr_err("[manager] mkdir %s failed: %d\n", NKSU_DAEMON_BIN_DIR, err);
         return err;
     }
 
-    snprintf(src, sizeof(src), "%s/%s", lib_dir, NKSU_NCORE_LIB_NAME);
-    err = kfile_copy(src, NKSU_NCORE_BOOT_PATH);
+    snprintf(src, sizeof(src), "%s/%s", lib_dir, NKSU_DAEMON_LIB_NAME);
+    err = kfile_copy(src, NKSU_DAEMON_BOOT_PATH);
     if (err) {
-        pr_err("[manager] copy %s -> %s failed: %d\n", src, NKSU_NCORE_BOOT_PATH, err);
+        pr_err("[manager] copy %s -> %s failed: %d\n", src, NKSU_DAEMON_BOOT_PATH, err);
         return err;
     }
     /* Label it nksu_file so init's injected init.rc can exec it. */
-    nksu_relabel_path(NKSU_NCORE_BOOT_PATH);
+    nksu_relabel_path(NKSU_DAEMON_BOOT_PATH);
 
-    snprintf(src, sizeof(src), "%s/%s", lib_dir, NKSU_NCORE_BUSYBOX_LIB);
+    snprintf(src, sizeof(src), "%s/%s", lib_dir, NKSU_DAEMON_BUSYBOX_LIB);
     if (kfile_exists(src)) {
-        int berr = kfile_copy(src, NKSU_NCORE_BUSYBOX_PATH);
+        int berr = kfile_copy(src, NKSU_DAEMON_BUSYBOX_PATH);
 
         if (berr)
             pr_warn("[manager] copy busybox failed: %d\n", berr);
         else
-            nksu_relabel_path(NKSU_NCORE_BUSYBOX_PATH);
+            nksu_relabel_path(NKSU_DAEMON_BUSYBOX_PATH);
     } else {
         pr_warn("[manager] %s not found, busybox not installed\n", src);
     }
 
-    pr_info("[manager] installed ncore from %s\n", lib_dir);
-    WRITE_ONCE(ncore_ready, true);
+    pr_info("[manager] installed ksud from %s\n", lib_dir);
+    WRITE_ONCE(daemon_ready, true);
     return 0;
 }
 
@@ -639,9 +639,9 @@ static int scan_and_apply(void)
      * every boot from this verified scan, never restored from disk.
      */
     manager_kuid = make_kuid(current_user_ns(), uid);
-    /* Install ncore/busybox before the profile store writes its file so
+    /* Install ksud/busybox before the profile store writes its file so
      * /data/adb/nksu exists for the first save. */
-    install_ncore_from_manager(paths);
+    install_daemon_from_manager(paths);
     nksu_profile_set_default(uid);
 #ifndef CONFIG_NKSU_SYSCALL
     mark_zygote();
@@ -652,11 +652,11 @@ out:
     nksu_borrow_creds_end(old);
 
     /*
-     * No ncore means no module can run this boot, so volume-key safe mode has
+     * No ksud means no module can run this boot, so volume-key safe mode has
      * nothing to protect.  Idempotent; the safe-mode watcher is armed earlier
      * (second_stage), so this simply stops it counting.
      */
-    if (!READ_ONCE(ncore_ready))
+    if (!READ_ONCE(daemon_ready))
         nksu_safe_mode_disable();
 
     return ret;

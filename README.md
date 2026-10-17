@@ -20,6 +20,13 @@ KernelSU-compatible module system, WebUI and SELinux rule wire format support.
 - Android 12+ (minSdk 31), **arm64-v8a** only
 - Unlocked bootloader
 
+## Building
+
+The manager builds its userspace runtime from `neko/` with Gradle: `./gradlew assembleRelease`
+runs `cargo ndk` for the bundled `ksud` daemon and `neko-boot` vendor_boot patcher. You need
+JDK 25, Android NDK r29 (`ANDROID_NDK_HOME`), Rust stable (`aarch64-linux-android` target) and
+`cargo-ndk`.
+
 ## Credits
 
 - [KernelSU](https://github.com/tiann/KernelSU) — the SELinux policy/rule engine, LSM hook layout,

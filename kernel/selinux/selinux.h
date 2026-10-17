@@ -38,7 +38,7 @@ void nksu_borrow_creds_release(void);
 
 /*
  * Relabel an existing path's inode to DOMAIN_FILE.  Used by the manager
- * bootstrap to label /data/adb/nksu/{ncore,bin/busybox} so the init.rc exec
+ * bootstrap to label /data/adb/nksu/{ksud,bin/busybox} so the init.rc exec
  * (which runs them as DOMAIN) is allowed -- the policy only grants init access
  * to files labelled nksu_file.
  */

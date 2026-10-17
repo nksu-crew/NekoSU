@@ -193,7 +193,7 @@ class ModuleViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 把已就位的 zip 交给 ncore 安装，逐行回填输出。 */
+    /** 把已就位的 zip 交给 ksud 安装，逐行回填输出。 */
     private suspend fun runInstall(zip: File) {
         val buffer = StringBuilder()
         var lastEmit = 0L

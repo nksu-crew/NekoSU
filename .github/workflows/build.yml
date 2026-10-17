@@ -16,7 +16,7 @@ on:
       - "kernel/**"
       - "uapi/**"
       - "manager/app/**"
-      - "userspace/ncore/**"
+      - "neko/**"
       - "*.gradle.kts"
       - "gradle.properties"
       - "gradle/libs.versions.toml"
@@ -31,7 +31,7 @@ on:
       - "kernel/**"
       - "uapi/**"
       - "manager/app/**"
-      - "userspace/ncore/**"
+      - "neko/**"
       - "*.gradle.kts"
       - "gradle.properties"
       - "gradle/libs.versions.toml"
@@ -117,27 +117,22 @@ jobs:
         mv android-ndk-"$NDK_VERSION" "$ANDROID_NDK_HOME"
         rm -f ndk.zip
 
-    # ncore lives in this repository (userspace/ncore) and is built here with
-    # its pinned Bazel, so the APK no longer depends on aqnya/ncore CI output
-    # or on an NCORE_TOKEN PAT.
-    - name: Set up Bazel
-      uses: ./userspace/ncore/.github/actions/bazel
+    # ksud and neko-boot live under neko/ and are compiled by Gradle through
+    # cargo-ndk, so the APK always carries a userspace runtime built from the
+    # same checkout.
+    - name: Set up Rust
+      run: |
+        rustup toolchain install stable --profile minimal
+        rustup default stable
+        rustup target add aarch64-linux-android
+
+    - name: Install cargo-ndk
+      run: cargo install cargo-ndk --locked
+
+    - name: Cache Rust build artifacts
+      uses: Swatinem/rust-cache@v2
       with:
-        bazelversion-file: userspace/ncore/.bazelversion
-
-    - name: Build ncore (android arm64)
-      working-directory: userspace/ncore
-      run: |
-        set -euo pipefail
-        bazel build //:ncore --config=android
-        file bazel-bin/ncore
-
-    - name: Stage ncore into jniLibs
-      run: |
-        set -euo pipefail
-        mkdir -p manager/app/src/main/jniLibs/arm64-v8a
-        cp userspace/ncore/bazel-bin/ncore manager/app/src/main/jniLibs/arm64-v8a/libncore.so
-        file manager/app/src/main/jniLibs/arm64-v8a/libncore.so
+        workspaces: neko -> build/rust/target
 
     - name: List packaged assets
       run: |

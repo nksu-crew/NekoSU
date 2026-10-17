@@ -5,7 +5,7 @@
  * The manager no longer re-pushes profiles on every startup; instead the
  * kernel mirrors each mutation to a plain-text file and restores it once at
  * feature-init time.  The format is deliberately simple so userspace (the
- * manager / ncore) can read it too:
+ * manager / ksud) can read it too:
  *
  *   # comment
  *   <uid> <caps_hex> <ns> <root_uid> <selinux_domain>

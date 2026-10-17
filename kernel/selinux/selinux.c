@@ -253,7 +253,7 @@ static void resolve_file_sid(void)
  * has no `filesystem associate` permission, so creating the inode directly as
  * nksu_file would be denied.  Instead the file is created normally and the
  * cached inode is relabeled in place (its in-memory SID, plus the xattr below).
- * This is what lets init's injected init.rc exec /data/adb/nksu/ncore.
+ * This is what lets init's injected init.rc exec /data/adb/nksu/ksud.
  *
  * The in-memory SID alone is not enough: init runs the injected init.rc exec
  * at post-fs-data, before the manager scan relabels the cached inode, and the

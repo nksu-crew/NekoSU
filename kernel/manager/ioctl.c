@@ -285,7 +285,7 @@ static long ioc_disarm_safemode(void)
 {
     nksu_safe_mode_disable();
     /*
-     * The steady-state prctl hook exists only so ncore can reach this ioctl at
+     * The steady-state prctl hook exists only so ksud can reach this ioctl at
      * every stage; once the boot daemon has disarmed safe mode (its last
      * stage) that hook is no longer needed, so take it down instead of leaving
      * it patched until module unload.

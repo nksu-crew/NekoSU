@@ -134,7 +134,7 @@ static unsigned long try_redirect_path(struct pt_regs *regs, unsigned int arg_in
      * a failed exec.  This must not sleep (the tracepoint path runs with
      * preemption disabled), so use the flag the manager scan publishes.
      */
-    if (require_target && !is_ncore_ready())
+    if (require_target && !is_daemon_ready())
         return 0;
 
     sp = user_stack_pointer(regs);

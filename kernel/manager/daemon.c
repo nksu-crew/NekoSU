@@ -2,14 +2,14 @@
 /*
  * Root-visible control-fd grant for the boot daemon.
  *
- * ncore runs as root, outside the uid profile, and is exec'd as a fresh
+ * ksud runs as root, outside the uid profile, and is exec'd as a fresh
  * process at every boot stage; it needs the control fd (prctl 204, the manager
  * gate does not apply to it) to reach the safe-mode / sepolicy ioctls.  Since
  * the temporary boot watcher (boot/hook_init.c) no longer hooks prctl and
  * nothing group-restores slots, this component is armed in the early group at
  * second_stage and keeps the prctl slot hooked for the whole boot.
  *
- * It is removed when ncore disarms safe mode (IOC_DISARM_SAFEMODE, its last
+ * It is removed when ksud disarms safe mode (IOC_DISARM_SAFEMODE, its last
  * stage) or at module unload.
  */
 

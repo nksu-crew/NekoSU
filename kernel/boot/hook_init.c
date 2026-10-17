@@ -267,7 +267,7 @@ static int init_thread_fn(void *data)
          * The policy is loaded during selinux_setup, so by second_stage we
          * can inject the nksu domain and its rules.  The early group (safe
          * mode) needs neither the policy nor /data, so it is armed here too --
-         * before post-fs-data, where ncore first queries safe mode.
+         * before post-fs-data, where ksud first queries safe mode.
          * Do NOT start the module stage here: on FBE devices init's
          * second_stage runs *before* vold mounts and decrypts /data, so
          * /data/adb/modules does not exist yet (this is what made every module

@@ -273,7 +273,7 @@
     <string name="install_log_export_failed">[nksu] 导出到 Download 失败: %1$s</string>
     <string name="install_log_rollback">[nksu] 写入失败，正在回滚原镜像</string>
     <string name="install_log_direct_done">[nksu] 直接安装完成，重启后生效</string>
-    <string name="install_log_err_ncore">[nksu] ERROR: ncore 不可执行: %1$s</string>
+    <string name="install_log_err_ncore">[nksu] ERROR: neko 工具不可执行: %1$s</string>
     <string name="install_log_err_ko">[nksu] ERROR: assets/%1$s 未找到或复制失败</string>
     <string name="install_log_err_no_part">[nksu] ERROR: 未找到 vendor_boot 分区</string>
     <string name="install_log_err_no_root">[nksu] ERROR: 未检测到 root（需要 Magisk/KernelSU 等 su，或已安装 nksu）</string>
@@ -283,7 +283,7 @@
     <string name="install_log_err_flash">[nksu] ERROR: 刷入 vendor_boot 失败</string>
     <string name="install_err_copy_asset">复制 assets/%1$s 失败: %2$s</string>
     <string name="install_err_read_file">无法读取所选文件</string>
-    <string name="install_err_ncore">ncore 不可执行: %1$s\n请确认:\n  1) jniLibs/&lt;abi&gt;/libncore.so 已随 APK 打包;\n  2) AndroidManifest 打开 extractNativeLibs (useLegacyPackaging=true);\n  3) 设备 ABI 与打包的 lib 目录匹配。</string>
+    <string name="install_err_ncore">neko 工具不可执行: %1$s\n请确认:\n  1) jniLibs/&lt;abi&gt;/libksud.so 已随 APK 打包;\n  2) AndroidManifest 打开 extractNativeLibs (useLegacyPackaging=true);\n  3) 设备 ABI 与打包的 lib 目录匹配。</string>
     <string name="install_err_ko_asset">assets/%1$s 未找到或复制失败</string>
     <string name="install_err_mkdir">无法创建目录 %1$s</string>
     <string name="install_err_mediastore_insert">MediaStore 插入失败</string>

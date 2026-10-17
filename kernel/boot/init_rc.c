@@ -5,18 +5,18 @@
  * KernelSU hooks init's read() of /system/etc/init/hw/init.rc through the
  * syscall table (__NR_read / __NR_fstat) and appends a static rc that execs
  * its userspace daemon ksud at the well-defined boot stages.  nksu does the
- * same, exec'ing ncore instead:
+ * same, exec'ing ksud instead:
  *
  *   on post-fs-data
- *       exec u:r:nksu:s0 root -- /data/adb/nksu/ncore post-fs-data
+ *       exec u:r:nksu:s0 root -- /data/adb/nksu/ksud post-fs-data
  *   on nonencrypted
  *   on property:vold.decrypt=trigger_restart_framework
- *       exec u:r:nksu:s0 root -- /data/adb/nksu/ncore services
+ *       exec u:r:nksu:s0 root -- /data/adb/nksu/ksud services
  *   on property:sys.boot_completed=1
- *       exec u:r:nksu:s0 root -- /data/adb/nksu/ncore boot-completed
+ *       exec u:r:nksu:s0 root -- /data/adb/nksu/ksud boot-completed
  *
- * ncore (userspace/ of the ncore project, shipped by the manager as
- * /data/adb/nksu/ncore) is the KernelSU-compatible module runtime.  The kernel
+ * ksud (neko/ksud, shipped by the manager as
+ * /data/adb/nksu/ksud) is the KernelSU-compatible module runtime.  The kernel
  * only edits init's view of init.rc.  Because init's `exec` is synchronous, the
  * post-fs-data hooks (metamodule mount included) finish before init continues,
  * so modules are mounted before zygote/system_server start.
@@ -55,20 +55,20 @@
 /* nksu domain; see selinux/selinux.h */
 #define NKSU_RC_CONTEXT DOMAIN_CTX
 
-/* The rc that init parses; it just reaches ncore at each stage. */
+/* The rc that init parses; it just reaches ksud at each stage. */
 static const char nksu_rc[] =
     "\n"
     "on post-fs-data\n"
-    "    exec " NKSU_RC_CONTEXT " root -- " NKSU_NCORE_PATH " post-fs-data\n"
+    "    exec " NKSU_RC_CONTEXT " root -- " NKSU_DAEMON_PATH " post-fs-data\n"
     "\n"
     "on nonencrypted\n"
-    "    exec " NKSU_RC_CONTEXT " root -- " NKSU_NCORE_PATH " services\n"
+    "    exec " NKSU_RC_CONTEXT " root -- " NKSU_DAEMON_PATH " services\n"
     "\n"
     "on property:vold.decrypt=trigger_restart_framework\n"
-    "    exec " NKSU_RC_CONTEXT " root -- " NKSU_NCORE_PATH " services\n"
+    "    exec " NKSU_RC_CONTEXT " root -- " NKSU_DAEMON_PATH " services\n"
     "\n"
     "on property:sys.boot_completed=1\n"
-    "    exec " NKSU_RC_CONTEXT " root -- " NKSU_NCORE_PATH " boot-completed\n"
+    "    exec " NKSU_RC_CONTEXT " root -- " NKSU_DAEMON_PATH " boot-completed\n"
     "\n";
 
 static const size_t nksu_rc_len = sizeof(nksu_rc) - 1;

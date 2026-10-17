@@ -5,7 +5,7 @@
  * The module watches KEY_VOLUMEUP from early boot.  Three key-down events set
  * a "safe mode requested" flag.  The kernel does not write any file and does
  * not reboot: the flag is reported through the control ioctl
- * (IOC_GET_SAFEMODE) and ncore acts on it -- creating
+ * (IOC_GET_SAFEMODE) and ksud acts on it -- creating
  * /data/adb/nksu/safe_module and skipping module loading -- then disarms the
  * watcher with IOC_DISARM_SAFEMODE.
  *
@@ -36,7 +36,7 @@
 static atomic_t nksu_safe_presses = ATOMIC_INIT(0);
 /* Latched once the press threshold is reached. */
 static bool nksu_safe_requested __read_mostly;
-/* Set once the watcher is told to stop (ncore's last stage, or no ncore). */
+/* Set once the watcher is told to stop (ksud's last stage, or no ksud). */
 static bool nksu_safe_disarmed __read_mostly;
 static bool nksu_safe_input_registered;
 

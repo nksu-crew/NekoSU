@@ -17,3 +17,6 @@ manager/app/src/main/assets/ko/
 last_kmsg
 dmesg.log
 logcat.log
+
+# Rust host check artifacts
+neko/target/

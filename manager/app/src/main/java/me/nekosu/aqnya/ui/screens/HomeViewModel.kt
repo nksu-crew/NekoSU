@@ -12,7 +12,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.nekosu.aqnya.BuildConfig
 import me.nekosu.aqnya.core.Ncore
-import me.nekosu.aqnya.data.installer.NcoreBoot
+import me.nekosu.aqnya.data.installer.KsudBoot
 import me.nekosu.aqnya.data.kernel.KernelInfo
 import me.nekosu.aqnya.util.getAppVersion
 
@@ -42,7 +42,7 @@ class HomeViewModel(
                 } else {
                     // LKM 版本比对：运行中的内核模块版本由仓库根的 version
                     // 手动维护，并与本 APK 打包时的同一文件值绑定。不一致时说明
-                    // 已刷入的 LKM 与随包 ncore 不匹配（表现为模块卡在
+                    // 已刷入的 LKM 与随包 ksud 不匹配（表现为模块卡在
                     // modules_update、/data/adb/ksu 软链接缺失，甚至启动失败）。
                     // 旧内核没有 IOC_GET_VERSION、或版本为 unknown 时视为匹配。
                     Ncore.ctl(3)
@@ -57,10 +57,10 @@ class HomeViewModel(
                     _installStatus.value =
                         if (matched) InstallStatus.INSTALLED else InstallStatus.NEED_UPDATE
 
-                    // 只有版本一致时才把随包的 ncore 放到 /data/adb/nksu/ncore，
-                    // 避免用一个不匹配的 ncore 覆盖能工作的旧版本。
+                    // 只有版本一致时才把随包的 ksud 放到 /data/adb/nksu/ksud，
+                    // 避免用一个不匹配的 ksud 覆盖能工作的旧版本。
                     if (matched) {
-                        NcoreBoot.install(appContext)
+                        KsudBoot.install(appContext)
                     }
                 }
             }

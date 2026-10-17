@@ -30,7 +30,7 @@ void nksu_exit_feature_components(void);
 /*
  * The kernel module's version.  The manager compares it with its own copy so it
  * can tell that the flashed LKM is stale and only ships a matching userspace
- * ncore.
+ * ksud.
  */
 const char *nksu_version(void);
 

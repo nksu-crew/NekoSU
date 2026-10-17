@@ -47,7 +47,7 @@ static const module_component_t early_components[] = {
         /*
          * Volume-key safe mode depends only on the input subsystem, which
          * needs neither the SELinux policy, /data nor the zygote, so it is
-         * armed at second_stage -- before post-fs-data, where ncore first
+         * armed at second_stage -- before post-fs-data, where ksud first
          * queries the flag over the control ioctl.
          */
         .name = "safe mode",
@@ -58,7 +58,7 @@ static const module_component_t early_components[] = {
         /*
          * Grant the control fd to root from second_stage on.  The temporary
          * boot watcher no longer hooks prctl and nothing group-restores slots,
-         * so this hook simply persists across zygote: ncore can query safe
+         * so this hook simply persists across zygote: ksud can query safe
          * mode / sepolicy at post-fs-data and every later stage.  Its exit
          * (IOC_DISARM_SAFEMODE, or module unload) removes it.
          */

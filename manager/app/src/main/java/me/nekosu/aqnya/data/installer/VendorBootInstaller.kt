@@ -19,7 +19,8 @@ object VendorBootInstaller {
     /** 内核模块在 assets 中的存放目录，例如 assets/ko/android14-6.1_nksu.ko。 */
     private const val KO_ASSET_DIR = "ko"
 
-    private const val NCORE_LIB_NAME = "libncore.so"
+    private const val KSUD_LIB_NAME = "libksud.so"
+    private const val NEKO_BOOT_LIB_NAME = "libneko-boot.so"
 
     /** 本地 LKM 在安装目录中暂存的文件名。 */
     private const val LOCAL_KO_NAME = "local_nksu.ko"
@@ -38,8 +39,13 @@ object VendorBootInstaller {
     fun installDir(context: Context): File =
         File(context.filesDir, "nksu-install").apply { mkdirs() }
 
-    fun ncorePath(context: Context): File =
-        File(context.applicationInfo.nativeLibraryDir, NCORE_LIB_NAME)
+    /** ksud, the module runtime / su daemon bundled by the manager. */
+    fun ksudPath(context: Context): File =
+        File(context.applicationInfo.nativeLibraryDir, KSUD_LIB_NAME)
+
+    /** neko-boot, the vendor_boot patcher. */
+    fun nekoBootPath(context: Context): File =
+        File(context.applicationInfo.nativeLibraryDir, NEKO_BOOT_LIB_NAME)
 
     /**
      * 把内核模块放到安装目录并返回其文件：
@@ -114,10 +120,10 @@ object VendorBootInstaller {
     ): Int =
         withContext(Dispatchers.IO) {
             val dir = installDir(context)
-            val ncore = ncorePath(context)
-            if (!ncore.exists() || !ncore.canExecute()) {
+            val nekoBoot = nekoBootPath(context)
+            if (!nekoBoot.exists() || !nekoBoot.canExecute()) {
                 throw IllegalStateException(
-                    context.getString(R.string.install_err_ncore, ncore.absolutePath),
+                    context.getString(R.string.install_err_ncore, nekoBoot.absolutePath),
                 )
             }
 
@@ -126,7 +132,7 @@ object VendorBootInstaller {
                     ?: throw IllegalStateException(context.getString(R.string.install_err_ko_missing))
 
             try {
-                val patched = patchImage(ncore, vendorBoot, koFile, onOutput)
+                val patched = patchImage(nekoBoot, vendorBoot, koFile, onOutput)
                 if (patched == null) {
                     onOutput(context.getString(R.string.install_log_err_patch))
                     return@withContext -1
@@ -155,15 +161,15 @@ object VendorBootInstaller {
         }
 
     /**
-     * 用 ncore 直接把 [koFile] 打进 [sourceImage]（v3/v4 vendor_boot）：
-     * ncore 负责解包、把模块安装到 `lib/modules/nksu.ko`、登记 `modules.load` /
+     * 用 ksud 直接把 [koFile] 打进 [sourceImage]（v3/v4 vendor_boot）：
+     * neko-boot 负责解包、把模块安装到 `lib/modules/nksu.ko`、登记 `modules.load` /
      * `modules.dep`，保持各 ramdisk 的压缩与 v4 ramdisk 表，最后写出
      * `<image>.new`。成功返回该文件，失败返回 null。
      *
-     * 只操作本地文件，以当前进程身份运行 ncore，无需 root。
+     * 只操作本地文件，以当前进程身份运行 ksud，无需 root。
      */
     private fun patchImage(
-        ncore: File,
+        nekoBoot: File,
         sourceImage: File,
         koFile: File,
         onOutput: (String) -> Unit,
@@ -172,23 +178,23 @@ object VendorBootInstaller {
         val output = File(dir, "${sourceImage.name}.new")
         output.delete()
         val args = listOf("-p", sourceImage.absolutePath, koFile.absolutePath)
-        if (!runNcore(ncore, args, dir, onOutput) || !output.isFile) {
+        if (!runTool(nekoBoot, args, dir, onOutput) || !output.isFile) {
             output.delete()
             return null
         }
         return output
     }
 
-    /** 运行 ncore 并把输出逐行回调；退出码为 0 返回 true。 */
-    private fun runNcore(
-        ncore: File,
+    /** 运行外部工具并把输出逐行回调；退出码为 0 返回 true。 */
+    private fun runTool(
+        tool: File,
         args: List<String>,
         workDir: File,
         onOutput: (String) -> Unit,
     ): Boolean =
         try {
             val process =
-                ProcessBuilder(listOf(ncore.absolutePath) + args)
+                ProcessBuilder(listOf(tool.absolutePath) + args)
                     .directory(workDir)
                     .redirectErrorStream(true)
                     .start()
@@ -251,7 +257,7 @@ object VendorBootInstaller {
     /**
      * 直接安装：以 root 读取指定 vendor_boot 分区，打入 nksu.ko 后写回。
      *
-     * 流程：dump 原镜像 -> `ncore -p <镜像> <ko>` 打补丁 -> 写回分区；写入失败
+     * 流程：dump 原镜像 -> `neko-boot -p <镜像> <ko>` 打补丁 -> 写回分区；写入失败
      * 时把原镜像写回回滚。KernelSU 的「直接安装 / 刷入非活动分区」都走这里，
      * 区别只是 @partition 指向当前或非活动 slot。
      *
@@ -271,10 +277,10 @@ object VendorBootInstaller {
     ): Int =
         withContext(Dispatchers.IO) {
             val dir = installDir(context)
-            val ncore = ncorePath(context)
+            val nekoBoot = nekoBootPath(context)
 
-            if (!ncore.exists() || !ncore.canExecute()) {
-                onOutput(context.getString(R.string.install_log_err_ncore, ncore.absolutePath))
+            if (!nekoBoot.exists() || !nekoBoot.canExecute()) {
+                onOutput(context.getString(R.string.install_log_err_ncore, nekoBoot.absolutePath))
                 return@withContext -1
             }
             val koFile = resolveKo(context, koName, koUri)
@@ -306,8 +312,8 @@ object VendorBootInstaller {
                 return@withContext -1
             }
 
-            // 2) 交给 ncore 直接把模块打进镜像（无需 root），得到补丁镜像。
-            val patched = patchImage(ncore, source, koFile, onOutput)
+            // 2) 交给 neko-boot 直接把模块打进镜像（无需 root），得到补丁镜像。
+            val patched = patchImage(nekoBoot, source, koFile, onOutput)
             if (patched == null) {
                 onOutput(context.getString(R.string.install_log_err_patch))
                 source.delete()

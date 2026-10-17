@@ -8,11 +8,11 @@
  *
  * A feature is a named, id-addressed switch with a get and a set handler (the
  * set handler may be NULL for read-only features).  The manager drives them
- * over the control fd (IOC_FEATURE_*) and ncore exposes the same through JNI,
+ * over the control fd (IOC_FEATURE_*) and ksud exposes the same through JNI,
  * mirroring KernelSU's ksu_register_feature_handler.
  *
  * Feature ids are a wire contract shared with the manager; keep them in sync
- * with manager/app/src/main/cpp/libjni/ioctl.h and ncore.kt.
+ * with manager/app/src/main/cpp/libjni/ioctl.h and ksud.kt.
  */
 #define NKSU_FEATURE_SELINUX_HIDE 1
 

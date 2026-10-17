@@ -1,0 +1,8 @@
+[package]
+name = "neko-boot"
+version = "1.0.3"
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+android-bootimg = { git = "https://github.com/5ec1cff/android_bootimg", rev = "150425b027c76ea104c82e408571651f2181b2c2" }

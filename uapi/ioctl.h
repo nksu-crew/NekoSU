@@ -8,8 +8,8 @@
  *   - the on-wire payload layout of every flag.
  *
  * It is included by the kernel module (kernel/manager/ioctl.h), the manager
- * app's JNI layer (manager/app/src/main/cpp/libjni) and the ncore userspace
- * runtime (userspace/ncore).  Keep it portable between kernel and userspace:
+ * app's JNI layer (manager/app/src/main/cpp/libjni) and the ksud userspace
+ * runtime (neko/ksud).  Keep it portable between kernel and userspace:
  * only <linux/ioctl.h> and <linux/types.h> may be used.
  */
 #ifndef NKSU_UAPI_IOCTL_H
@@ -51,7 +51,7 @@ enum fmac_flag {
     IOC_DEL_CAP,       /* data[12]  = uint32_t uid */
     IOC_SEL_ADD_RULE,  /* data[264] = src[64] tgt[64] cls[64] perm[64] effect[4] invert[4] */
     IOC_SET_PROFILE,   /* data[84]  = uid[4] caps[8] domain[64] namespace[4] root_uid[4] */
-    /* 11 was IOC_LIST_MODULES; module enumeration now lives in ncore (userspace). */
+    /* 11 was IOC_LIST_MODULES; module enumeration now lives in ksud (userspace). */
     IOC_SET_SEPOLICY = 12, /* data = KernelSU-format sepolicy batch, size = 长度 */
     /*
      * data[<= NKSU_PROFILE_TEXT_MAX] (out) = the profile table as text, one
@@ -63,7 +63,7 @@ enum fmac_flag {
     /*
      * data[<= 64] (out) = the kernel module's version string (NKSU_VERSION),
      * NUL-terminated.  The manager compares it with its own copy so it never
-     * runs a userspace ncore that does not match the flashed LKM.
+     * runs a userspace ksud that does not match the flashed LKM.
      */
     IOC_GET_VERSION = 14,
     /*
@@ -103,7 +103,7 @@ struct fmac_ioc {
 
 /*
  * prctl opcodes.  201 and 203 are gated to the manager (is_manager-gated);
- * 204 lets the boot-time daemon (ncore) obtain the control fd (root-gated) so
+ * 204 lets the boot-time daemon (ksud) obtain the control fd (root-gated) so
  * it can send IOC_SET_SEPOLICY.
  */
 #define NKSU_PRCTL_GET_SHM_FD     201

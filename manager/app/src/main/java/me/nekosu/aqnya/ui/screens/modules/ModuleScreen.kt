@@ -56,7 +56,7 @@ import me.nekosu.aqnya.util.LogUtils
 /**
  * 模块管理页 —— 参照 KernelSU 管理器的模块列表 / 安装界面。
  *
- * 列表由用户态 ncore 提供；安装与 action 输出都直接展示为整屏日志
+ * 列表由用户态 ksud 提供；安装与 action 输出都直接展示为整屏日志
  * （见 [LogPane] / [LogTopBar]），与 KernelSU 一致，不再套一层卡片。
  */
 @OptIn(ExperimentalMaterial3Api::class)
