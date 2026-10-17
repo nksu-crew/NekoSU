@@ -1,4 +1,5 @@
 import org.gradle.api.DefaultTask
+import org.gradle.api.GradleException
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Input
@@ -77,10 +78,23 @@ abstract class BuildRustTask : DefaultTask() {
     }
 
     private fun run(root: File, command: List<String>, environment: Map<String, String> = emptyMap()) {
-        val process = ProcessBuilder(command).directory(root).inheritIO()
+        val process = ProcessBuilder(command).directory(root).redirectErrorStream(true).start()
         process.environment().putAll(environment)
-        val code = process.start().waitFor()
-        check(code == 0) { "command failed with exit code $code: ${command.joinToString(" ")}" }
+        val output = ArrayDeque<String>()
+        process.inputStream.bufferedReader().useLines { lines ->
+            lines.forEach { line ->
+                logger.lifecycle(line)
+                if (output.size == 200) output.removeFirst()
+                output.addLast(line)
+            }
+        }
+        val code = process.waitFor()
+        if (code != 0) {
+            throw GradleException(
+                "command failed with exit code $code: ${command.joinToString(" ")}\n" +
+                    output.joinToString("\n"),
+            )
+        }
     }
 }
 
