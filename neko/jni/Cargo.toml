@@ -8,7 +8,7 @@ name = "jni"
 crate-type = ["cdylib"]
 
 [dependencies]
-jni = "0.21"
+jni = "0.22"
 libc = "0.2"
 log.workspace = true
 android_logger = "0.15"
