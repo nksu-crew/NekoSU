@@ -682,12 +682,26 @@ static void probe_sys_enter(void *data, struct pt_regs *regs, long id)
 #undef NKSU_HOOK_CASE
 }
 
-/* fork callback: ensure the child of a managed UID also gets traced.  Only the
- * new task needs flagging -- the parent's threads already carry the flag -- so
- * this is O(1) instead of scanning every thread on every fork. */
+/*
+ * Android may start an app from a pre-forked USAP worker, and the tracepoint
+ * flag can be cleared by another tracing user.  Do not rely solely on the
+ * parent's current flag: zygote/USAP children must stay traceable even if the
+ * pool worker lost it before specializing into the manager UID.
+ */
+static bool nksu_app_process(const struct task_struct *task)
+{
+	const char *comm = task->comm;
+
+	return !strncmp(comm, "zygote", 6) || !strncmp(comm, "usap", 4) ||
+	       strstr(comm, "app_process");
+}
+
+/* fork callback: propagate tracing to managed children and to every child of
+ * zygote/USAP.  This is O(1) instead of scanning every thread on every fork. */
 static void probe_sched_fork(void *data, struct task_struct *parent, struct task_struct *child)
 {
-	if (!nksu_profile_has_uid(__kuid_val(task_uid(child))))
+	if (!test_tsk_thread_flag(parent, TIF_SYSCALL_TRACEPOINT) && !nksu_app_process(parent) &&
+	    !nksu_profile_has_uid(__kuid_val(task_uid(child))))
 		return;
 	set_tsk_thread_flag(child, TIF_SYSCALL_TRACEPOINT);
 }

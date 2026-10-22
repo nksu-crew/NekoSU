@@ -341,22 +341,39 @@ static int mark_zygote(void)
 	for (i = 0; i < n; i++) {
 		pid_t pid;
 		uid_t uid;
+		const char *label;
 
 		p = tasks[i];
-		if (get_task_cmdline(p, cmdline_buf, 256) <= 0)
-			goto next;
-
-		if (strncmp(cmdline_buf, "zygote", 6) != 0 &&
-		    strncmp(cmdline_buf, "zygote64", 8) != 0 && !strstr(cmdline_buf, "app_process"))
-			goto next;
-
 		pid = p->pid;
 		rcu_read_lock();
 		uid = __kuid_val(task_uid(p));
 		rcu_read_unlock();
 
+		/*
+		 * Android 12+ launches apps from a pre-forked USAP pool, not
+		 * always directly from zygote.  Those workers must be marked too:
+		 * an app adopted from an unmarked USAP worker never inherits the
+		 * syscall tracepoint flag, so its prctl() calls bypass the
+		 * manager fd grant even though the manager itself verified.
+		 *
+		 * Also refresh an already-running authorized process.  The flag
+		 * can be cleared by other tracing users between scans, so its
+		 * absence does not prove this process is irrelevant.
+		 */
+		if (is_manager_uid(uid) || nksu_profile_has_uid(uid)) {
+			label = "authorized process";
+		} else {
+			if (get_task_cmdline(p, cmdline_buf, 256) <= 0)
+				goto next;
+			if (strncmp(cmdline_buf, "zygote", 6) != 0 &&
+			    strncmp(cmdline_buf, "usap", 4) != 0 &&
+			    !strstr(cmdline_buf, "app_process"))
+				goto next;
+			label = cmdline_buf;
+		}
+
 		nksu_mark_threads_by_pid(pid);
-		pr_info("[manager] : marked %s (pid=%d, uid=%u)\n", cmdline_buf, pid, uid);
+		pr_info("[manager] : marked %s (pid=%d, uid=%u)\n", label, pid, uid);
 	next:
 		put_task_struct(p);
 	}
