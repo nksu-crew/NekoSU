@@ -12,6 +12,7 @@
 #include <linux/module.h>
 #include <linux/pid.h>
 #include <linux/preempt.h>
+#include <linux/rcupdate.h>
 #include <linux/sched.h>
 #include <linux/sched/signal.h>
 #include <linux/shmem_fs.h>
@@ -22,6 +23,7 @@
 #include <linux/tracepoint.h>
 #include <linux/uaccess.h>
 #include <linux/version.h>
+#include <linux/xarray.h>
 #include <asm/barrier.h>
 #include <asm/ptrace.h>
 
@@ -126,6 +128,63 @@ static struct tracepoint *nksu_find_tracepoint(const char *name)
 
 	for_each_kernel_tracepoint(nksu_tp_find_cb, &ctx);
 	return result;
+}
+
+/*
+ * The task_work stage already knows the address returned by vm_mmap().  Keep
+ * it keyed by the thread-group leader so the syscall hook can resume directly
+ * without walking the VMA list or taking mmap_lock.  Entries disappear with
+ * the task group, so the cache does not pin the mm or outlive the process.
+ */
+struct nksu_path_cache {
+	struct rcu_head rcu;
+	unsigned long addr;
+};
+
+static DEFINE_XARRAY(nksu_path_addrs);
+
+static void nksu_path_cache_store(unsigned long addr)
+{
+	struct nksu_path_cache *cache;
+	struct nksu_path_cache *old;
+
+	if (!addr)
+		return;
+	cache = kzalloc(sizeof(*cache), GFP_KERNEL);
+	if (!cache)
+		return;
+	cache->addr = addr;
+	old = xa_store(&nksu_path_addrs, (unsigned long)current->group_leader, cache, GFP_KERNEL);
+	if (xa_err(old)) {
+		kfree(cache);
+		return;
+	}
+	if (old)
+		kfree_rcu(old, rcu);
+}
+
+static unsigned long nksu_path_cached_addr(void)
+{
+	struct nksu_path_cache *cache;
+	unsigned long addr = 0;
+
+	rcu_read_lock();
+	cache = xa_load(&nksu_path_addrs, (unsigned long)current->group_leader);
+	if (cache)
+		addr = cache->addr;
+	rcu_read_unlock();
+	return addr;
+}
+
+static void nksu_path_task_exit(void *data, struct task_struct *task)
+{
+	struct nksu_path_cache *cache;
+
+	if (!task->signal || atomic_read(&task->signal->live) > 1)
+		return;
+	cache = xa_erase(&nksu_path_addrs, (unsigned long)task->group_leader);
+	if (cache)
+		kfree_rcu(cache, rcu);
 }
 
 struct nksu_path_work {
@@ -235,8 +294,11 @@ static int nksu_path_map_current(void)
 		return -ESHUTDOWN;
 	if (unlikely(!current->mm || (current->flags & PF_EXITING)))
 		return -ESRCH;
-	if (nksu_path_user_addr(current->mm, false))
+	addr = nksu_path_user_addr(current->mm, false);
+	if (addr) {
+		nksu_path_cache_store(addr);
 		return 0;
+	}
 
 	file = READ_ONCE(nksu_path_file);
 	if (unlikely(!file))
@@ -262,6 +324,8 @@ static int nksu_path_map_current(void)
 	revert_creds(old);
 	if (IS_ERR_VALUE(addr))
 		ret = (int)addr;
+	else
+		nksu_path_cache_store(addr);
 
 	return ret;
 }
@@ -349,6 +413,7 @@ static void nksu_path_fork(void *data, struct task_struct *parent, struct task_s
 
 static struct tracepoint *tp_path_exec;
 static struct tracepoint *tp_path_fork;
+static struct tracepoint *tp_path_exit;
 
 int nksu_path_init(void)
 {
@@ -401,7 +466,8 @@ int nksu_path_init(void)
 
 	tp_path_exec = nksu_find_tracepoint("sched_process_exec");
 	tp_path_fork = nksu_find_tracepoint("sched_process_fork");
-	if (!tp_path_exec || !tp_path_fork) {
+	tp_path_exit = nksu_find_tracepoint("sched_process_exit");
+	if (!tp_path_exec || !tp_path_fork || !tp_path_exit) {
 		pr_err("[hook]: scheduler tracepoints not found\n");
 		ret = -ENOENT;
 		goto err_page;
@@ -420,6 +486,14 @@ int nksu_path_init(void)
 		goto err_page;
 	}
 
+	ret = tracepoint_probe_register(tp_path_exit, nksu_path_task_exit, NULL);
+	if (ret) {
+		pr_err("[hook]: register path exit probe failed: %d\n", ret);
+		tracepoint_probe_unregister(tp_path_fork, nksu_path_fork, NULL);
+		tracepoint_probe_unregister(tp_path_exec, nksu_path_exec, NULL);
+		goto err_page;
+	}
+
 	smp_store_release(&nksu_path_ready, true);
 
 	pr_info("[hook]: staged su redirect paths in a private shmem page\n");
@@ -430,6 +504,7 @@ err_page:
 	tracepoint_synchronize_unregister();
 	tp_path_exec = NULL;
 	tp_path_fork = NULL;
+	tp_path_exit = NULL;
 	WRITE_ONCE(nksu_path_file, NULL);
 	fput(file);
 	return ret;
@@ -437,7 +512,9 @@ err_page:
 
 void nksu_path_exit(void)
 {
+	struct nksu_path_cache *cache;
 	struct file *file;
+	unsigned long index = 0;
 
 	smp_store_release(&nksu_path_ready, false);
 
@@ -445,9 +522,20 @@ void nksu_path_exit(void)
 		tracepoint_probe_unregister(tp_path_exec, nksu_path_exec, NULL);
 	if (tp_path_fork)
 		tracepoint_probe_unregister(tp_path_fork, nksu_path_fork, NULL);
+	if (tp_path_exit)
+		tracepoint_probe_unregister(tp_path_exit, nksu_path_task_exit, NULL);
 	tp_path_exec = NULL;
 	tp_path_fork = NULL;
+	tp_path_exit = NULL;
 	tracepoint_synchronize_unregister();
+	synchronize_rcu();
+
+	while ((cache = xa_find(&nksu_path_addrs, &index, ~0UL, XA_PRESENT))) {
+		xa_erase(&nksu_path_addrs, index);
+		kfree(cache);
+		index++;
+	}
+	xa_destroy(&nksu_path_addrs);
 
 	file = READ_ONCE(nksu_path_file);
 	WRITE_ONCE(nksu_path_file, NULL);
@@ -510,7 +598,9 @@ static unsigned long try_redirect_path(struct pt_regs *regs, unsigned int arg_in
 		return 0;
 	}
 
-	base = nksu_path_user_addr(current->mm, true);
+	base = nksu_path_cached_addr();
+	if (unlikely(!base))
+		base = nksu_path_user_addr(current->mm, true);
 	if (unlikely(!base)) {
 		*map_missing = true;
 		pr_warn_ratelimited("[hook]: pid %d has no su redirect mapping\n", current->pid);
