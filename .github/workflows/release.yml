@@ -38,7 +38,9 @@ jobs:
       - name: Download build artifacts
         run: |
           set -euo pipefail
-          gh run download "${{ steps.run.outputs.run_id }}" -D artifacts
+          gh run download "${{ steps.run.outputs.run_id }}" -n app-release.apk -D artifacts/apk
+          gh run download "${{ steps.run.outputs.run_id }}" -p 'ko-*' -D artifacts/ko
+          find artifacts -maxdepth 3 -type f -printf '%p %s\n'
 
       - name: Collect assets
         run: |
