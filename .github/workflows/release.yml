@@ -44,7 +44,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-assets
-          cp artifacts/app-release.apk/app-release.apk "release-assets/NekoSU-${TAG}.apk"
+          apk="$(find artifacts -name '*.apk' -type f | head -1)"
+          if [ -z "$apk" ]; then
+            echo "APK artifact not found" >&2
+            exit 1
+          fi
+          cp "$apk" "release-assets/NekoSU-${TAG}.apk"
           find artifacts -name '*_nksu.ko' -exec cp {} release-assets/ \;
           (cd release-assets && sha256sum * > SHA256SUMS)
           ls -lh release-assets
