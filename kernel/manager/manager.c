@@ -350,21 +350,26 @@ static int mark_zygote(void)
 		rcu_read_unlock();
 
 		/*
-		 * Android 12+ launches apps from a pre-forked USAP pool, not
-		 * always directly from zygote.  Those workers must be marked too:
-		 * an app adopted from an unmarked USAP worker never inherits the
-		 * syscall tracepoint flag, so its prctl() calls bypass the
-		 * manager fd grant even though the manager itself verified.
+		 * Refresh an already-running authorized process: the tracepoint
+		 * flag can be cleared by other tracing users between scans, so
+		 * its absence does not prove this process is irrelevant.
 		 *
-		 * Also refresh an already-running authorized process.  The flag
-		 * can be cleared by other tracing users between scans, so its
-		 * absence does not prove this process is irrelevant.
+		 * App workers may also be pre-forked (USAP on devices where it
+		 * is enabled).  Match their short comm first so a failed cmdline
+		 * read cannot silently leave the whole app pool unmarked.
 		 */
 		if (is_manager_uid(uid) || nksu_profile_has_uid(uid)) {
 			label = "authorized process";
+		} else if (!strncmp(p->comm, "zygote", 6) || !strncmp(p->comm, "usap", 4) ||
+			   strstr(p->comm, "app_process")) {
+			label = p->comm;
 		} else {
-			if (get_task_cmdline(p, cmdline_buf, 256) <= 0)
+			if (get_task_cmdline(p, cmdline_buf, 256) <= 0) {
+				pr_warn_ratelimited(
+					"[manager] cannot read cmdline for pid=%d uid=%u\n", pid,
+					uid);
 				goto next;
+			}
 			if (strncmp(cmdline_buf, "zygote", 6) != 0 &&
 			    strncmp(cmdline_buf, "usap", 4) != 0 &&
 			    !strstr(cmdline_buf, "app_process"))

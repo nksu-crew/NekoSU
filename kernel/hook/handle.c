@@ -59,11 +59,13 @@ long handle_prctl_hooks(struct pt_regs *regs)
 
 	switch (option) {
 	case NKSU_PRCTL_GET_SHM_FD:
-		fmac_anonfd_get();
+		if (fmac_anonfd_get() < 0)
+			pr_err_ratelimited("[manager] cannot attach shared-memory fd\n");
 		return 1;
 
 	case NKSU_PRCTL_GET_CTL_FD:
-		fmac_ctlfd_get();
+		if (fmac_ctlfd_get() < 0)
+			pr_err_ratelimited("[manager] cannot attach control fd\n");
 		return 1;
 
 	default:
