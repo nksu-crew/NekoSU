@@ -28,12 +28,6 @@ on:
       - "uapi/**"
       - "manager/app/**"
       - "neko/**"
-      - "*.gradle.kts"
-      - "gradle.properties"
-      - "gradle/libs.versions.toml"
-      - "gradle/wrapper/**"
-      - "gradlew"
-      - "gradlew.bat"
   pull_request:
     branches: [ "main" ]
     paths:
@@ -43,12 +37,6 @@ on:
       - "uapi/**"
       - "manager/app/**"
       - "neko/**"
-      - "*.gradle.kts"
-      - "gradle.properties"
-      - "gradle/libs.versions.toml"
-      - "gradle/wrapper/**"
-      - "gradlew"
-      - "gradlew.bat"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
