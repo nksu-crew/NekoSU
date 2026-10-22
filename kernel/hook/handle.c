@@ -1,7 +1,6 @@
 #include <linux/binfmts.h>
 #include <linux/compiler.h>
 #include <linux/cred.h>
-#include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/errno.h>
 #include <linux/fs.h>
@@ -242,7 +241,6 @@ static unsigned long nksu_path_user_addr(struct mm_struct *mm, bool trylock)
 {
 	struct file *file;
 	unsigned long addr;
-	int retry;
 
 	if (unlikely(!mm || !smp_load_acquire(&nksu_path_ready)))
 		return 0;
@@ -257,27 +255,15 @@ static unsigned long nksu_path_user_addr(struct mm_struct *mm, bool trylock)
 			 * disabled, but if this path is preemptible there is no reason
 			 * to fail: wait for the lock normally.
 			 */
-			if (preemptible()) {
+			if (preemptible())
 				mmap_read_lock(mm);
-			} else {
-				/*
-				 * A writer (mmap/munmap) may hold the lock briefly.  Spin
-				 * for a short bounded window instead of failing the su
-				 * redirect immediately.
-				 */
-				for (retry = 0; retry < 128; retry++) {
-					udelay(1);
-					if (mmap_read_trylock(mm))
-						goto locked;
-				}
+			else
 				return 0;
-			}
 		}
 	} else {
 		mmap_read_lock(mm);
 	}
 
-locked:
 	addr = nksu_path_scan(mm, file);
 	mmap_read_unlock(mm);
 	return addr;
