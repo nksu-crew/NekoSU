@@ -10,7 +10,6 @@
 #include <linux/mmap_lock.h>
 #include <linux/module.h>
 #include <linux/pid.h>
-#include <linux/preempt.h>
 #include <linux/rcupdate.h>
 #include <linux/sched.h>
 #include <linux/sched/signal.h>
@@ -249,17 +248,8 @@ static unsigned long nksu_path_user_addr(struct mm_struct *mm, bool trylock)
 		return 0;
 
 	if (trylock) {
-		if (!mmap_read_trylock(mm)) {
-			/*
-			 * The syscall-enter tracepoint usually runs with preemption
-			 * disabled, but if this path is preemptible there is no reason
-			 * to fail: wait for the lock normally.
-			 */
-			if (preemptible())
-				mmap_read_lock(mm);
-			else
-				return 0;
-		}
+		if (!mmap_read_trylock(mm))
+			return 0;
 	} else {
 		mmap_read_lock(mm);
 	}
