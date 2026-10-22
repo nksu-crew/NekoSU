@@ -38,7 +38,6 @@ jobs:
       - name: Download build artifacts
         run: |
           set -euo pipefail
-          gh run download "${{ steps.run.outputs.run_id }}" -n app-release.apk -D artifacts/apk
           gh run download "${{ steps.run.outputs.run_id }}" -p 'ko-*' -D artifacts/ko
           find artifacts -maxdepth 3 -type f -printf '%p %s\n'
 
@@ -46,12 +45,17 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-assets
-          apk="$(find artifacts -name '*.apk' -type f | head -1)"
-          if [ -z "$apk" ]; then
+          run_id="${{ steps.run.outputs.run_id }}"
+          artifact_id="$(gh api "repos/${GH_REPO}/actions/runs/${run_id}/artifacts" --jq '.artifacts[] | select(.name == "app-release.apk") | .id')"
+          if [ -z "$artifact_id" ]; then
             echo "APK artifact not found" >&2
             exit 1
           fi
-          cp "$apk" "release-assets/NekoSU-${TAG}.apk"
+          curl -fsSL \
+            -H "Authorization: token ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -o "release-assets/NekoSU-${TAG}.apk" \
+            "https://api.github.com/repos/${GH_REPO}/actions/artifacts/${artifact_id}/zip"
           find artifacts -name '*_nksu.ko' -exec cp {} release-assets/ \;
           (cd release-assets && sha256sum * > SHA256SUMS)
           ls -lh release-assets
