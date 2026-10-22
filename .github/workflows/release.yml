@@ -1,0 +1,60 @@
+name: Publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to publish (for example v1.0.6-beta.5)'
+        required: true
+        type: string
+      notes:
+        description: 'Release notes'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Find the build run for this tag
+        id: run
+        run: |
+          set -euo pipefail
+          run_id="$(gh run list --workflow build.yml --branch "$TAG" --limit 1 --json databaseId --jq '.[0].databaseId')"
+          if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
+            echo "No build run found for $TAG" >&2
+            exit 1
+          fi
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download build artifacts
+        run: |
+          set -euo pipefail
+          gh run download "${{ steps.run.outputs.run_id }}" -D artifacts
+
+      - name: Collect assets
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          cp artifacts/app-release.apk/app-release.apk "release-assets/NekoSU-${TAG}.apk"
+          find artifacts -name '*_nksu.ko' -exec cp {} release-assets/ \;
+          (cd release-assets && sha256sum * > SHA256SUMS)
+          ls -lh release-assets
+
+      - name: Publish the release
+        run: |
+          set -euo pipefail
+          title="NekoSU ${TAG}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* --clobber
+            gh release edit "$TAG" --title "$title" --draft=false --prerelease --notes "${{ inputs.notes }}"
+          else
+            gh release create "$TAG" --title "$title" --prerelease --notes "${{ inputs.notes }}" release-assets/*
+          fi
