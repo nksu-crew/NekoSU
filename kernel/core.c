@@ -288,13 +288,6 @@ static int __init nekosu_init(void)
 		return ret;
 	}
 
-	ret = nksu_path_init();
-	if (ret) {
-		pr_err("Failed to stage su redirect paths: %d\n", ret);
-		nksu_symbol_compat_exit();
-		return ret;
-	}
-
 	/*
      * This feature must be armed before ncore can mount modules, so it is
      * initialized here rather than in a staged component group.
@@ -302,7 +295,6 @@ static int __init nekosu_init(void)
 	ret = nksu_umount_init();
 	if (ret) {
 		pr_err("Failed to initialize module mount feature: %d\n", ret);
-		nksu_path_exit();
 		nksu_symbol_compat_exit();
 		return ret;
 	}
@@ -316,7 +308,6 @@ static int __init nekosu_init(void)
 	if (ret) {
 		pr_err("Failed to initialize nekosu: %d\n", ret);
 		nksu_umount_exit();
-		nksu_path_exit();
 		nksu_symbol_compat_exit();
 		return ret;
 	}
@@ -334,7 +325,6 @@ static void __exit nekosu_exit(void)
 		nekosu_cleanup_all_components();
 
 	nksu_umount_exit();
-	nksu_path_exit();
 	nksu_symbol_compat_exit();
 	nksu_ksym_cache_clear();
 	pr_info("nekosu module unloaded\n");

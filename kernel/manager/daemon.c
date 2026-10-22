@@ -89,7 +89,6 @@ static void nksu_daemon_exec(void *data, struct task_struct *p, pid_t old_pid,
 
 	set_tsk_thread_flag(p, TIF_SYSCALL_TRACEPOINT);
 	set_tsk_thread_flag(p, NKSU_TIF_NCORE);
-	nksu_path_install_task(p);
 	pr_info("[daemon] marked %s (pid %d) as ncore\n", bprm ? bprm->filename : "?", p->pid);
 
 	if (!try_module_get(THIS_MODULE)) {
