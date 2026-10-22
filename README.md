@@ -1,4 +1,6 @@
-<h1 align="center">NekoSU</h1>
+<h1 align="center">
+  <img src="assets/nekosu-banner.png" alt="NekoSU" width="720">
+</h1>
 
 <p align="center">
   <strong>Kernel-level root for Android.</strong><br/>
