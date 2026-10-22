@@ -833,6 +833,7 @@ static int scan_and_apply(void)
 	install_ret = mark_zygote();
 	if (install_ret)
 		pr_warn("[manager] cannot mark zygote: %d\n", install_ret);
+	nksu_path_sync_all();
 
 out:
 	nksu_borrow_creds_end(old);
