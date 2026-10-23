@@ -301,13 +301,40 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   Future<bool?> _confirmUpdate(ModuleInfo module, ModuleUpdate update) {
-    return showDialog<bool>(
+    final scheme = Theme.of(context).colorScheme;
+    return showGeneralDialog<bool>(
       context: context,
-      builder: (context) => _ModuleUpdateDialog(
-        module: module,
-        update: update,
-        openChangelog: _openChangelog,
-      ),
+      barrierDismissible: true,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      barrierColor: scheme.scrim.withValues(alpha: 0.4),
+      transitionDuration: const Duration(milliseconds: 260),
+      pageBuilder: (context, animation, secondaryAnimation) =>
+          _ModuleUpdateDialog(
+            module: module,
+            update: update,
+            openChangelog: _openChangelog,
+          ),
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        final slide = Tween<Offset>(
+          begin: const Offset(0, 0.04),
+          end: Offset.zero,
+        ).animate(curved);
+        return FadeTransition(
+          opacity: curved,
+          child: SlideTransition(
+            position: slide,
+            child: ScaleTransition(
+              scale: Tween<double>(begin: 0.95, end: 1).animate(curved),
+              child: child,
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -591,23 +618,32 @@ class _ModuleUpdateDialogState extends State<_ModuleUpdateDialog> {
         width: double.maxFinite,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxHeight: 325),
-          child: Container(
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              color: scheme.surfaceBright,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: SingleChildScrollView(
-                child: changelogUrl == null
-                    ? Text(
-                        l10n.modulesUpdateChangelogEmpty,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: scheme.onSurfaceVariant,
+          child: AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: Container(
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                color: scheme.surfaceBright,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: SingleChildScrollView(
+                  child: changelogUrl == null
+                      ? Text(
+                          l10n.modulesUpdateChangelogEmpty,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        )
+                      : _buildChangelog(
+                          l10n: l10n,
+                          theme: theme,
+                          scheme: scheme,
                         ),
-                      )
-                    : _buildChangelog(l10n: l10n, theme: theme, scheme: scheme),
+                ),
               ),
             ),
           ),
@@ -639,8 +675,10 @@ class _ModuleUpdateDialogState extends State<_ModuleUpdateDialog> {
     return FutureBuilder<String>(
       future: _changelog,
       builder: (context, snapshot) {
+        final Widget child;
         if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(
+          child = const Center(
+            key: ValueKey('changelog-loading'),
             child: Padding(
               padding: EdgeInsets.symmetric(vertical: 24),
               child: SizedBox(
@@ -650,9 +688,9 @@ class _ModuleUpdateDialogState extends State<_ModuleUpdateDialog> {
               ),
             ),
           );
-        }
-        if (snapshot.hasError) {
-          return Column(
+        } else if (snapshot.hasError) {
+          child = Column(
+            key: const ValueKey('changelog-error'),
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
@@ -668,26 +706,38 @@ class _ModuleUpdateDialogState extends State<_ModuleUpdateDialog> {
               ),
             ],
           );
+        } else {
+          final changelog = snapshot.data?.trim() ?? '';
+          if (changelog.isEmpty) {
+            child = Text(
+              l10n.modulesUpdateChangelogEmpty,
+              key: const ValueKey('changelog-empty'),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            );
+          } else {
+            child = KeyedSubtree(
+              key: const ValueKey('changelog-content'),
+              child: MarkdownBody(
+                data: changelog,
+                selectable: true,
+                styleSheet: _markdownStyle(theme, scheme),
+                onTapLink: (text, href, title) {
+                  if (href == null) return;
+                  final uri = Uri.tryParse(href);
+                  if (uri == null || !ModuleUpdate.isHttpUri(uri)) return;
+                  unawaited(widget.openChangelog(href));
+                },
+              ),
+            );
+          }
         }
-        final changelog = snapshot.data?.trim() ?? '';
-        if (changelog.isEmpty) {
-          return Text(
-            l10n.modulesUpdateChangelogEmpty,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: scheme.onSurfaceVariant,
-            ),
-          );
-        }
-        return MarkdownBody(
-          data: changelog,
-          selectable: true,
-          styleSheet: _markdownStyle(theme, scheme),
-          onTapLink: (text, href, title) {
-            if (href == null) return;
-            final uri = Uri.tryParse(href);
-            if (uri == null || !ModuleUpdate.isHttpUri(uri)) return;
-            unawaited(widget.openChangelog(href));
-          },
+        return AnimatedSwitcher(
+          duration: const Duration(milliseconds: 180),
+          switchInCurve: Curves.easeOut,
+          switchOutCurve: Curves.easeIn,
+          child: child,
         );
       },
     );
