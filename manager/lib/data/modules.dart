@@ -39,6 +39,9 @@ class ModuleInfo {
 
   String get title => name.trim().isEmpty ? id : name.trim();
 
+  /// Numeric `versionCode` from `module.prop`, or `0` when absent/invalid.
+  int get localVersionCode => int.tryParse(versionCode.trim()) ?? 0;
+
   factory ModuleInfo.fromJson(Map<String, dynamic> json) {
     String readString(String key) => json[key]?.toString() ?? '';
     bool readBool(String key) => json[key] == true || json[key] == 'true';
