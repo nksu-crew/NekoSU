@@ -982,12 +982,40 @@ class _ModuleCardState extends State<_ModuleCard> {
                           icon: Icons.code_rounded,
                           label: showActionText ? l10n.modulesWebUi : null,
                         ),
-                      if (showUpdate)
-                        _ModuleCardButton(
-                          onPressed: widget.onUpdate,
-                          icon: Icons.system_update_rounded,
-                          label: l10n.modulesUpdateNow,
+                      AnimatedSize(
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeOutCubic,
+                        alignment: Alignment.centerLeft,
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 180),
+                          switchInCurve: Curves.easeOut,
+                          switchOutCurve: Curves.easeIn,
+                          transitionBuilder: (child, animation) {
+                            return FadeTransition(
+                              opacity: animation,
+                              child: ScaleTransition(
+                                scale: Tween<double>(
+                                  begin: 0.85,
+                                  end: 1,
+                                ).animate(animation),
+                                child: child,
+                              ),
+                            );
+                          },
+                          child: showUpdate
+                              ? KeyedSubtree(
+                                  key: const ValueKey('module-update'),
+                                  child: _ModuleCardButton(
+                                    onPressed: widget.onUpdate,
+                                    icon: Icons.system_update_rounded,
+                                    label: l10n.modulesUpdateNow,
+                                  ),
+                                )
+                              : const SizedBox.shrink(
+                                  key: ValueKey('module-update-empty'),
+                                ),
                         ),
+                      ),
                     ],
                   ),
                 ),
