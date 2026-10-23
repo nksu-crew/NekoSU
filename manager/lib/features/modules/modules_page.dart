@@ -1008,7 +1008,12 @@ class _ModuleCardState extends State<_ModuleCard> {
                                   child: _ModuleCardButton(
                                     onPressed: widget.onUpdate,
                                     icon: Icons.system_update_rounded,
-                                    label: l10n.modulesUpdateNow,
+                                    label: showActionText
+                                        ? l10n.modulesUpdateNow
+                                        : null,
+                                    tooltip: showActionText
+                                        ? null
+                                        : l10n.modulesUpdateNow,
                                   ),
                                 )
                               : const SizedBox.shrink(
