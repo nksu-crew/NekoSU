@@ -1,0 +1,128 @@
+name: Clean caches
+
+on:
+  workflow_dispatch:
+    inputs:
+      key_prefix:
+        description: 'Only delete caches whose key starts with this prefix (empty = all)'
+        required: false
+        default: ''
+        type: string
+      ref:
+        description: 'Only delete caches for this git ref, for example refs/heads/main (empty = all)'
+        required: false
+        default: ''
+        type: string
+      older_than_days:
+        description: 'Only delete caches last accessed at least this many days ago (0 = no age filter)'
+        required: false
+        default: '0'
+        type: string
+      dry_run:
+        description: 'List matching caches without deleting them'
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: clean-caches
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      KEY_PREFIX: ${{ inputs.key_prefix }}
+      REF_FILTER: ${{ inputs.ref }}
+      OLDER_THAN_DAYS: ${{ inputs.older_than_days }}
+      DRY_RUN: ${{ inputs.dry_run }}
+
+    steps:
+    - name: List repository caches
+      run: |
+        set -euo pipefail
+        gh cache list --limit 1000 --json id,key,ref,sizeInBytes,createdAt,lastAccessedAt > "$RUNNER_TEMP/caches.json"
+        echo "Repository caches: $(jq length "$RUNNER_TEMP/caches.json")"
+
+    - name: Delete matching caches
+      run: |
+        set -euo pipefail
+        python3 - <<'PY'
+        import datetime
+        import json
+        import os
+        import subprocess
+        import sys
+
+        cache_file = os.path.join(os.environ["RUNNER_TEMP"], "caches.json")
+        with open(cache_file, encoding="utf-8") as handle:
+            caches = json.load(handle)
+
+        prefix = os.environ.get("KEY_PREFIX", "").strip()
+        ref_filter = os.environ.get("REF_FILTER", "").strip()
+        older_than_days = int(os.environ.get("OLDER_THAN_DAYS", "0").strip() or "0")
+        dry_run = os.environ.get("DRY_RUN", "true").strip().lower() == "true"
+        now = datetime.datetime.now(datetime.timezone.utc)
+
+        selected = []
+        for cache in caches:
+            key = cache.get("key") or ""
+            ref = cache.get("ref") or ""
+            if prefix and not key.startswith(prefix):
+                continue
+            if ref_filter and ref != ref_filter:
+                continue
+            if older_than_days > 0:
+                stamp = cache.get("lastAccessedAt") or cache.get("createdAt")
+                if not stamp:
+                    continue
+                try:
+                    moment = datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if (now - moment).days < older_than_days:
+                    continue
+            selected.append(cache)
+
+        total_bytes = sum(int(cache.get("sizeInBytes") or 0) for cache in selected)
+        print(f"Matching caches: {len(selected)} ({total_bytes / 1024 / 1024:.1f} MiB)")
+        for cache in selected:
+            print(f"  {cache.get('id')}  {cache.get('ref')}  {cache.get('key')}")
+
+        summary = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary:
+            with open(summary, "a", encoding="utf-8") as handle:
+                handle.write("### Cache cleanup\n\n")
+                handle.write(f"- Matching caches: {len(selected)} ({total_bytes / 1024 / 1024:.1f} MiB)\n")
+                handle.write(f"- Mode: {'dry run' if dry_run else 'delete'}\n")
+                if prefix:
+                    handle.write(f"- Key prefix: `{prefix}`\n")
+                if ref_filter:
+                    handle.write(f"- Ref: `{ref_filter}`\n")
+                if older_than_days > 0:
+                    handle.write(f"- Last accessed: at least {older_than_days} days ago\n")
+
+        if not selected:
+            print("No matching caches.")
+            sys.exit(0)
+
+        if dry_run:
+            print("Dry run: nothing deleted.")
+            sys.exit(0)
+
+        repo = os.environ["GH_REPO"]
+        for cache in selected:
+            cache_id = cache["id"]
+            subprocess.run(
+                ["gh", "api", "--method", "DELETE", f"repos/{repo}/actions/caches/{cache_id}"],
+                check=True,
+            )
+        print(f"Deleted {len(selected)} cache(s).")
+        PY
