@@ -264,10 +264,17 @@ void nksu_ksym_scan_memory(void)
      *
      * Do not use a compat pointer here: the first lookup (filp_open, which
      * bootstraps the whole layer) runs before any pointer has been filled
-     * in, so it would be NULL.  printk is a direct module relocation and is
-     * always valid.
+     * in, so it would be NULL.
+     *
+     * 6.x turns printk() into a macro, so taking its address no longer
+     * compiles there; copy_from_kernel_nofault() exists and is exported
+     * from 5.8 on.  Older trees (4.9/5.4) still have a real printk symbol.
      */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+	anchor = (unsigned long)&copy_from_kernel_nofault;
+#else
 	anchor = (unsigned long)&printk;
+#endif
 	if (anchor) {
 		pr_info("[ksym] scanning kernel image from anchor 0x%lx\n", anchor);
 
