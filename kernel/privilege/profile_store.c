@@ -180,18 +180,18 @@ void nksu_profile_store_save(void)
 			ssize_t written = nksu_kwrite(fp, buf + pos, (size_t)(len - pos), &pos);
 
 			if (written < 0) {
-				pr_err("[profile] save %s failed: %d\n", NKSU_PROFILE_FILE,
-				       (int)written);
+				pr_err("[profile] write %s failed: %d (pos=%lld)\n",
+				       NKSU_PROFILE_FILE, (int)written, pos);
 				break;
 			}
 			if (written == 0) {
-				pr_err("[profile] save %s: short write at %lld\n",
+				pr_err("[profile] write %s: short write at %lld\n",
 				       NKSU_PROFILE_FILE, pos);
 				break;
 			}
 		}
 	} else if (PTR_ERR(fp) != -ENOENT) {
-		pr_err("[profile] save %s failed: %ld\n", NKSU_PROFILE_FILE, PTR_ERR(fp));
+		pr_err("[profile] open %s failed: %ld\n", NKSU_PROFILE_FILE, PTR_ERR(fp));
 	}
 
 	nksu_borrow_creds_end(old);
