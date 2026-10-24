@@ -33,6 +33,17 @@
 #include "symbol/symbol.h"
 #include "symbol/symbol_internal.h"
 
+/*
+ * 4.9 still exports kallsyms_lookup_name() (the export was removed in 5.7).
+ * Use it as the primary source there: it is cheap and independent of the
+ * in-memory table layout.  The reference is weak so a vendor kernel that
+ * dropped the export still loads (the pointer is then NULL and the /proc /
+ * scanner fallbacks take over).
+ */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 7, 0)
+extern unsigned long kallsyms_lookup_name(const char *name) __attribute__((weak));
+#endif
+
 /* cache buckets: 2^18, very low load for ~100k symbols */
 static DEFINE_HASHTABLE(ksym_htable, 18);
 static DEFINE_MUTEX(ksym_lock);
@@ -98,6 +109,17 @@ unsigned long nksu_ksym_lookup(const char *name)
 	e = ksym_find_locked(name);
 	if (e)
 		return e->addr;
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 7, 0)
+	/* 0) 4.9 still exports kallsyms_lookup_name() (weak: may be absent). */
+	if (kallsyms_lookup_name) {
+		addr = kallsyms_lookup_name(name);
+		if (addr) {
+			nksu_ksym_cache_add_locked(name, addr);
+			return addr;
+		}
+	}
+#endif
 
 	/* 1) /proc/kallsyms */
 	addr = nksu_ksym_lookup_proc(name);

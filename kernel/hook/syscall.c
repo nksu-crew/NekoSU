@@ -17,7 +17,7 @@ syscall_fn_t *syscall_table;
 
 struct hook_entry {
 	unsigned long addr;
-	syscall_fn_t previous;
+	void *previous;
 };
 
 static struct hook_entry hook_table[MAX_HOOKS];
@@ -28,12 +28,14 @@ static DEFINE_SPINLOCK(hook_lock);
  * Replacing a slot goes through hook/patch.c, the single owner of the
  * text-patch primitive (and of init_mm).  Do not add a second patcher here.
  */
-static int patch_slot(void *addr, syscall_fn_t newval)
+static int patch_slot(void *addr, void *newval)
 {
 	return nksu_patch_text(addr, &newval, sizeof(newval));
 }
 
-static int record_slot(unsigned long addr, syscall_fn_t hook_fn)
+static void *recorded_previous(unsigned long addr);
+
+static int record_slot(unsigned long addr, void *hook_fn, void **previous)
 {
 	unsigned long flags;
 	int ret;
@@ -44,9 +46,12 @@ static int record_slot(unsigned long addr, syscall_fn_t hook_fn)
 		return -ENOMEM;
 	}
 	hook_table[hook_count].addr = addr;
-	hook_table[hook_count].previous = *(syscall_fn_t *)addr;
+	hook_table[hook_count].previous = *(void **)addr;
 	hook_count++;
 	spin_unlock_irqrestore(&hook_lock, flags);
+
+	if (previous)
+		*previous = recorded_previous(addr);
 
 	ret = patch_slot((void *)addr, hook_fn);
 	if (ret) {
@@ -75,20 +80,20 @@ static int restore_slot(unsigned long addr)
 		pr_debug("nksu: restore: slot not recorded\n");
 		return -ENOENT;
 	}
-	previous = hook_table[i].previous;
+	previous = (syscall_fn_t)hook_table[i].previous;
 	hook_table[i] = hook_table[--hook_count];
 	spin_unlock_irqrestore(&hook_lock, flags);
 
-	ret = patch_slot((void *)addr, previous);
+	ret = patch_slot((void *)addr, (void *)previous);
 	if (ret)
 		pr_err("nksu: restore patch failed: %d\n", ret);
 	return ret;
 }
 
-static syscall_fn_t recorded_previous(unsigned long addr)
+static void *recorded_previous(unsigned long addr)
 {
 	unsigned long flags;
-	syscall_fn_t previous = NULL;
+	void *previous = NULL;
 	int i;
 
 	spin_lock_irqsave(&hook_lock, flags);
@@ -114,14 +119,12 @@ int syscall_slot_hook(int nr, syscall_fn_t fn, syscall_fn_t *previous, const cha
 	}
 
 	addr = (unsigned long)&syscall_table[nr];
-	ret = record_slot(addr, fn);
+	ret = record_slot(addr, (void *)fn, (void **)previous);
 
 	if (ret) {
 		pr_err("nksu: failed to hook %s: %d\n", tag, ret);
 		return ret;
 	}
-	if (previous)
-		*previous = recorded_previous(addr);
 	pr_info("nksu: hooked %s\n", tag);
 	return 0;
 }
@@ -129,6 +132,31 @@ int syscall_slot_hook(int nr, syscall_fn_t fn, syscall_fn_t *previous, const cha
 int syscall_slot_unhook(int nr)
 {
 	return restore_slot((unsigned long)&syscall_table[nr]);
+}
+
+/*
+ * 4.9 sys_call_table holds plain sys_* functions (no pt_regs wrapper), so the
+ * init.rc proxy hooks a slot with the native C signature through this entry
+ * point.  The slot bookkeeping (and restore path) is shared.
+ */
+int syscall_slot_hook_native(int nr, void *fn, void **previous, const char *tag)
+{
+	unsigned long addr;
+	int ret;
+
+	if (!syscall_table) {
+		ret = syscall_table_resolve();
+		if (ret)
+			return ret;
+	}
+
+	addr = (unsigned long)&syscall_table[nr];
+	ret = record_slot(addr, fn, previous);
+	if (ret)
+		pr_err("nksu: failed to hook %s: %d\n", tag, ret);
+	else
+		pr_info("nksu: hooked %s\n", tag);
+	return ret;
 }
 
 int syscall_table_resolve(void)

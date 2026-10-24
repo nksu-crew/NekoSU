@@ -61,6 +61,9 @@ endif
 ccflags-y += -I$(srctree)/security/selinux
 ccflags-y += -I$(srctree)/security/selinux/include
 ccflags-y += -I$(IDIR)
+ccflags-y += -I$(src)/include
+ccflags-y += -I$(src)/..
+ccflags-y += -I$(src)/../..
 # Source root: headers are grouped per subsystem, e.g. "hook/handle.h".
 ccflags-y += -I$(IDIR)/..
 # Repository root: the shared kernel/userspace UAPI headers under uapi/.

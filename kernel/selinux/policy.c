@@ -18,6 +18,7 @@
 #include "guards.h"
 #include <linux/slab.h>
 #include <linux/mutex.h>
+#include <linux/spinlock.h>
 #include <linux/rcupdate.h>
 #include <linux/version.h>
 #include <linux/printk.h>
@@ -47,6 +48,7 @@
 #endif
 
 /* the pre-hook policy, restored on unload */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 static struct selinux_policy *nksu_orig_policy __read_mostly;
 static struct selinux_policy *nksu_work_policy __read_mostly;
 
@@ -54,15 +56,40 @@ struct selinux_policy *nksu_orig_policy_get(void)
 {
 	return nksu_orig_policy;
 }
+#else
+/*
+ * 4.9 keeps the policy tables directly in struct selinux_ss.  The original
+ * policydb struct is saved aside and the working deep copy is swapped into the
+ * live ss in place, so the ss pointer (and its status page / locks) never
+ * changes.
+ */
+static struct policydb *nksu_orig_pdb __read_mostly;
+
+struct policydb *nksu_orig_policy_get(void)
+{
+	return nksu_orig_pdb;
+}
+#endif
 
 /*
  * Independent deep-copy of a selinux_policy via the policydb (de)serializer,
  * exactly like KernelSU's ksu_dup_sepolicy.  This is what makes mutation and
  * eventual destruction of the copy safe.
  */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 static struct selinux_policy *nksu_policy_dup(struct selinux_policy *old_pol)
+#else
+static struct policydb *nksu_policy_dup(struct policydb *old_pdb)
+#endif
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 	struct selinux_policy *new_pol;
+#else
+	struct policydb *new_pdb;
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+	struct policydb *old_pdb = &old_pol->policydb;
+#endif
 	struct policy_file fp;
 	size_t len;
 	void *data;
@@ -70,8 +97,7 @@ static struct selinux_policy *nksu_policy_dup(struct selinux_policy *old_pol)
 
 	// policydb_read() adds each type to its own attribute map; keep one
 	// spare ebitmap entry per type so the round-trip never returns -EINVAL.
-	len = old_pol->policydb.len +
-	      (size_t)old_pol->policydb.p_types.nprim * (sizeof(u32) + sizeof(u64));
+	len = old_pdb->len + (size_t)old_pdb->p_types.nprim * (sizeof(u32) + sizeof(u64));
 
 	data = vmalloc(len);
 	if (!data)
@@ -80,7 +106,7 @@ static struct selinux_policy *nksu_policy_dup(struct selinux_policy *old_pol)
 	fp.data = data;
 	fp.len = len;
 
-	ret = policydb_write(&old_pol->policydb, &fp);
+	ret = policydb_write(old_pdb, &fp);
 	if (ret) {
 		pr_err("[selinux]: policydb_write: %d\n", ret);
 		vfree(data);
@@ -96,14 +122,17 @@ static struct selinux_policy *nksu_policy_dup(struct selinux_policy *old_pol)
 		if (len >= kConfigOff + sizeof(u32)) {
 			u32 *config_ptr = (u32 *)((unsigned long)data + kConfigOff);
 
-			if (old_pol->policydb.android_netlink_route)
+			if (old_pdb->android_netlink_route)
 				*config_ptr |= POLICYDB_CONFIG_ANDROID_NETLINK_ROUTE;
-			if (old_pol->policydb.android_netlink_getneigh)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
+			if (old_pdb->android_netlink_getneigh)
 				*config_ptr |= POLICYDB_CONFIG_ANDROID_NETLINK_GETNEIGH;
+#endif
 		}
 	}
 #endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 	/*
 	 * kmemdup() copies selinux_policy.sidtab too, so the working copy
 	 * shares the original's sidtab. See the KNOWN RISK note in
@@ -127,10 +156,166 @@ static struct selinux_policy *nksu_policy_dup(struct selinux_policy *old_pol)
 		return ERR_PTR(ret);
 	}
 	new_pol->policydb.len = len;
+#else
+	new_pdb = kzalloc(sizeof(*new_pdb), GFP_KERNEL);
+	if (!new_pdb) {
+		vfree(data);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	fp.data = data;
+	fp.len = len;
+
+	ret = policydb_read(new_pdb, &fp);
+	if (ret) {
+		pr_err("[selinux]: policydb_read: %d\n", ret);
+		kfree(new_pdb);
+		vfree(data);
+		return ERR_PTR(ret);
+	}
+	new_pdb->len = len;
+#endif
 	vfree(data);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 	return new_pol;
+#else
+	return new_pdb;
+#endif
 }
+
+/*
+ * Clone the live policy while holding only the read lock for the actual
+ * serializer copy (policydb_write() cannot sleep), then parse it back with
+ * allocation permitted.  Used by the 4.9 rule engine, which must not allocate
+ * under the policy write lock.
+ */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 7, 0)
+struct policydb *nksu_policydb_dup_live(void)
+{
+	struct policydb *new_pdb;
+	struct policy_file fp;
+	size_t alloc, need;
+	void *data;
+	u32 netlink_route;
+	int ret, attempt;
+
+	if (!selinux_state.ss)
+		return ERR_PTR(-ENOENT);
+
+	for (attempt = 0; attempt < 3; attempt++) {
+		alloc = selinux_state.ss->policydb.len +
+			(size_t)selinux_state.ss->policydb.p_types.nprim *
+				(sizeof(u32) + sizeof(u64)) + 4096;
+		data = vmalloc(alloc);
+		if (!data)
+			return ERR_PTR(-ENOMEM);
+
+		read_lock(&selinux_state.ss->policy_rwlock);
+		need = selinux_state.ss->policydb.len +
+		       (size_t)selinux_state.ss->policydb.p_types.nprim *
+			       (sizeof(u32) + sizeof(u64));
+		if (need > alloc) {
+			read_unlock(&selinux_state.ss->policy_rwlock);
+			vfree(data);
+			continue;
+		}
+		netlink_route = selinux_state.ss->policydb.android_netlink_route;
+		fp.data = data;
+		fp.len = alloc;
+		ret = policydb_write(&selinux_state.ss->policydb, &fp);
+		read_unlock(&selinux_state.ss->policy_rwlock);
+		if (ret) {
+			vfree(data);
+			return ERR_PTR(ret);
+		}
+		if (fp.len > alloc) {
+			/* put_entry() underflowed: the buffer was too small. */
+			vfree(data);
+			return ERR_PTR(-EOVERFLOW);
+		}
+		alloc -= fp.len;
+
+		/* policydb_write() drops the Android netlink config bit. */
+		if (alloc >= 24 && netlink_route) {
+			u32 *config_ptr = (u32 *)((unsigned long)data + 20);
+
+			*config_ptr |= POLICYDB_CONFIG_ANDROID_NETLINK_ROUTE;
+		}
+
+		new_pdb = kzalloc(sizeof(*new_pdb), GFP_KERNEL);
+		if (!new_pdb) {
+			vfree(data);
+			return ERR_PTR(-ENOMEM);
+		}
+
+		fp.data = data;
+		fp.len = alloc;
+		ret = policydb_read(new_pdb, &fp);
+		vfree(data);
+		if (ret) {
+			kfree(new_pdb);
+			return ERR_PTR(ret);
+		}
+		new_pdb->len = alloc;
+		return new_pdb;
+	}
+
+	return ERR_PTR(-EAGAIN);
+}
+
+void nksu_policydb_free(struct policydb *pdb)
+{
+	if (!pdb)
+		return;
+	policydb_destroy(pdb);
+	kfree(pdb);
+}
+
+int nksu_policydb_install(struct policydb *new_pdb)
+{
+	struct policydb *old;
+	unsigned long flags;
+
+	if (!new_pdb || !selinux_state.ss) {
+		nksu_policydb_free(new_pdb);
+		return -EINVAL;
+	}
+
+	/*
+	 * Keep the outgoing tables on the heap so destroying them happens
+	 * after the swap, outside the lock.
+	 */
+	old = kmalloc(sizeof(*old), GFP_KERNEL);
+	if (!old) {
+		nksu_policydb_free(new_pdb);
+		return -ENOMEM;
+	}
+
+	write_lock_irqsave(&selinux_state.ss->policy_rwlock, flags);
+	*old = selinux_state.ss->policydb;
+	selinux_state.ss->policydb = *new_pdb;
+	write_unlock_irqrestore(&selinux_state.ss->policy_rwlock, flags);
+
+	/* The struct container is now redundant; its tables are live. */
+	kfree(new_pdb);
+
+	/*
+	 * The clean policy kept for SELinux hiding must never be freed here;
+	 * rules are only applied after the working copy was installed, so this
+	 * is a safety net rather than an expected path.
+	 */
+	if (nksu_orig_pdb && old->p_types.table == nksu_orig_pdb->p_types.table) {
+		pr_err("[selinux]: refusing to free the clean policy\n");
+		kfree(old);
+		return 0;
+	}
+
+	policydb_destroy(old);
+	kfree(old);
+	return 0;
+}
+#endif
 
 /*
  * Clone the live policy and RCU-swap it in, keeping the original aside so
@@ -138,6 +323,7 @@ static struct selinux_policy *nksu_policy_dup(struct selinux_policy *old_pol)
  */
 int sepolicy_dup_and_apply(void)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 	struct selinux_policy *orig, *work;
 
 	if (nksu_orig_policy) {
@@ -166,6 +352,99 @@ int sepolicy_dup_and_apply(void)
 		rcu_assign_pointer(selinux_state.policy, work);
 	}
 	synchronize_rcu();
+#else
+	struct policydb *live, *saved, *work;
+	struct policy_file fp;
+	size_t alloc;
+	void *data;
+	int ret;
+
+	if (nksu_orig_pdb) {
+		pr_warn("[selinux]: sepolicy_dup_and_apply: already active\n");
+		return -EBUSY;
+	}
+	if (!selinux_state.ss) {
+		pr_err("[selinux]: sepolicy_dup_and_apply: no live policy\n");
+		return -ENOENT;
+	}
+
+	live = &selinux_state.ss->policydb;
+	saved = kmalloc(sizeof(*saved), GFP_KERNEL);
+	if (!saved)
+		return -ENOMEM;
+
+	/*
+	 * Serialise under the policy write lock, but only with a preallocated
+	 * buffer: policydb_write() just copies memory and cannot sleep.
+	 */
+	alloc = live->len +
+		(size_t)live->p_types.nprim * (sizeof(u32) + sizeof(u64));
+	data = vmalloc(alloc);
+	if (!data) {
+		kfree(saved);
+		return -ENOMEM;
+	}
+
+	write_lock_irq(&selinux_state.ss->policy_rwlock);
+	*saved = *live;
+	fp.data = data;
+	fp.len = alloc;
+	ret = policydb_write(live, &fp);
+	write_unlock_irq(&selinux_state.ss->policy_rwlock);
+	if (ret) {
+		pr_err("[selinux]: policydb_write: %d\n", ret);
+		vfree(data);
+		kfree(saved);
+		return ret;
+	}
+
+	{
+		size_t len = alloc - fp.len;
+
+		if (len >= 24) {
+			u32 *config_ptr = (u32 *)((unsigned long)data + 20);
+
+			if (saved->android_netlink_route)
+				*config_ptr |= POLICYDB_CONFIG_ANDROID_NETLINK_ROUTE;
+		}
+
+		work = kzalloc(sizeof(*work), GFP_KERNEL);
+		if (!work) {
+			vfree(data);
+			kfree(saved);
+			return -ENOMEM;
+		}
+
+		fp.data = data;
+		fp.len = len;
+		ret = policydb_read(work, &fp);
+		if (ret) {
+			pr_err("[selinux]: policydb_read: %d\n", ret);
+			kfree(work);
+			vfree(data);
+			kfree(saved);
+			return ret;
+		}
+		work->len = len;
+	}
+	vfree(data);
+
+	write_lock_irq(&selinux_state.ss->policy_rwlock);
+	/* A concurrent reload would have replaced the tables underneath us. */
+	if (selinux_state.ss->policydb.p_types.table != saved->p_types.table) {
+		write_unlock_irq(&selinux_state.ss->policy_rwlock);
+		pr_err("[selinux]: policy reloaded during dup, retrying next boot\n");
+		policydb_destroy(work);
+		kfree(work);
+		kfree(saved);
+		return -EAGAIN;
+	}
+	selinux_state.ss->policydb = *work;
+	kfree(work);
+	write_unlock_irq(&selinux_state.ss->policy_rwlock);
+
+	nksu_orig_pdb = saved;
+#endif
 
 	pr_info("[selinux]: policy duplicated, working copy installed\n");
 	return 0;
@@ -173,6 +452,7 @@ int sepolicy_dup_and_apply(void)
 
 void sepolicy_restore(void)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 	struct selinux_policy *live;
 
 	if (!nksu_orig_policy) {
@@ -211,6 +491,19 @@ void sepolicy_restore(void)
 	 */
 	nksu_work_policy = NULL;
 	nksu_orig_policy = NULL;
+#else
+	if (!nksu_orig_pdb) {
+		pr_warn("[selinux]: sepolicy_restore: nothing to restore\n");
+		return;
+	}
+
+	write_lock_irq(&selinux_state.ss->policy_rwlock);
+	selinux_state.ss->policydb = *nksu_orig_pdb;
+	write_unlock_irq(&selinux_state.ss->policy_rwlock);
+
+	kfree(nksu_orig_pdb);
+	nksu_orig_pdb = NULL;
+#endif
 
 	avc_reset();
 
@@ -228,6 +521,7 @@ static void apply(const char *src, const char *tgt, const char *cls, const char 
 
 static bool xperm_supported(void)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 	struct selinux_policy *pol;
 	bool ok;
 
@@ -236,6 +530,14 @@ static bool xperm_supported(void)
 					lockdep_is_held(&selinux_state.policy_mutex));
 	ok = pol && pol->policydb.policyvers >= POLICYDB_VERSION_XPERMS_IOCTL;
 	return ok;
+#else
+	bool ok;
+
+	read_lock(&selinux_state.ss->policy_rwlock);
+	ok = selinux_state.ss->policydb.policyvers >= POLICYDB_VERSION_XPERMS_IOCTL;
+	read_unlock(&selinux_state.ss->policy_rwlock);
+	return ok;
+#endif
 }
 
 int load_policy(void)

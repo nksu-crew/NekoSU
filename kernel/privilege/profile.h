@@ -17,6 +17,7 @@
 #include <linux/stddef.h>
 #include <linux/string.h>
 #include <linux/types.h>
+ #include <linux/version.h>
 
 #define NKSU_PROFILE_MAGIC 0x4b4e5355 /* "NKSU" */
 
@@ -82,6 +83,7 @@ struct nksu_profile_blob {
  * bitmap must cover every addressable uid, so pin both at compile time
  * (C11 static_assert).
  */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
 static_assert(sizeof(struct nksu_profile_entry) == 28, "nksu_profile_entry layout changed");
 static_assert(offsetof(struct nksu_profile_entry, caps) == 8, "nksu_profile_entry.caps moved");
 static_assert(offsetof(struct nksu_profile_entry, domain_off) == 16,
@@ -97,7 +99,23 @@ static_assert(BITS_TO_LONGS(NKSU_BITMAP_MAX_UID) * BITS_PER_LONG == NKSU_BITMAP_
 	      "bitmap must cover NKSU_BITMAP_MAX_UID uids exactly");
 static_assert(sizeof(struct nksu_profile_blob) % _Alignof(struct nksu_profile_entry) == 0,
 	      "blob header must leave the entry array aligned");
-
+#else
+_Static_assert(sizeof(struct nksu_profile_entry) == 28, "nksu_profile_entry layout changed");
+_Static_assert(offsetof(struct nksu_profile_entry, caps) == 8, "nksu_profile_entry.caps moved");
+_Static_assert(offsetof(struct nksu_profile_entry, domain_off) == 16,
+	      "nksu_profile_entry.domain_off moved");
+_Static_assert(offsetof(struct nksu_profile_entry, domain_len) == 20,
+	      "nksu_profile_entry.domain_len moved");
+_Static_assert(offsetof(struct nksu_profile_entry, ns) == 24, "nksu_profile_entry.ns moved");
+_Static_assert(sizeof(struct nksu_profile_caps) == sizeof(u64),
+	      "caps storage must hold a 64-bit capability set");
+_Static_assert(sizeof(kernel_cap_t) == sizeof(struct nksu_profile_caps),
+	      "kernel_cap_t size must match the caps storage slot");
+_Static_assert(BITS_TO_LONGS(NKSU_BITMAP_MAX_UID) * BITS_PER_LONG == NKSU_BITMAP_MAX_UID,
+	      "bitmap must cover NKSU_BITMAP_MAX_UID uids exactly");
+_Static_assert(sizeof(struct nksu_profile_blob) % _Alignof(struct nksu_profile_entry) == 0,
+	      "blob header must leave the entry array aligned");
+#endif
 /* --- public API --- */
 
 /*

@@ -20,8 +20,6 @@
 #include <linux/module.h>
 #include <linux/atomic.h>
 #include <linux/sched.h>
-#include <linux/sched/signal.h>
-#include <linux/sched/task.h>
 #include <linux/version.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0)
 #include <linux/initrd.h>
@@ -172,8 +170,14 @@ static int nksu_spawn_child(void *data)
 	wait_for_initramfs();
 #endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
 	ret = kernel_execve(work->path, (const char *const *)work->argv,
 			    (const char *const *)work->envp);
+#else
+	ret = nksu_do_execve(nksu_getname_kernel(work->path),
+			     (const char __user *const __user *)work->argv,
+			     (const char __user *const __user *)work->envp);
+#endif
 out:
 	work->ret = ret;
 
@@ -214,7 +218,12 @@ static int nksu_spawn_supervisor(void *data)
 		if (pid < 0) {
 			work->ret = pid;
 		} else {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
 			kernel_wait(pid, &status);
+#else
+			if (nksu_sys_wait4)
+				nksu_sys_wait4(pid, (int __user *)&status, 0, NULL);
+#endif
 			if (!work->ret)
 				work->ret = status;
 		}

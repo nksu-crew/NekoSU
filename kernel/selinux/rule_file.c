@@ -29,9 +29,9 @@ struct nksu_sepol_cmd {
 	u32 subcmd;
 };
 
-/* The batch header must be a bare { u32, u32 } pair (C11 static_assert). */
-static_assert(sizeof(struct nksu_sepol_cmd) == 2 * sizeof(u32),
-	      "sepolicy command header must be two u32s");
+/* The batch header must be a bare { u32, u32 } pair (C11 static assert). */
+_Static_assert(sizeof(struct nksu_sepol_cmd) == 2 * sizeof(u32),
+	       "sepolicy command header must be two u32s");
 
 struct nksu_sepol_cursor {
 	const u8 *cur;

@@ -36,15 +36,21 @@ typeof(switch_task_namespaces) *nksu_switch_task_namespaces;
 typeof(avc_ss_reset) *nksu_avc_ss_reset;
 typeof(selnl_notify_policyload) *nksu_selnl_notify_policyload;
 typeof(selinux_status_update_policyload) *nksu_selinux_status_update_policyload;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 typeof(symtab_search) *nksu_symtab_search;
 typeof(symtab_insert) *nksu_symtab_insert;
+#else
+typeof(hashtab_search) *nksu_hashtab_search;
+typeof(hashtab_insert) *nksu_hashtab_insert;
+#endif
 typeof(avtab_search_node) *nksu_avtab_search_node;
 typeof(avtab_search_node_next) *nksu_avtab_search_node_next;
 typeof(avtab_insert_nonunique) *nksu_avtab_insert_nonunique;
 typeof(avtab_alloc) *nksu_avtab_alloc;
 typeof(avtab_destroy) *nksu_avtab_destroy;
-typeof(avtab_alloc_dup) *nksu_avtab_alloc_dup;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 typeof(policydb_filenametr_search) *nksu_policydb_filenametr_search;
+#endif
 typeof(policydb_write) *nksu_policydb_write;
 typeof(policydb_read) *nksu_policydb_read;
 typeof(policydb_destroy) *nksu_policydb_destroy;
@@ -52,10 +58,11 @@ typeof(ebitmap_set_bit) *nksu_ebitmap_set_bit;
 typeof(ebitmap_get_bit) *nksu_ebitmap_get_bit;
 typeof(ebitmap_destroy) *nksu_ebitmap_destroy;
 typeof(ebitmap_cpy) *nksu_ebitmap_cpy;
-typeof(hashtab_duplicate) *nksu_hashtab_duplicate;
 typeof(hashtab_destroy) *nksu_hashtab_destroy;
 typeof(hashtab_map) *nksu_hashtab_map;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 typeof(__hashtab_insert) *nksu___hashtab_insert;
+#endif
 typeof(security_context_to_sid) *nksu_security_context_to_sid;
 typeof(avc_has_perm) *nksu_avc_has_perm;
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
@@ -67,14 +74,22 @@ typeof(vfs_mkdir) *nksu_vfs_mkdir;
 typeof(vfs_unlink) *nksu_vfs_unlink;
 typeof(lookup_one_len) *nksu_lookup_one_len;
 typeof(__vfs_setxattr_noperm) *nksu___vfs_setxattr_noperm;
-typeof(ksys_sync) *nksu_ksys_sync;
 typeof(task_work_add) *nksu_task_work_add;
 typeof(change_pid) *nksu_change_pid;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 typeof(path_umount) *nksu_path_umount;
+#else
+typeof(sys_umount) *nksu_sys_umount;
+#endif
 
 typeof(filp_open) *nksu_filp_open;
 typeof(kernel_read) *nksu_kernel_read;
 typeof(kernel_write) *nksu_kernel_write;
+
+typeof(find_task_by_vpid) *nksu_find_task_by_vpid;
+typeof(free_uid) *nksu_free_uid;
+typeof(access_process_vm) *nksu_access_process_vm;
+typeof(tasklist_lock) *nksu_tasklist_lock;
 
 typeof(commit_creds) *nksu_commit_creds;
 typeof(abort_creds) *nksu_abort_creds;
@@ -93,8 +108,14 @@ typeof(fsnotify_destroy_mark) *nksu_fsnotify_destroy_mark;
 typeof(fsnotify_add_mark) *nksu_fsnotify_add_mark;
 
 typeof(kernel_thread) *nksu_kernel_thread;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
 typeof(kernel_execve) *nksu_kernel_execve;
 typeof(kernel_wait) *nksu_kernel_wait;
+#else
+typeof(do_execve) *nksu_do_execve;
+typeof(getname_kernel) *nksu_getname_kernel;
+typeof(sys_wait4) *nksu_sys_wait4;
+#endif
 typeof(flush_signal_handlers) *nksu_flush_signal_handlers;
 
 typeof(selinux_state) *nksu_selinux_state;
@@ -103,7 +124,11 @@ typeof(selinux_blob_sizes) *nksu_selinux_blob_sizes;
 #endif
 typeof(init_nsproxy) *nksu_init_nsproxy;
 typeof(__set_fixmap) *nksu___set_fixmap;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
 typeof(copy_to_kernel_nofault) *nksu_copy_to_kernel_nofault;
+#else
+typeof(probe_kernel_write) *nksu_probe_kernel_write;
+#endif
 
 #define NKSU_RESOLVE(ptr, sym)                                   \
 	do {                                                     \
@@ -123,6 +148,7 @@ typeof(copy_to_kernel_nofault) *nksu_copy_to_kernel_nofault;
  *   <= 6.9  fsnotify_add_mark(mark, &inode->i_fsnotify_marks, type, flags, NULL)
  *   >= 6.10 fsnotify_add_mark(mark, inode, type, flags)
  */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 int nksu_fsnotify_add_inode_mark(struct fsnotify_mark *mark, struct inode *inode, int add_flags)
 {
 	if (!nksu_fsnotify_add_mark)
@@ -135,6 +161,7 @@ int nksu_fsnotify_add_inode_mark(struct fsnotify_mark *mark, struct inode *inode
 				      add_flags, NULL);
 #endif
 }
+#endif
 
 int nksu_symbol_compat_init(void)
 {
@@ -149,6 +176,10 @@ int nksu_symbol_compat_init(void)
 	NKSU_RESOLVE(nksu_filp_open, "filp_open");
 	NKSU_RESOLVE(nksu_kernel_read, "kernel_read");
 	NKSU_RESOLVE(nksu_kernel_write, "kernel_write");
+	NKSU_RESOLVE(nksu_find_task_by_vpid, "find_task_by_vpid");
+	NKSU_RESOLVE(nksu_free_uid, "free_uid");
+	NKSU_RESOLVE(nksu_access_process_vm, "access_process_vm");
+	NKSU_RESOLVE(nksu_tasklist_lock, "tasklist_lock");
 
 	NKSU_RESOLVE(nksu_alloc_uid, "alloc_uid");
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0)
@@ -170,10 +201,13 @@ int nksu_symbol_compat_init(void)
 	NKSU_RESOLVE(nksu_vfs_unlink, "vfs_unlink");
 	NKSU_RESOLVE(nksu_lookup_one_len, "lookup_one_len");
 	NKSU_RESOLVE(nksu___vfs_setxattr_noperm, "__vfs_setxattr_noperm");
-	NKSU_RESOLVE(nksu_ksys_sync, "ksys_sync");
 	NKSU_RESOLVE(nksu_task_work_add, "task_work_add");
 	NKSU_RESOLVE(nksu_change_pid, "change_pid");
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 	NKSU_RESOLVE(nksu_path_umount, "path_umount");
+#else
+	NKSU_RESOLVE(nksu_sys_umount, "sys_umount");
+#endif
 	NKSU_RESOLVE(nksu_commit_creds, "commit_creds");
 	NKSU_RESOLVE(nksu_abort_creds, "abort_creds");
 	NKSU_RESOLVE(nksu_groups_alloc, "groups_alloc");
@@ -194,15 +228,21 @@ int nksu_symbol_compat_init(void)
 #endif
 	NKSU_RESOLVE(nksu_init_nsproxy, "init_nsproxy");
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 	NKSU_RESOLVE(nksu_symtab_search, "symtab_search");
 	NKSU_RESOLVE(nksu_symtab_insert, "symtab_insert");
+#else
+	NKSU_RESOLVE(nksu_hashtab_search, "hashtab_search");
+	NKSU_RESOLVE(nksu_hashtab_insert, "hashtab_insert");
+#endif
 	NKSU_RESOLVE(nksu_avtab_search_node, "avtab_search_node");
 	NKSU_RESOLVE(nksu_avtab_search_node_next, "avtab_search_node_next");
 	NKSU_RESOLVE(nksu_avtab_insert_nonunique, "avtab_insert_nonunique");
 	NKSU_RESOLVE(nksu_avtab_alloc, "avtab_alloc");
 	NKSU_RESOLVE(nksu_avtab_destroy, "avtab_destroy");
-	NKSU_RESOLVE(nksu_avtab_alloc_dup, "avtab_alloc_dup");
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 	NKSU_RESOLVE(nksu_policydb_filenametr_search, "policydb_filenametr_search");
+#endif
 	NKSU_RESOLVE(nksu_policydb_write, "policydb_write");
 	NKSU_RESOLVE(nksu_policydb_read, "policydb_read");
 	NKSU_RESOLVE(nksu_policydb_destroy, "policydb_destroy");
@@ -210,18 +250,29 @@ int nksu_symbol_compat_init(void)
 	NKSU_RESOLVE(nksu_ebitmap_get_bit, "ebitmap_get_bit");
 	NKSU_RESOLVE(nksu_ebitmap_destroy, "ebitmap_destroy");
 	NKSU_RESOLVE(nksu_ebitmap_cpy, "ebitmap_cpy");
-	NKSU_RESOLVE(nksu_hashtab_duplicate, "hashtab_duplicate");
 	NKSU_RESOLVE(nksu_hashtab_destroy, "hashtab_destroy");
 	NKSU_RESOLVE(nksu_hashtab_map, "hashtab_map");
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 	NKSU_RESOLVE(nksu___hashtab_insert, "__hashtab_insert");
+#endif
 
 	/* kernel/spawn/spawn.c primitives -- no direct relocation against these */
 	NKSU_RESOLVE(nksu_kernel_thread, "kernel_thread");
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
 	NKSU_RESOLVE(nksu_kernel_execve, "kernel_execve");
 	NKSU_RESOLVE(nksu_kernel_wait, "kernel_wait");
+#else
+	NKSU_RESOLVE(nksu_do_execve, "do_execve");
+	NKSU_RESOLVE(nksu_getname_kernel, "getname_kernel");
+	NKSU_RESOLVE(nksu_sys_wait4, "sys_wait4");
+#endif
 	NKSU_RESOLVE(nksu_flush_signal_handlers, "flush_signal_handlers");
 	NKSU_RESOLVE(nksu___set_fixmap, "__set_fixmap");
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
 	NKSU_RESOLVE(nksu_copy_to_kernel_nofault, "copy_to_kernel_nofault");
+#else
+	NKSU_RESOLVE(nksu_probe_kernel_write, "probe_kernel_write");
+#endif
 
 	if (missing) {
 		pr_err("[ksym] %d unexported symbol(s) unresolved, cache=%lu\n", missing,
@@ -254,11 +305,20 @@ void nksu_symbol_compat_exit(void)
 	nksu_vfs_unlink = NULL;
 	nksu_lookup_one_len = NULL;
 	nksu___vfs_setxattr_noperm = NULL;
-	nksu_ksys_sync = NULL;
 	nksu_task_work_add = NULL;
+	nksu_change_pid = NULL;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
+	nksu_path_umount = NULL;
+#else
+	nksu_sys_umount = NULL;
+#endif
 	nksu_filp_open = NULL;
 	nksu_kernel_read = NULL;
 	nksu_kernel_write = NULL;
+	nksu_find_task_by_vpid = NULL;
+	nksu_free_uid = NULL;
+	nksu_access_process_vm = NULL;
+	nksu_tasklist_lock = NULL;
 	nksu_commit_creds = NULL;
 	nksu_abort_creds = NULL;
 	nksu_groups_alloc = NULL;
@@ -278,15 +338,21 @@ void nksu_symbol_compat_exit(void)
 	nksu_selinux_blob_sizes = NULL;
 #endif
 	nksu_init_nsproxy = NULL;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 	nksu_symtab_search = NULL;
 	nksu_symtab_insert = NULL;
+#else
+	nksu_hashtab_search = NULL;
+	nksu_hashtab_insert = NULL;
+#endif
 	nksu_avtab_search_node = NULL;
 	nksu_avtab_search_node_next = NULL;
 	nksu_avtab_insert_nonunique = NULL;
 	nksu_avtab_alloc = NULL;
 	nksu_avtab_destroy = NULL;
-	nksu_avtab_alloc_dup = NULL;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 	nksu_policydb_filenametr_search = NULL;
+#endif
 	nksu_policydb_write = NULL;
 	nksu_policydb_read = NULL;
 	nksu_policydb_destroy = NULL;
@@ -294,15 +360,26 @@ void nksu_symbol_compat_exit(void)
 	nksu_ebitmap_get_bit = NULL;
 	nksu_ebitmap_destroy = NULL;
 	nksu_ebitmap_cpy = NULL;
-	nksu_hashtab_duplicate = NULL;
 	nksu_hashtab_destroy = NULL;
 	nksu_hashtab_map = NULL;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 	nksu___hashtab_insert = NULL;
+#endif
 	nksu___set_fixmap = NULL;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
 	nksu_copy_to_kernel_nofault = NULL;
+#else
+	nksu_probe_kernel_write = NULL;
+#endif
 	nksu_kernel_thread = NULL;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
 	nksu_kernel_execve = NULL;
 	nksu_kernel_wait = NULL;
+#else
+	nksu_do_execve = NULL;
+	nksu_getname_kernel = NULL;
+	nksu_sys_wait4 = NULL;
+#endif
 	nksu_flush_signal_handlers = NULL;
 }
 

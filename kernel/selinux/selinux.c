@@ -130,15 +130,23 @@ static DEFINE_MUTEX(domain_cache_lock);
  * making all later manager and profile file accesses run as u:r:kernel:s0.
  * Refuse to resolve (and therefore cache) anything until the policy is live.
  */
+static bool policy_ready(void)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+	return selinux_initialized();
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+	return READ_ONCE(selinux_state.policy) != NULL;
+#else
+	/* 4.9 / 5.x-ss: `initialized` is set once the policy is loaded. */
+	return READ_ONCE(selinux_state.initialized);
+#endif
+}
+
 static int context_to_sid(const char *context, u32 *sid)
 {
 	int rc;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
-	if (!selinux_initialized())
-#else
-	if (!selinux_initialized(&selinux_state))
-#endif
+	if (!policy_ready())
 		return -EAGAIN;
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
@@ -415,6 +423,7 @@ int load_hook(void)
 
 #ifdef CONFIG_NKSU_DEBUG
 	pr_info("[selinux]: debug mode, setting permissive for '%s'\n", DOMAIN);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 	scoped_guard(nksu_mutex, &selinux_state.policy_mutex)
 	{
 		db = &rcu_dereference_protected(selinux_state.policy,
@@ -422,6 +431,12 @@ int load_hook(void)
 			      ->policydb;
 		do_allow(db, DOMAIN);
 	}
+#else
+	write_lock_irq(&selinux_state.ss->policy_rwlock);
+	db = &selinux_state.ss->policydb;
+	do_allow(db, DOMAIN);
+	write_unlock_irq(&selinux_state.ss->policy_rwlock);
+#endif
 	avc_reset();
 #endif
 
@@ -440,14 +455,14 @@ static int nksu_selinux_init_thread(void *data)
 		if (kthread_should_stop())
 			return 0;
 
-		if (READ_ONCE(selinux_state.policy))
+		if (policy_ready())
 			break;
 
 		msleep(10);
 		timeout_ms -= 10;
 	}
 
-	if (READ_ONCE(selinux_state.policy)) {
+	if (policy_ready()) {
 		pr_info("[selinux]: SELinux policy ready, continuing init\n");
 		ret = load_hook();
 	} else {
@@ -465,7 +480,7 @@ static int nksu_selinux_init_thread(void *data)
 
 int init_selinux_hook(void)
 {
-	if (!READ_ONCE(selinux_state.policy)) {
+	if (!policy_ready()) {
 		nksu_init_thread = kthread_run(nksu_selinux_init_thread, NULL, "nksu-selinux-init");
 		if (IS_ERR(nksu_init_thread)) {
 			pr_err("[selinux]: failed to start init thread: %ld\n",

@@ -176,7 +176,7 @@ bool nksu_feature_persist_has(const char *name)
 		goto out;
 
 	{
-		ssize_t rd = kernel_read(fp, buf, (size_t)size, &pos);
+		ssize_t rd = nksu_kread(fp, buf, (size_t)size, &pos);
 
 		if (rd > 0) {
 			char *cursor = buf;
@@ -223,7 +223,7 @@ int nksu_feature_persist_set(const char *name, bool enabled)
 		if (size > 0 && size <= NKSU_FEATURE_FILE_MAX) {
 			in = kvmalloc((size_t)size + 1, GFP_KERNEL);
 			if (in) {
-				ssize_t rd = kernel_read(rf, in, (size_t)size, &pos);
+				ssize_t rd = nksu_kread(rf, in, (size_t)size, &pos);
 
 				if (rd > 0)
 					in[rd] = '\0';
@@ -271,7 +271,7 @@ int nksu_feature_persist_set(const char *name, bool enabled)
 	} else {
 		pos = 0;
 		while (pos < (loff_t)out_len) {
-			ssize_t written = kernel_write(wf, out + pos, out_len - (size_t)pos, &pos);
+			ssize_t written = nksu_kwrite(wf, out + pos, out_len - (size_t)pos, &pos);
 
 			if (written < 0) {
 				ret = (int)written;

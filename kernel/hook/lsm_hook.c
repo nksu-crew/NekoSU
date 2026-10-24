@@ -207,7 +207,11 @@ int nksu_lsm_hook(struct nksu_lsm_hook *hook)
 	{
 		unsigned long heads_addr, heads_size;
 		unsigned int heads_count, scanned = 0;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
 		struct hlist_head *head, *head_end;
+#else
+		struct list_head *head, *head_end;
+#endif
 		struct security_hook_list *selected_entry = NULL;
 		void **selected_slot = NULL;
 		void *selected_origin = NULL;
@@ -225,12 +229,20 @@ int nksu_lsm_hook(struct nksu_lsm_hook *hook)
          * order; no need for the kallsyms symbol size here.
          */
 		heads_size = sizeof(struct security_hook_heads);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
 		heads_count = heads_size / sizeof(struct hlist_head);
+#else
+		heads_count = heads_size / sizeof(struct list_head);
+#endif
 
-		head = (struct hlist_head *)heads_addr;
+		head = (void *)heads_addr;
 		head_end = head + heads_count;
 		for (; head < head_end; head++) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
 			hlist_for_each_entry(entry, head, list) {
+#else
+			list_for_each_entry(entry, head, list) {
+#endif
 				void **slot = (void **)((char *)entry + hook->hook_offset);
 				void *cur = READ_ONCE(*slot);
 

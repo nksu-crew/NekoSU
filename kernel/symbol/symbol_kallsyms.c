@@ -8,7 +8,8 @@
  *   kallsyms_relative_base                       // BASE_RELATIVE only
  *   kallsyms_names[]     [len][token ...]; a 0x80 length bit adds one byte:
  *                        len = (first & 0x7f) | (second << 7)
- *   kallsyms_markers[]   one u32 offset per 256 symbols
+ *   kallsyms_markers[]   one offset per 256 symbols (u32, or 64-bit on
+ *                        older arm64 kernels where ".align 8" means 256)
  *   kallsyms_token_table[]  256 NUL-terminated tokens (1-2 bytes each)
  *   kallsyms_token_index[]  256 u16 offsets into token_table
  *
@@ -37,6 +38,7 @@
 #include <linux/mm.h>
 #include <linux/vmalloc.h>
 #include <linux/errno.h>
+#include <linux/sizes.h>
 
 #include "symbol/symbol_internal.h"
 
@@ -126,25 +128,56 @@ struct kallsyms_view {
 	const u8 *token_table;
 	u32 tlen;
 	const u16 *token_index; /* 256 entries */
-	const u32 *markers; /* one offset per 256 symbols */
+	const u8 *markers; /* one entry per 256 symbols */
 	u32 marker_count;
+	u8 marker_shift; /* 2 = u32 entry (>=5.4), 3 = u64 (older 64-bit) */
 	const u8 *names; /* start of kallsyms_names */
 	const u8 *names_end; /* == markers */
 };
 
+static u64 kallsyms_marker(const struct kallsyms_view *v, u32 i)
+{
+	if (v->marker_shift == 3) {
+		u64 value;
+
+		memcpy(&value, v->markers + (size_t)i * 8, sizeof(value));
+		return value;
+	} else {
+		u32 value;
+
+		memcpy(&value, v->markers + (size_t)i * 4, sizeof(value));
+		return value;
+	}
+}
+
 /*
- * Return the token_table size if p is a valid token_table, else 0.
+ * Find the token index array that follows the token table.
  *
- * A token_table is exactly 256 non-empty NUL-terminated tokens immediately
- * followed (after 2-byte alignment) by a u16 index array whose i-th entry is
- * the byte offset of the i-th token. Requiring that exact match makes false
- * positives in unrelated rodata essentially impossible, and does not assume
- * anything about individual token length.
- *
- * A cheap prefilter (enough NULs in the first 64 bytes) keeps the scan fast in
- * code/rodata regions with long NUL-free runs.
+ * output_label() aligns the label with ALGN: ".align 8" means 8 bytes on
+ * x86 but 2^8 = 256 bytes on arm64 (4.9), so both alignments are tried.
  */
-u32 nksu_kallsyms_token_table_len(const u8 *p, const u8 *end)
+static const u16 *token_index_candidate(const u8 *q, const u8 *end, const u32 *offsets)
+{
+	static const unsigned int aligns[] = { 8, 256 };
+	unsigned int a;
+	int i;
+
+	for (a = 0; a < ARRAY_SIZE(aligns); a++) {
+		const u16 *ti = (const u16 *)PTR_ALIGN(q, aligns[a]);
+
+		if ((const u8 *)ti + 512 > end)
+			continue;
+		for (i = 0; i < 256; i++) {
+			if (ti[i] != offsets[i])
+				break;
+		}
+		if (i == 256)
+			return ti;
+	}
+	return NULL;
+}
+
+static u32 token_table_scan(const u8 *p, const u8 *end, const u16 **ti_out)
 {
 	const u8 *q = p;
 	u32 offsets[256];
@@ -196,17 +229,26 @@ u32 nksu_kallsyms_token_table_len(const u8 *p, const u8 *end)
 	}
 
 	tlen = (u32)(q - p);
-	/* kallsyms_token_index is emitted with the label's 8-byte alignment */
-	ti = (const u16 *)PTR_ALIGN(q, 8);
-	if ((const u8 *)ti + 512 > end)
+	ti = token_index_candidate(q, end, offsets);
+	if (!ti)
 		return 0;
-
-	for (i = 0; i < 256; i++) {
-		if (ti[i] != offsets[i])
-			return 0;
-	}
-
+	if (ti_out)
+		*ti_out = ti;
 	return tlen;
+}
+
+/*
+ * Return the token_table size if p is a valid token_table, else 0.
+ *
+ * A token_table is exactly 256 non-empty NUL-terminated tokens immediately
+ * followed by a u16 index array whose i-th entry is the byte offset of the
+ * i-th token. Requiring that exact match makes false positives in unrelated
+ * rodata essentially impossible, and does not assume anything about
+ * individual token length.
+ */
+u32 nksu_kallsyms_token_table_len(const u8 *p, const u8 *end)
+{
+	return token_table_scan(p, end, NULL);
 }
 
 /*
@@ -218,37 +260,54 @@ u32 nksu_kallsyms_token_table_len(const u8 *p, const u8 *end)
  * 0. Walk backwards from the last marker while the sequence keeps increasing;
  * the result is markers[0].
  */
-static bool locate_markers(const u8 *buf_start, const u8 *token_table, const u32 **markers_out,
-			   u32 *count_out)
+static bool locate_markers_width(const u8 *buf_start, const u8 *token_table, u8 shift,
+				 const u8 **markers_out, u32 *count_out)
 {
-	const u8 *limit = token_table - (size_t)KSYM_MARKERS_MAX * 4;
+	const size_t width = (size_t)1 << shift;
+	const u8 *limit = token_table - (size_t)KSYM_MARKERS_MAX * width;
 	const u8 *p, *start;
 	u32 count;
 
 	if (limit < buf_start)
 		limit = buf_start;
 
-	/* token_table must be 4-byte aligned for the backwards u32 walk */
-	if (((unsigned long)token_table & 3) != 0)
+	/* token_table is 8-byte aligned; the marker array shares that align. */
+	if (((unsigned long)token_table & (width - 1)) != 0)
 		return false;
 
-	p = token_table - 4;
+	p = token_table - width;
 	if (p < limit)
 		return false;
 
-	/* skip the 0..4 bytes of alignment padding before token_table */
-	if (*(const u32 *)p == 0 && p - 4 >= limit)
-		p -= 4;
+	/*
+	 * Skip the alignment padding before token_table.  output_label aligns
+	 * it to 8 bytes; a 4-byte marker array needs at most one pad word,
+	 * while a 64-bit one can contribute up to 7 zero bytes (here the 4.9
+	 * image has five zero quads).  Real marker entries are strictly
+	 * increasing and end with a non-zero offset, so any run of trailing
+	 * zeros is padding.
+	 */
+	for (;;) {
+		u64 tail;
+
+		if (p - width < limit)
+			break;
+		memcpy(&tail, p, width);
+		if (tail != 0)
+			break;
+		p -= width;
+	}
 
 	start = p;
 	count = 1;
 
-	while (start - 4 >= limit) {
-		u32 cur = *(const u32 *)(start - 4);
-		u32 nxt = *(const u32 *)start;
+	while (start - width >= limit) {
+		u64 cur, nxt;
 
+		memcpy(&cur, start - width, width);
+		memcpy(&nxt, start, width);
 		if (cur < nxt && nxt - cur <= KSYM_MARKER_SPAN_MAX) {
-			start -= 4;
+			start -= width;
 			count++;
 		} else {
 			break;
@@ -259,25 +318,44 @@ static bool locate_markers(const u8 *buf_start, const u8 *token_table, const u32
      * The real markers array starts at 0. If we did not land on 0, the
      * walk went into preceding data; scan forward for the first 0.
      */
-	if (count >= 2 && *(const u32 *)start != 0) {
-		const u8 *q;
+	{
+		u64 head;
 
-		for (q = start; q < token_table; q += 4) {
-			if (*(const u32 *)q == 0) {
-				start = q;
-				count = (u32)(token_table - q) / 4;
-				break;
+		memcpy(&head, start, width);
+		if (count >= 2 && head != 0) {
+			const u8 *q;
+
+			for (q = start; q < token_table; q += width) {
+				u64 v;
+
+				memcpy(&v, q, width);
+				if (v == 0) {
+					start = q;
+					count = (u32)((token_table - q) / width);
+					break;
+				}
 			}
 		}
 	}
 
-	if (count < 2 || *(const u32 *)start != 0)
-		return false;
+	{
+		u64 head;
 
-	*markers_out = (const u32 *)start;
+		memcpy(&head, start, width);
+		if (count < 2 || head != 0)
+			return false;
+	}
+
+	*markers_out = start;
 	*count_out = count;
 	return true;
 }
+
+/*
+ * kallsyms_markers holds one offset per 256 symbols.  64-bit kernels before
+ * 5.4 emit them as .quad (unsigned long); newer kernels use .long.  Both
+ * widths are tried by view_from_token_table().
+ */
 
 /*
  * Validate a candidate names start:
@@ -307,7 +385,7 @@ static bool names_start_valid(const u8 *cand, const struct kallsyms_view *v)
 		if (++sym_in_group == 256) {
 			sym_in_group = 0;
 			if (k < v->marker_count) {
-				if (off != v->markers[k])
+				if (off != kallsyms_marker(v, k))
 					return false;
 				k++;
 			}
@@ -315,13 +393,14 @@ static bool names_start_valid(const u8 *cand, const struct kallsyms_view *v)
 	}
 
 	/*
-     * All markers matched and decoding ended near the end of names. There
-     * may be a little alignment padding between names and markers (16 bytes
-     * of slack).
-     */
+	 * All markers matched and decoding ended near the end of names. There
+	 * is alignment padding between names and the markers label: up to 7
+	 * bytes on kernels that align labels to 8, up to 255 on arm64 4.9
+	 * (where ".align 8" means 2^8 bytes).  Allow the full 256-byte range.
+	 */
 	if (k != v->marker_count)
 		return false;
-	return off + 16 >= names_size;
+	return off + 256 >= names_size;
 }
 
 /*
@@ -342,7 +421,7 @@ static const u8 *find_names_start(const u8 *buf_start, const struct kallsyms_vie
 
 	if (v->marker_count < 2)
 		return NULL;
-	last_marker = v->markers[v->marker_count - 1];
+	last_marker = (u32)kallsyms_marker(v, v->marker_count - 1);
 	if (last_marker < 1 || (size_t)last_marker >= (size_t)(names_end - buf_start))
 		return NULL;
 
@@ -379,24 +458,32 @@ static const u8 *find_names_start(const u8 *buf_start, const struct kallsyms_vie
  * Given token_table, fill token_index / markers. Returns 0 on success.
  * The names start is left to the caller (there may be several candidates).
  */
+static bool view_accept_all(const u8 *names, const u8 *names_end, void *arg)
+{
+	(void)names;
+	(void)names_end;
+	(void)arg;
+	return true;
+}
+
 static int view_from_token_table(const u8 *buf_start, const u8 *token_table, const u8 *buf_end,
 				 struct kallsyms_view *v)
 {
 	u32 tlen;
+	u8 shift;
 	int i;
 
 	memset(v, 0, sizeof(*v));
 
-	tlen = nksu_kallsyms_token_table_len(token_table, buf_end);
+	tlen = token_table_scan(token_table, buf_end, &v->token_index);
 	if (!tlen)
 		return -ENOENT;
-	/* token_index is 8-byte aligned by output_label's ALGN */
+	/* token_index is emitted with output_label's ALGN. */
 	if (token_table + tlen + 7 + 512 > buf_end)
 		return -ENOENT;
 
 	v->token_table = token_table;
 	v->tlen = tlen;
-	v->token_index = (const u16 *)PTR_ALIGN(token_table + tlen, 8);
 
 	if (v->token_index[0] != 0)
 		return -ENOENT;
@@ -405,11 +492,25 @@ static int view_from_token_table(const u8 *buf_start, const u8 *token_table, con
 			return -ENOENT;
 	}
 
-	if (!locate_markers(buf_start, token_table, &v->markers, &v->marker_count))
-		return -ENOENT;
+	/*
+	 * Try the modern u32 marker array first, then the 64-bit one used by
+	 * older kernels (4.9).  Only accept a width whose marker boundaries
+	 * actually line up with a decodable kallsyms_names section.
+	 */
+	for (i = 0; i < 2; i++) {
+		shift = i == 0 ? 2 : 3;
 
-	v->names_end = (const u8 *)v->markers;
-	return 0;
+		if (!locate_markers_width(buf_start, token_table, shift, &v->markers,
+					  &v->marker_count))
+			continue;
+
+		v->marker_shift = shift;
+		v->names_end = v->markers;
+		if (find_names_start(buf_start, v, view_accept_all, NULL))
+			return 0;
+	}
+
+	return -ENOENT;
 }
 
 /*
@@ -463,76 +564,126 @@ static unsigned long symbol_addr(const struct addr_info *ai, u32 i)
 }
 
 /*
- * Recover the address array and relative_base from the fixed on-disk layout.
+ * Recover the address array and relative_base from the on-disk layout.
  *
  * scripts/kallsyms.c emits, in this order:
- *     kallsyms_offsets[]        (u32 / .long per symbol)
- *     kallsyms_relative_base    (.quad, 8-byte aligned)
- *     kallsyms_num_syms         (.long, 8-byte aligned)
- *     kallsyms_names            (8-byte aligned)
+ *     kallsyms_offsets[]        (u32 / .long per symbol)   [BASE_RELATIVE]
+ *   or kallsyms_addresses[]     (u64 / PTR per symbol)      [!BASE_RELATIVE]
+ *     kallsyms_relative_base    (.quad, BASE_RELATIVE only)
+ *     kallsyms_num_syms         (PTR)
+ *     kallsyms_names
  *
- * So relative_base is the u64 at names-16, num_syms the u32 at names-8, and
- * the offsets array starts at names-16-ALIGN(num_syms*4, 8) (the array is
- * 8-byte aligned, so its span is rounded up). num_syms must be consistent
- * with the number of markers, which validates the layout.
+ * Each label goes through output_label(), which uses ALGN.  On little-endian
+ * 64-bit x86 ALGN is 8 bytes, but on arm64 the assembler reads ".align 8" as
+ * 2^8 = 256 bytes, so older kernels (4.9) align every table to 256 bytes.
+ * Rather than hard-coding the layout, find num_syms just before names by
+ * matching it against the marker count, derive the alignment from the gap to
+ * names, and then locate relative_base/offsets from there.
  */
+static unsigned long align_down_ul(unsigned long value, unsigned long align)
+{
+	return value & ~(align - 1);
+}
+
 static int resolve_addresses(const struct kallsyms_view *v, const u8 *buf_start, const u8 *buf_end,
 			     struct addr_info *ai, u32 *num_out)
 {
 	const u8 *names = v->names;
 	unsigned long names_addr = (unsigned long)names;
-	unsigned long rel_base;
-	size_t offsets_size, offsets_span;
+	unsigned long limit, num_addr, align;
 	u32 num_syms;
 
+	(void)buf_end;
 	memset(ai, 0, sizeof(*ai));
 
 	/* marker_count = ceil(num_syms / 256) */
 	if (v->marker_count < 2)
 		return -ENOENT;
 
-	/* the two scalars sit just before names */
 	if (names_addr < (unsigned long)buf_start + 24)
 		return -ENOENT;
 
-	memcpy(&num_syms, names - 8, sizeof(num_syms));
-	if (num_syms == 0 || num_syms <= (v->marker_count - 1) * 256u ||
-	    num_syms > v->marker_count * 256u)
-		return -ENOENT;
+	limit = names_addr > (unsigned long)buf_start + 0x800 ?
+			names_addr - 0x800 :
+			(unsigned long)buf_start;
 
-	/*
-     * scripts/kallsyms.c emits kallsyms_offsets[] through output_label(), so
-     * the array starts on an 8-byte boundary and is immediately followed by
-     * the 8-byte-aligned kallsyms_relative_base. With an odd symbol count the
-     * num_syms * 4 bytes end 4 bytes short of the next 8-byte boundary, and 4
-     * bytes of padding sit between the array and relative_base. The span must
-     * be rounded up to 8 bytes, otherwise the array start -- and therefore
-     * every decoded address -- shifts by one u32.
-     */
-	offsets_size = (size_t)num_syms * sizeof(u32);
-	offsets_span = ALIGN(offsets_size, 8);
+	for (num_addr = (names_addr - sizeof(u64)) & ~(sizeof(u64) - 1);
+	     num_addr >= limit; num_addr -= sizeof(u64)) {
+		u64 value;
+		unsigned long rel_addr, offsets_size, offsets_start;
+		u64 rel_base;
 
-	/* names must lie inside the scanned buffer */
-	if (names_addr < (unsigned long)buf_start || names_addr > (unsigned long)buf_end)
-		return -ENOENT;
+		memcpy(&value, (const void *)num_addr, sizeof(value));
+		if (value == 0 || value > KSYM_MARKERS_MAX * 256u)
+			continue;
+		if (value <= (u64)(v->marker_count - 1) * 256u ||
+		    value > (u64)v->marker_count * 256u)
+			continue;
 
-	/*
-     * The offsets array, num_syms and relative_base all sit below names, so
-     * names - buf_start must leave room for both scalars and the aligned
-     * array. Subtract first so the comparison cannot overflow.
-     */
-	if (names_addr - (unsigned long)buf_start < 16 + offsets_span)
-		return -ENOENT;
+		num_syms = (u32)value;
 
-	memcpy(&rel_base, names - 16, sizeof(rel_base));
-	if (rel_base < 0xffff000000000000UL)
-		return -ENOENT;
+		/*
+		 * output_label() aligns every label, so the gap between
+		 * num_syms and names is exactly the alignment unit.
+		 */
+		align = names_addr - num_addr;
+		if (align < sizeof(u64) || align > 0x800 || (align & (align - 1)))
+			continue;
 
-	ai->base_relative = true;
-	ai->offsets = (const u32 *)(names_addr - 16 - offsets_span);
-	ai->relative_base = rel_base;
-	*num_out = num_syms;
-	return 0;
+		rel_addr = num_addr - align;
+		if (rel_addr < (unsigned long)buf_start)
+			continue;
+
+		memcpy(&rel_base, (const void *)rel_addr, sizeof(rel_base));
+		if (rel_base >= 0xff00000000000000UL) {
+			/* BASE_RELATIVE: offsets[] then relative_base */
+			offsets_size = (unsigned long)num_syms * sizeof(u32);
+			offsets_start = align_down_ul(rel_addr - offsets_size, align);
+			if (offsets_start < (unsigned long)buf_start)
+				continue;
+
+			{
+				const u32 *offs = (const u32 *)offsets_start;
+				u32 first, last;
+
+				memcpy(&first, offs, sizeof(first));
+				memcpy(&last, (const u8 *)offs + offsets_size - sizeof(u32),
+				       sizeof(last));
+				/* relative_base is the lowest symbol address. */
+				if (first != 0 || last > (u32)SZ_1G)
+					continue;
+			}
+
+			ai->base_relative = true;
+			ai->offsets = (const u32 *)offsets_start;
+			ai->relative_base = rel_base;
+			*num_out = num_syms;
+			return 0;
+		}
+
+		/* Absolute address table: no relative_base scalar. */
+		offsets_size = (unsigned long)num_syms * sizeof(unsigned long);
+		offsets_start = align_down_ul(num_addr - offsets_size, align);
+		if (offsets_start < (unsigned long)buf_start)
+			continue;
+		{
+			const unsigned long *addr = (const unsigned long *)offsets_start;
+			unsigned long first, last;
+
+			memcpy(&first, addr, sizeof(first));
+			memcpy(&last, (const u8 *)addr + offsets_size - sizeof(unsigned long),
+			       sizeof(last));
+			if (first < 0xff00000000000000UL || last < first ||
+			    last - first > SZ_1G)
+				continue;
+		}
+
+		ai->addresses = (const unsigned long *)offsets_start;
+		*num_out = num_syms;
+		return 0;
+	}
+
+	return -ENOENT;
 }
 
 /*

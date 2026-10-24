@@ -26,9 +26,17 @@
 #define NKSU_CLEANUP_H
 
 #include <linux/compiler.h>
-#include <linux/compiler_attributes.h>
 
+/*
+ * <linux/compiler_attributes.h> only exists from v4.14 (and cleanup.h from
+ * v6.5).  Older trees (e.g. 4.9) do not ship either, so probe with
+ * __has_include when the compiler supports it and fall back to the backport
+ * below.
+ */
 #ifdef __has_include
+#if __has_include(<linux/compiler_attributes.h>)
+#include <linux/compiler_attributes.h>
+#endif
 #if __has_include(<linux/cleanup.h>)
 #include <linux/cleanup.h>
 #define NKSU_HAVE_LINUX_CLEANUP 1

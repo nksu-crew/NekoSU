@@ -7,12 +7,10 @@
 #include <linux/kernel.h>
 #include <linux/mman.h>
 #include <linux/mm.h>
-#include <linux/mmap_lock.h>
 #include <linux/module.h>
 #include <linux/pid.h>
 #include <linux/rcupdate.h>
 #include <linux/sched.h>
-#include <linux/sched/signal.h>
 #include <linux/shmem_fs.h>
 #include <linux/slab.h>
 #include <linux/string.h>
@@ -21,9 +19,14 @@
 #include <linux/tracepoint.h>
 #include <linux/uaccess.h>
 #include <linux/version.h>
-#include <linux/xarray.h>
 #include <asm/barrier.h>
 #include <asm/ptrace.h>
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)
+#include <linux/xarray.h>
+#else
+#include <linux/radix-tree.h>
+#endif
 
 #include "hook/hook.h"
 #include "manager/manager.h"
@@ -139,7 +142,31 @@ struct nksu_path_cache {
 	unsigned long addr;
 };
 
+/*
+ * 4.9 has no xarray; a radix tree provides the same index -> pointer map and
+ * also supports lockless lookups.  The helpers below give both trees the small
+ * xarray surface this file uses.
+ */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 20, 0)
+static struct radix_tree_root nksu_path_addrs = RADIX_TREE_INIT(GFP_KERNEL);
+
+static void *nksu_xa_store(struct radix_tree_root *root, unsigned long index, void *entry,
+			   gfp_t gfp)
+{
+	void *old = radix_tree_delete(root, index);
+
+	if (radix_tree_insert(root, index, entry))
+		return ERR_PTR(-ENOMEM);
+	return old;
+}
+
+#define xa_store(root, index, entry, gfp) nksu_xa_store((root), (index), (entry), (gfp))
+#define xa_load(root, index) radix_tree_lookup((root), (index))
+#define xa_erase(root, index) radix_tree_delete((root), (index))
+#define xa_err(entry) IS_ERR(entry)
+#else
 static DEFINE_XARRAY(nksu_path_addrs);
+#endif
 
 static void nksu_path_cache_store(unsigned long addr)
 {
@@ -424,7 +451,7 @@ int nksu_path_init(void)
 		return ret;
 	}
 
-	written = kernel_write(file, page, PAGE_SIZE, &pos);
+	written = nksu_kwrite(file, page, PAGE_SIZE, &pos);
 	kfree(page);
 	if (written != (ssize_t)PAGE_SIZE) {
 		pr_err("[hook]: cannot stage redirect page: %zd\n", written);
@@ -490,8 +517,6 @@ void nksu_path_exit(void)
 {
 	struct nksu_path_cache *cache;
 	struct file *file;
-	unsigned long index = 0;
-
 	smp_store_release(&nksu_path_ready, false);
 
 	if (tp_path_exec)
@@ -506,12 +531,33 @@ void nksu_path_exit(void)
 	tracepoint_synchronize_unregister();
 	synchronize_rcu();
 
-	while ((cache = xa_find(&nksu_path_addrs, &index, ~0UL, XA_PRESENT))) {
-		xa_erase(&nksu_path_addrs, index);
-		kfree(cache);
-		index++;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)
+	{
+		unsigned long index = 0;
+
+		while ((cache = xa_find(&nksu_path_addrs, &index, ~0UL, XA_PRESENT))) {
+			xa_erase(&nksu_path_addrs, index);
+			kfree(cache);
+			index++;
+		}
+		xa_destroy(&nksu_path_addrs);
 	}
-	xa_destroy(&nksu_path_addrs);
+#else
+	for (;;) {
+		void **slots[16];
+		unsigned long indices[16];
+		unsigned int n, i;
+
+		n = radix_tree_gang_lookup_slot(&nksu_path_addrs, slots, indices, 0, 16);
+		if (!n)
+			break;
+		for (i = 0; i < n; i++) {
+			cache = *slots[i];
+			radix_tree_delete(&nksu_path_addrs, indices[i]);
+			kfree(cache);
+		}
+	}
+#endif
 
 	file = READ_ONCE(nksu_path_file);
 	WRITE_ONCE(nksu_path_file, NULL);
@@ -705,6 +751,15 @@ static const struct syscall_hook syscall_hooks[] = { NKSU_SYSCALL_HANDLERS(NKSU_
 
 int init_syscall_hook(void)
 {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 17, 0)
+	/*
+	 * 4.9's sys_call_table holds native sys_* functions, not the pt_regs
+	 * dispatcher this path installs.  Refuse instead of corrupting every
+	 * syscall; the tracepoint dispatcher (CONFIG_NKSU_SYSCALL=n) works.
+	 */
+	pr_err("[hook]: syscall-table hooking needs Linux >= 4.17; use the tracepoint hook\n");
+	return -EOPNOTSUPP;
+#else
 	int ret, i;
 
 	/* Steady state is profile-gated; the temporary watcher may have left
@@ -736,6 +791,7 @@ err:
 	for (i = 0; i < ARRAY_SIZE(syscall_hooks); i++)
 		nksu_unhook_syscall(syscall_hooks[i].nr);
 	return ret;
+#endif
 }
 
 void exit_syscall_hook(void)

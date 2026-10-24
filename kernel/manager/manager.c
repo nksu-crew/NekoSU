@@ -16,8 +16,7 @@
 #include <crypto/hash.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
-#include <linux/sched/signal.h>
-#include <linux/sched/task.h>
+#include <linux/sched.h>
 #include <linux/kthread.h>
 #include <linux/wait.h>
 #include <linux/delay.h>
@@ -200,7 +199,7 @@ static enum manager_verify_result verify_package_signature(struct abx_package *p
 		return MANAGER_VERIFY_ERROR;
 	}
 
-	rd = kernel_read(fp, buf, fsize, &pos);
+	rd = nksu_kread(fp, buf, fsize, &pos);
 	if (rd != (ssize_t)fsize) {
 		pr_err("[manager] short read from %s: %zd of %zu bytes\n", PACKAGES_XML_PATH, rd,
 		       fsize);
@@ -250,7 +249,7 @@ static uid_t get_uid_from_packages_list(const char *package_name)
 	if (!buf)
 		return (uid_t)-1;
 
-	read_size = kernel_read(file, buf, fsize, &pos);
+	read_size = nksu_kread(file, buf, fsize, &pos);
 	if (read_size <= 0)
 		return (uid_t)-1;
 	buf[read_size] = '\0';
@@ -277,10 +276,10 @@ static int get_task_cmdline(struct task_struct *task, char *buffer, int buflen)
 	if (!mm)
 		return 0;
 
-	down_read(&mm->mmap_lock);
+	mmap_read_lock(mm);
 	arg_start = mm->arg_start;
 	arg_end = mm->arg_end;
-	up_read(&mm->mmap_lock);
+	mmap_read_unlock(mm);
 
 	len = arg_end - arg_start;
 	if (len > buflen - 1)
@@ -515,7 +514,7 @@ static int kfile_copy(const char *src, const char *dst)
 		return PTR_ERR(out);
 
 	for (;;) {
-		ssize_t r = kernel_read(in, buf, PAGE_SIZE, &ipos);
+		ssize_t r = nksu_kread(in, buf, PAGE_SIZE, &ipos);
 
 		if (r < 0) {
 			err = (int)r;
@@ -526,7 +525,7 @@ static int kfile_copy(const char *src, const char *dst)
 
 		off = 0;
 		while (off < r) {
-			ssize_t w = kernel_write(out, buf + off, (size_t)(r - off), &opos);
+			ssize_t w = nksu_kwrite(out, buf + off, (size_t)(r - off), &opos);
 
 			if (w <= 0) {
 				err = w ? (int)w : -EIO;
@@ -924,6 +923,7 @@ static void appscan_defer_scan(void)
 	}
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 static int appscan_handle_inode_event(struct fsnotify_mark *mark, u32 mask, struct inode *inode,
 				      struct inode *dir, const struct qstr *file_name, u32 cookie)
 {
@@ -945,6 +945,40 @@ static int appscan_handle_inode_event(struct fsnotify_mark *mark, u32 mask, stru
 static const struct fsnotify_ops appscan_ops = {
 	.handle_inode_event = appscan_handle_inode_event,
 };
+#else
+/* 4.9 has the old group-wide handle_event callback and group-owned marks. */
+static void appscan_free_mark(struct fsnotify_mark *mark)
+{
+	kfree(mark);
+}
+
+static int appscan_handle_event(struct fsnotify_group *group, struct inode *inode,
+				struct fsnotify_mark *inode_mark, struct fsnotify_mark *vfsmount_mark,
+				u32 mask, void *data, int data_type,
+				const unsigned char *file_name, u32 cookie)
+{
+	(void)group;
+	(void)inode;
+	(void)inode_mark;
+	(void)vfsmount_mark;
+	(void)mask;
+	(void)data;
+	(void)data_type;
+	(void)cookie;
+
+	if (!file_name || strlen((const char *)file_name) != sizeof(APPSCAN_WATCH_NAME) - 1)
+		return 0;
+	if (memcmp(file_name, APPSCAN_WATCH_NAME, sizeof(APPSCAN_WATCH_NAME) - 1))
+		return 0;
+
+	appscan_defer_scan();
+	return 0;
+}
+
+static const struct fsnotify_ops appscan_ops = {
+	.handle_event = appscan_handle_event,
+};
+#endif
 
 static void appscan_observer_exit(void)
 {
@@ -995,9 +1029,17 @@ static int appscan_observer_init(void)
 		goto out_group;
 	}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 	fsnotify_init_mark(mark, appscan_group);
+#else
+	fsnotify_init_mark(mark, appscan_free_mark);
+#endif
 	mark->mask = APPSCAN_WATCH_MASK;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 	ret = nksu_fsnotify_add_inode_mark(mark, d_inode(kpath.dentry), 0);
+#else
+	ret = nksu_fsnotify_add_mark(mark, appscan_group, d_inode(kpath.dentry), NULL, 0);
+#endif
 	path_put(&kpath);
 	if (ret) {
 		fsnotify_put_mark(mark);
