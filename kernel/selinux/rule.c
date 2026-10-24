@@ -626,7 +626,7 @@ static bool rule_add_filename_trans(struct policydb *db, const char *s, const ch
 
 		trans->next = last;
 		trans->otype = def->value;
-		rc = nksu_hashtab_insert(db->filename_trans, new_key, trans,
+		rc = nksu_hashtab_insert(&db->filename_trans, new_key, trans,
 					 filenametr_key_params);
 		if (rc)
 			goto free_name;
