@@ -269,7 +269,14 @@ static int __init nekosu_init(void)
 {
 	int ret;
 
-	late_load = ((current->pid != 1) || strcmp(current->comm, "init"));
+	/*
+	 * A built-in module runs from kernel_init (pid 1, still "swapper/0" at
+	 * that point); init's first-stage insmod also runs as pid 1 "init".
+	 * Both need the staged boot watcher.  Only a later userspace load is a
+	 * "late load" that initializes everything at once.
+	 */
+	late_load = current->pid != 1 ||
+		    (strcmp(current->comm, "init") && strcmp(current->comm, "swapper/0"));
 
 	pr_info("Loading nekosu module...\n");
 

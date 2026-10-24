@@ -136,40 +136,24 @@ static struct tracepoint *nksu_find_tracepoint(const char *name)
  * it keyed by the thread-group leader so the syscall hook can resume directly
  * without walking the VMA list or taking mmap_lock.  Entries disappear with
  * the task group, so the cache does not pin the mm or outlive the process.
+ *
+ * 4.9 uses this cache too (see below) only on kernels with xarray; older trees
+ * fall back to scanning the VMA list when the path actually matches su, which
+ * is rare.  A custom cache was intentionally avoided there: its rcu_head /
+ * kfree_rcu lifetime interacted badly with 4.9's NOCB callback queueing.
  */
 struct nksu_path_cache {
 	struct rcu_head rcu;
 	unsigned long addr;
 };
 
-/*
- * 4.9 has no xarray; a radix tree provides the same index -> pointer map and
- * also supports lockless lookups.  The helpers below give both trees the small
- * xarray surface this file uses.
- */
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 20, 0)
-static struct radix_tree_root nksu_path_addrs = RADIX_TREE_INIT(GFP_KERNEL);
-
-static void *nksu_xa_store(struct radix_tree_root *root, unsigned long index, void *entry,
-			   gfp_t gfp)
-{
-	void *old = radix_tree_delete(root, index);
-
-	if (radix_tree_insert(root, index, entry))
-		return ERR_PTR(-ENOMEM);
-	return old;
-}
-
-#define xa_store(root, index, entry, gfp) nksu_xa_store((root), (index), (entry), (gfp))
-#define xa_load(root, index) radix_tree_lookup((root), (index))
-#define xa_erase(root, index) radix_tree_delete((root), (index))
-#define xa_err(entry) IS_ERR(entry)
-#else
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)
 static DEFINE_XARRAY(nksu_path_addrs);
 #endif
 
 static void nksu_path_cache_store(unsigned long addr)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)
 	struct nksu_path_cache *cache;
 	struct nksu_path_cache *old;
 
@@ -186,10 +170,14 @@ static void nksu_path_cache_store(unsigned long addr)
 	}
 	if (old)
 		kfree_rcu(old, rcu);
+#else
+	(void)addr;
+#endif
 }
 
 static unsigned long nksu_path_cached_addr(void)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)
 	struct nksu_path_cache *cache;
 	unsigned long addr = 0;
 
@@ -199,10 +187,14 @@ static unsigned long nksu_path_cached_addr(void)
 		addr = cache->addr;
 	rcu_read_unlock();
 	return addr;
+#else
+	return 0;
+#endif
 }
 
 static void nksu_path_task_exit(void *data, struct task_struct *task)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)
 	struct nksu_path_cache *cache;
 
 	if (!task->signal || atomic_read(&task->signal->live) > 1)
@@ -210,6 +202,10 @@ static void nksu_path_task_exit(void *data, struct task_struct *task)
 	cache = xa_erase(&nksu_path_addrs, (unsigned long)task->group_leader);
 	if (cache)
 		kfree_rcu(cache, rcu);
+#else
+	(void)data;
+	(void)task;
+#endif
 }
 
 struct nksu_path_work {
@@ -515,7 +511,9 @@ err_page:
 
 void nksu_path_exit(void)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)
 	struct nksu_path_cache *cache;
+#endif
 	struct file *file;
 	smp_store_release(&nksu_path_ready, false);
 
@@ -541,21 +539,6 @@ void nksu_path_exit(void)
 			index++;
 		}
 		xa_destroy(&nksu_path_addrs);
-	}
-#else
-	for (;;) {
-		void **slots[16];
-		unsigned long indices[16];
-		unsigned int n, i;
-
-		n = radix_tree_gang_lookup_slot(&nksu_path_addrs, slots, indices, 0, 16);
-		if (!n)
-			break;
-		for (i = 0; i < n; i++) {
-			cache = *slots[i];
-			radix_tree_delete(&nksu_path_addrs, indices[i]);
-			kfree(cache);
-		}
 	}
 #endif
 
