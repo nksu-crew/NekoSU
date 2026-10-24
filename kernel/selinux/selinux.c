@@ -25,6 +25,7 @@
 #include <linux/delay.h>
 #include <linux/fs.h>
 #include <linux/file.h>
+#include <linux/key.h>
 #include <linux/mount.h>
 #include <linux/xattr.h>
 #include <linux/magic.h>
@@ -223,6 +224,35 @@ int set_domain(const char *domain, struct cred *new_cred)
 static struct cred *nksu_domain_cred;
 static DEFINE_MUTEX(nksu_domain_cred_lock);
 
+/*
+ * 4.9's fscrypt looks the master key up in the credentials' keyrings.  The
+ * cached cred may be built in a kernel thread (manager scan / profile load),
+ * where the session keyring is NULL, so file I/O would then fail with
+ * -ENOKEY even after the user has unlocked /data.  Android installs the
+ * fscrypt keys into init's session keyring, so adopt that keyring (and its
+ * subscribed user keyring) for the cached cred.
+ */
+static void nksu_adopt_init_keyrings(struct cred *cred)
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 7, 0)
+	struct task_struct *init;
+	struct key *session = NULL;
+
+	rcu_read_lock();
+	init = find_task_by_vpid(1);
+	if (init)
+		session = key_get(__task_cred(init)->session_keyring);
+	rcu_read_unlock();
+
+	if (session) {
+		key_put(cred->session_keyring);
+		cred->session_keyring = session;
+	}
+#else
+	(void)cred;
+#endif
+}
+
 const struct cred *nksu_borrow_creds_begin(void)
 {
 	const struct cred *old = NULL;
@@ -234,6 +264,8 @@ const struct cred *nksu_borrow_creds_begin(void)
 
 		if (!cred)
 			goto out;
+
+		nksu_adopt_init_keyrings(cred);
 
 		cred->cap_effective = CAP_FULL_SET;
 		cred->cap_permitted = CAP_FULL_SET;

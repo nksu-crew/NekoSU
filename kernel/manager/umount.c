@@ -822,7 +822,10 @@ static void nksu_register_mount_target(struct pt_regs *regs, unsigned int source
 
 	source_ok = nksu_read_abs_path(regs, source_arg, source, sizeof(source));
 	if (!nksu_read_abs_path(regs, target_arg, target, sizeof(target))) {
-		pr_warn("[mount] cannot read %s target\n", what);
+		if (force || (source_ok && nksu_path_is_module(source)))
+			pr_warn("[mount] cannot read %s target\n", what);
+		else
+			pr_debug("[mount] cannot read %s target\n", what);
 		return;
 	}
 

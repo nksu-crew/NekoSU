@@ -620,8 +620,12 @@ static bool resolve_lib_dir(const struct abx_package *paths, char *out, size_t c
 	char cand[320];
 	char base[256];
 
+	pr_info("[manager] package paths: native='%s' code='%s'\n", paths->native_lib_path,
+		paths->code_path);
+
 	if (paths->native_lib_path[0]) {
 		snprintf(cand, sizeof(cand), "%s/%s", paths->native_lib_path, NKSU_DAEMON_LIB_NAME);
+		pr_info("[manager] trying %s\n", cand);
 		if (kfile_exists(cand)) {
 			strscpy(out, paths->native_lib_path, cap);
 			return true;
@@ -632,11 +636,13 @@ static bool resolve_lib_dir(const struct abx_package *paths, char *out, size_t c
 		code_path_base(paths->code_path, base, sizeof(base));
 
 		snprintf(cand, sizeof(cand), "%s/lib/arm64/%s", base, NKSU_DAEMON_LIB_NAME);
+		pr_info("[manager] trying %s\n", cand);
 		if (kfile_exists(cand)) {
 			snprintf(out, cap, "%s/lib/arm64", base);
 			return true;
 		}
 		snprintf(cand, sizeof(cand), "%s/lib/arm/%s", base, NKSU_DAEMON_LIB_NAME);
+		pr_info("[manager] trying %s\n", cand);
 		if (kfile_exists(cand)) {
 			snprintf(out, cap, "%s/lib/arm", base);
 			return true;
