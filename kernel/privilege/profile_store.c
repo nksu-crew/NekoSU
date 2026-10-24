@@ -27,7 +27,9 @@
 #include <linux/errno.h>
 #include <linux/fs.h>
 #include <linux/kernel.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
 #include <linux/minmax.h>
+#endif
 #include <linux/mm.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
@@ -175,7 +177,7 @@ void nksu_profile_store_save(void)
 	fp = filp_open(NKSU_PROFILE_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0600);
 	if (!IS_ERR(fp)) {
 		while (pos < len) {
-			ssize_t written = kernel_write(fp, buf + pos, (size_t)(len - pos), &pos);
+			ssize_t written = nksu_kwrite(fp, buf + pos, (size_t)(len - pos), &pos);
 
 			if (written < 0) {
 				pr_err("[profile] save %s failed: %d\n", NKSU_PROFILE_FILE,
@@ -322,7 +324,7 @@ int nksu_profile_store_load(void)
 		return -ENOMEM;
 	}
 
-	rd = kernel_read(fp, buf, (size_t)size, &pos);
+	rd = nksu_kread(fp, buf, (size_t)size, &pos);
 	nksu_borrow_creds_end(old);
 
 	if (rd <= 0)

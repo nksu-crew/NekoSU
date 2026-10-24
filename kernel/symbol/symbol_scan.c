@@ -31,7 +31,7 @@
 #include "symbol/symbol_compat.h"
 
 /*
- * filp_open()/kernel_read() are reached through resolved pointers here; the
+ * filp_open()/nksu_kread() are reached through resolved pointers here; the
  * type-hash the module emits for those indirect calls may differ from the
  * running kernel's, so opt this file out of CFI like the other users do.
  */
@@ -207,7 +207,7 @@ static unsigned long read_vmcoreinfo_entry(const char *kind, const char *name)
 
 	/* the file can be much larger than a page; read it all */
 	while (total < SZ_64K - 1) {
-		rd = nksu_kernel_read(f, buf + total, SZ_64K - 1 - total, &pos);
+		rd = nksu_kread(f, buf + total, SZ_64K - 1 - total, &pos);
 		if (rd <= 0)
 			break;
 		total += (size_t)rd;
@@ -261,9 +261,16 @@ void nksu_ksym_scan_memory(void)
      * so the anchor (a text symbol) and the tables we are looking for both
      * sit at higher addresses: scan upward first and only fall back to the
      * region below the anchor if that misses.
+     *
+     * Do not use a compat pointer here: the first lookup (filp_open, which
+     * bootstraps the whole layer) runs before any pointer has been filled
+     * in, so it would be NULL.  printk is a direct module relocation and is
+     * always valid.
      */
-	anchor = (unsigned long)&copy_from_kernel_nofault;
+	anchor = (unsigned long)&printk;
 	if (anchor) {
+		pr_info("[ksym] scanning kernel image from anchor 0x%lx\n", anchor);
+
 		if (anchor <= ULONG_MAX - SZ_256M) {
 			found = scan_region(anchor, anchor + SZ_256M);
 			if (found)
@@ -276,6 +283,8 @@ void nksu_ksym_scan_memory(void)
 				return;
 		}
 	}
+
+	pr_warn("[ksym] in-memory kallsyms scan found no table (anchor=0x%lx)\n", anchor);
 }
 
 #if defined(__clang__)

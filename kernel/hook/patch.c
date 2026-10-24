@@ -25,6 +25,7 @@
 #include <asm/tlbflush.h>
 #include <asm/fixmap.h>
 #include <asm/pgtable.h>
+#include <asm/memory.h>
 
 #include "hook/patch.h"
 #include "symbol/symbol.h"
@@ -36,13 +37,23 @@ static struct mm_struct *nksu_patch_init_mm;
 static unsigned long nksu_patch_phys(unsigned long addr, int *err)
 {
 	pgd_t *pgd;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0)
 	p4d_t *p4d;
+#endif
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
 
 	*err = 0;
 
+	/*
+	 * The kernel image (text/rodata) is part of arm64's linear map on 4.9,
+	 * so __pa() resolves it directly; the page-table walk below only exists
+	 * on newer kernels where __pa() must not be used for it.
+	 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 11, 0)
+	return __pa(addr);
+#else
 	pgd = pgd_offset(nksu_patch_init_mm, addr);
 	if (pgd_none(*pgd) || pgd_bad(*pgd))
 		goto fail;
@@ -76,6 +87,7 @@ static unsigned long nksu_patch_phys(unsigned long addr, int *err)
 fail:
 	*err = -ENOENT;
 	return 0;
+#endif /* < 4.11 */
 }
 
 struct nksu_patch_info {

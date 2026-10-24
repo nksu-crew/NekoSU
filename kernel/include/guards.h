@@ -23,7 +23,7 @@
 #include <linux/fs.h>
 #include <linux/mm.h>
 #include <linux/mutex.h>
-#include <linux/sched/mm.h>
+#include <linux/sched.h>
 #include <linux/slab.h>
 
 /* Resource helpers. */

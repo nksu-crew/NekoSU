@@ -27,7 +27,7 @@ static bool ksym_proc_hidden;
 static bool ksym_proc_checked;
 
 /*
- * filp_open()/kernel_read() are reached through resolved pointers here; the
+ * filp_open()/nksu_kread() are reached through resolved pointers here; the
  * type-hash the module emits for those indirect calls may differ from the
  * running kernel's, so opt this file out of CFI like the other users do.
  */
@@ -134,9 +134,9 @@ unsigned long nksu_ksym_lookup_proc(const char *name)
 		return 0;
 
 	/*
-     * kernel_read() drives ->read_iter only. This kernel's kallsyms proc
+     * nksu_kread() drives ->read_iter only. This kernel's kallsyms proc
      * file registers .proc_read = seq_read without proc_read_iter, so
-     * kernel_read() fails with -EINVAL and prints "kernel read not
+     * nksu_kread() fails with -EINVAL and prints "kernel read not
      * supported for file /kallsyms". Detect that up-front and let the
      * in-memory kallsyms scan handle the lookup instead.
      */
@@ -161,7 +161,7 @@ unsigned long nksu_ksym_lookup_proc(const char *name)
 			break;
 		}
 
-		rd = nksu_kernel_read(f, buf + used, SZ_64K - 1 - used, &pos);
+		rd = nksu_kread(f, buf + used, SZ_64K - 1 - used, &pos);
 		if (rd < 0)
 			break;
 		if (rd == 0) {

@@ -11,7 +11,6 @@
 #include <linux/string.h>
 #include <linux/pid.h>
 #include <linux/sched.h>
-#include <linux/sched/signal.h>
 
 #include "fmac.h"
 #include "manager/feature.h"

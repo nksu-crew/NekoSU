@@ -20,4 +20,8 @@ config NKSU_SYSCALL
 	help
 	  Enable nekosu syscall hook.
 
+	  This path rewrites sys_call_table entries with a pt_regs dispatcher
+	  and requires Linux >= 4.17.  On 4.9 leave it disabled; the default
+	  tracepoint dispatcher is used instead.
+
 endmenu

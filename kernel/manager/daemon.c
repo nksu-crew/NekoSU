@@ -21,7 +21,6 @@
 #include <linux/module.h>
 #include <linux/pid.h>
 #include <linux/sched.h>
-#include <linux/sched/signal.h>
 #include <linux/slab.h>
 #include <linux/task_work.h>
 #include <linux/tracepoint.h>

@@ -62,6 +62,7 @@
 /* grab the working policydb under the lock */
 static struct policydb *fmac_get_pdb(void)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 	struct selinux_policy *pol;
 
 	pol = rcu_dereference_protected(selinux_state.policy,
@@ -69,6 +70,11 @@ static struct policydb *fmac_get_pdb(void)
 	if (!pol)
 		return NULL;
 	return &pol->policydb;
+#else
+	if (!selinux_state.ss)
+		return NULL;
+	return &selinux_state.ss->policydb;
+#endif
 }
 
 /*
@@ -91,6 +97,19 @@ void avc_reset(void)
 }
 
 /* ---- low-level avtab helpers ---- */
+
+/*
+ * 4.9 stores the avtab buckets in a flex_array instead of a plain pointer
+ * array; this accessor keeps the iteration code identical.
+ */
+static struct avtab_node *nksu_avtab_bucket(struct avtab *tab, u32 i)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+	return tab->htable[i];
+#else
+	return flex_array_get_ptr(tab->htable, i);
+#endif
+}
 
 static struct avtab_node *rule_get_avtab_node(struct policydb *db, struct avtab_key *key,
 					      struct avtab_extended_perms *xperms)
@@ -161,14 +180,19 @@ static bool rule_remove_avtab_node(struct policydb *db, struct avtab_node *node)
 
 	for (i = 0; i < db->te_avtab.nslot; i++) {
 		prev = NULL;
-		for (n = db->te_avtab.htable[i]; n; prev = n, n = n->next) {
+		for (n = nksu_avtab_bucket(&db->te_avtab, i); n; prev = n, n = n->next) {
 			if (n != node)
 				continue;
 
 			if (prev)
 				prev->next = n->next;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 			else
 				db->te_avtab.htable[i] = n->next;
+#else
+			else
+				flex_array_put_ptr(db->te_avtab.htable, i, n->next, GFP_ATOMIC);
+#endif
 
 			if (db->te_avtab.nel > 0)
 				db->te_avtab.nel--;
@@ -181,7 +205,11 @@ static bool rule_remove_avtab_node(struct policydb *db, struct avtab_node *node)
 				shrink += sizeof(n->datum.u.data);
 
 			n->next = NULL;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 			removed.htable[0] = n;
+#else
+			flex_array_put_ptr(removed.htable, 0, n, GFP_ATOMIC);
+#endif
 			removed.nel = 1;
 			avtab_destroy(&removed);
 			if (db->len >= (unsigned)shrink)
@@ -200,9 +228,16 @@ static inline bool rule_strip_av(int effect, bool invert)
 	return (effect == AVTAB_AUDITDENY) == !invert;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 #define for_each_htable(htab, cur)               \
 	for (int _i = 0; _i < (htab).size; _i++) \
 		for (cur = (htab).htable[_i]; cur; cur = cur->next)
+#else
+/* 4.9 struct symtab holds a pointer to its hashtab. */
+#define for_each_htable(htab, cur)                \
+	for (int _i = 0; _i < (htab)->size; _i++) \
+		for (cur = (htab)->htable[_i]; cur; cur = cur->next)
+#endif
 
 static bool rule_add_raw(struct policydb *db, struct type_datum *src, struct type_datum *tgt,
 			 struct class_datum *cls, struct perm_datum *perm, int effect, bool invert)
@@ -506,7 +541,6 @@ static const struct hashtab_key_params filenametr_key_params = {
 	.hash = filenametr_hash,
 	.cmp = filenametr_cmp,
 };
-#endif
 
 /*
  * hashtab_insert() is a static inline that dereferences the unexported
@@ -592,7 +626,7 @@ static bool rule_add_filename_trans(struct policydb *db, const char *s, const ch
 
 		trans->next = last;
 		trans->otype = def->value;
-		rc = nksu_hashtab_insert(&db->filename_trans, new_key, trans,
+		rc = nksu_hashtab_insert(db->filename_trans, new_key, trans,
 					 filenametr_key_params);
 		if (rc)
 			goto free_name;
@@ -619,6 +653,70 @@ free_trans:
 	kfree(trans);
 	return false;
 }
+#else
+/*
+ * 4.9 keeps filename transitions in a plain hashtab keyed by the full
+ * (stype, ttype, tclass, name) tuple with a single otype datum.
+ */
+static bool rule_add_filename_trans(struct policydb *db, const char *s, const char *t,
+				    const char *c, const char *d, const char *o)
+{
+	struct type_datum *src, *tgt, *def;
+	struct class_datum *cls;
+	struct filename_trans *key;
+	struct filename_trans_datum *datum;
+	int rc;
+
+	if (!(src = symtab_search(&db->p_types, s)))
+		return false;
+	if (!(tgt = symtab_search(&db->p_types, t)))
+		return false;
+	if (!(cls = symtab_search(&db->p_classes, c)))
+		return false;
+	if (!(def = symtab_search(&db->p_types, d)))
+		return false;
+
+	key = kzalloc(sizeof(*key), GFP_KERNEL);
+	if (!key)
+		return false;
+	key->stype = src->value;
+	key->ttype = tgt->value;
+	key->tclass = cls->value;
+	key->name = kstrdup(o, GFP_KERNEL);
+	if (!key->name) {
+		kfree(key);
+		return false;
+	}
+
+	datum = nksu_hashtab_search(db->filename_trans, key);
+	if (datum) {
+		datum->otype = def->value;
+		kfree(key->name);
+		kfree(key);
+		return true;
+	}
+
+	datum = kzalloc(sizeof(*datum), GFP_KERNEL);
+	if (!datum)
+		goto free_key;
+	datum->otype = def->value;
+
+	rc = nksu_hashtab_insert(db->filename_trans, key, datum);
+	if (rc)
+		goto free_datum;
+
+	if (ebitmap_set_bit(&db->filename_trans_ttypes, key->ttype, 1))
+		return false;
+	return true;
+
+free_datum:
+	kfree(datum);
+free_key:
+	kfree(key->name);
+	kfree(key);
+	return false;
+}
+#endif
 
 /* NekoSU does not implement genfscon yet; keep the call a no-op. */
 static bool rule_add_genfscon(struct policydb *db, const char *fs_name, const char *path,
@@ -629,6 +727,7 @@ static bool rule_add_genfscon(struct policydb *db, const char *fs_name, const ch
 
 /* ---- type / attribute / type state ---- */
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 static bool rule_add_type_datum(struct policydb *db, const char *type_name, bool attr)
 {
 	struct type_datum *type;
@@ -697,6 +796,166 @@ err_free:
 	kfree(type);
 	return false;
 }
+#else
+/*
+ * 4.9 stores the per-type arrays in flex_arrays whose element count is fixed at
+ * allocation time, so growing the type table means building a larger array and
+ * moving the entries over.
+ */
+static struct flex_array *nksu_flex_grow_ptrs(struct flex_array *old, u32 old_n, u32 new_n)
+{
+	struct flex_array *fa;
+	u32 i;
+
+	fa = flex_array_alloc(sizeof(void *), new_n, GFP_KERNEL | __GFP_ZERO);
+	if (!fa)
+		return NULL;
+	if (flex_array_prealloc(fa, 0, new_n, GFP_KERNEL | __GFP_ZERO)) {
+		flex_array_free(fa);
+		return NULL;
+	}
+	if (old) {
+		for (i = 0; i < old_n; i++) {
+			void *p = flex_array_get_ptr(old, i);
+
+			if (p && flex_array_put_ptr(fa, i, p, GFP_KERNEL)) {
+				flex_array_free(fa);
+				return NULL;
+			}
+		}
+	}
+	return fa;
+}
+
+static struct flex_array *nksu_flex_grow_ebitmaps(struct flex_array *old, u32 old_n, u32 new_n)
+{
+	struct flex_array *fa;
+	u32 i;
+
+	fa = flex_array_alloc(sizeof(struct ebitmap), new_n, GFP_KERNEL | __GFP_ZERO);
+	if (!fa)
+		return NULL;
+	if (flex_array_prealloc(fa, 0, new_n, GFP_KERNEL | __GFP_ZERO)) {
+		flex_array_free(fa);
+		return NULL;
+	}
+	if (old) {
+		for (i = 0; i < old_n; i++) {
+			struct ebitmap *e = flex_array_get(old, i);
+			struct ebitmap tmp;
+
+			if (!e)
+				continue;
+			/*
+			 * Deep copy: the private clone may be installed while the
+			 * previous working policy is destroyed, so the two must
+			 * not share bitmaps.
+			 */
+			if (ebitmap_cpy(&tmp, e)) {
+				u32 j;
+
+				for (j = 0; j < i; j++) {
+					struct ebitmap *c = flex_array_get(fa, j);
+
+					if (c)
+						ebitmap_destroy(c);
+				}
+				flex_array_free(fa);
+				return NULL;
+			}
+			if (flex_array_put(fa, i, &tmp, GFP_KERNEL)) {
+				u32 j;
+
+				ebitmap_destroy(&tmp);
+				for (j = 0; j < i; j++) {
+					struct ebitmap *c = flex_array_get(fa, j);
+
+					if (c)
+						ebitmap_destroy(c);
+				}
+				flex_array_free(fa);
+				return NULL;
+			}
+		}
+	}
+	return fa;
+}
+
+static void nksu_flex_free_ebitmaps(struct flex_array *fa, u32 n)
+{
+	u32 i;
+
+	if (!fa)
+		return;
+	for (i = 0; i < n; i++) {
+		struct ebitmap *e = flex_array_get(fa, i);
+
+		if (e)
+			ebitmap_destroy(e);
+	}
+	flex_array_free(fa);
+}
+
+static bool rule_add_type_datum(struct policydb *db, const char *type_name, bool attr)
+{
+	struct flex_array *attr_map, *val_to_struct, *val_to_name;
+	struct ebitmap *new_map;
+	struct type_datum *type;
+	u32 value;
+	char *key;
+	int i;
+
+	if (symtab_search(&db->p_types, type_name))
+		return true;
+
+	value = db->p_types.nprim + 1;
+
+	type = kzalloc(sizeof(*type), GFP_KERNEL);
+	key = kstrdup(type_name, GFP_KERNEL);
+	attr_map = nksu_flex_grow_ebitmaps(db->type_attr_map_array, value - 1, value);
+	val_to_struct = nksu_flex_grow_ptrs(db->type_val_to_struct_array, value - 1, value);
+	val_to_name = nksu_flex_grow_ptrs(db->sym_val_to_name[SYM_TYPES], value - 1, value);
+	if (!type || !key || !attr_map || !val_to_struct || !val_to_name)
+		goto err_free;
+
+	if (symtab_insert(&db->p_types, key, type))
+		goto err_free;
+
+	/* Commit: from here on nothing can fail. */
+	nksu_flex_free_ebitmaps(db->type_attr_map_array, value - 1);
+	flex_array_free(db->type_val_to_struct_array);
+	flex_array_free(db->sym_val_to_name[SYM_TYPES]);
+
+	db->type_attr_map_array = attr_map;
+	db->type_val_to_struct_array = val_to_struct;
+	db->sym_val_to_name[SYM_TYPES] = val_to_name;
+
+	type->primary = 1;
+	type->value = value;
+	type->attribute = attr;
+
+	new_map = flex_array_get(db->type_attr_map_array, value - 1);
+	if (new_map) {
+		ebitmap_init(new_map);
+		ebitmap_set_bit(new_map, value - 1, 1);
+	}
+	flex_array_put_ptr(db->type_val_to_struct_array, value - 1, type, GFP_KERNEL);
+	flex_array_put_ptr(db->sym_val_to_name[SYM_TYPES], value - 1, key, GFP_KERNEL);
+
+	for (i = 0; i < db->p_roles.nprim; ++i)
+		ebitmap_set_bit(&db->role_val_to_struct[i]->types, value - 1, 1);
+
+	return true;
+
+err_free:
+	nksu_flex_free_ebitmaps(attr_map, value - 1);
+	flex_array_free(val_to_struct);
+	flex_array_free(val_to_name);
+	kfree(key);
+	kfree(type);
+	return false;
+}
+#endif
 
 static bool rule_set_type_state(struct policydb *db, const char *type_name, bool permissive)
 {
@@ -724,11 +983,17 @@ static bool rule_set_type_state(struct policydb *db, const char *type_name, bool
 static void rule_add_typeattribute_raw(struct policydb *db, struct type_datum *type,
 				       struct type_datum *attr)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 	struct ebitmap *sattr = &db->type_attr_map_array[type->value - 1];
+#else
+	struct ebitmap *sattr = flex_array_get(db->type_attr_map_array, type->value - 1);
+#endif
 	struct hashtab_node *node;
 	struct constraint_node *n;
 	struct constraint_expr *e;
 
+	if (!sattr)
+		return;
 	ebitmap_set_bit(sattr, attr->value - 1, 1);
 
 	for_each_htable(db->p_classes.table, node)
@@ -737,7 +1002,7 @@ static void rule_add_typeattribute_raw(struct policydb *db, struct type_datum *t
 
 		for (n = cls->constraints; n; n = n->next) {
 			for (e = n->expr; e; e = e->next) {
-				if (e->expr_type == CEXPR_NAMES &&
+				if (e->expr_type == CEXPR_NAMES && e->type_names &&
 				    ebitmap_get_bit(&e->type_names->types, attr->value - 1))
 					ebitmap_set_bit(&e->names, type->value - 1, 1);
 			}
@@ -787,6 +1052,39 @@ static bool rule_add_typeattribute(struct policydb *db, const char *type, const 
 static atomic_t rule_batch_depth = ATOMIC_INIT(0);
 static bool rule_reset_pending;
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 7, 0)
+/*
+ * 4.9 policy mutations allocate memory (avtab nodes, hashtab nodes, grown
+ * flex arrays) and must not do so under the policy rwlock, which is a
+ * spinlock there.  Every mutation works on a private deep copy and installs it
+ * with a short write-locked swap; a batch shares one copy.
+ *
+ * Batches are expected from a single context (boot rule load or one manager
+ * IOC to ncore) as before.
+ */
+static DEFINE_MUTEX(nksu_rule_state_lock);
+static struct policydb *nksu_rule_batch_pdb;
+static unsigned int nksu_rule_batch_level;
+static struct task_struct *nksu_rule_batch_owner;
+
+static bool rule_in_batch(void)
+{
+	return nksu_rule_batch_level && nksu_rule_batch_owner == current;
+}
+
+static struct policydb *rule_batch_pdb(void)
+{
+	if (!nksu_rule_batch_pdb) {
+		struct policydb *pdb = nksu_policydb_dup_live();
+
+		if (IS_ERR(pdb))
+			return NULL;
+		nksu_rule_batch_pdb = pdb;
+	}
+	return nksu_rule_batch_pdb;
+}
+#endif
+
 static void rule_mark_dirty(void)
 {
 	if (atomic_read(&rule_batch_depth))
@@ -797,30 +1095,87 @@ static void rule_mark_dirty(void)
 
 void sepolicy_batch_begin(void)
 {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 7, 0)
+	if (nksu_rule_batch_level == 0) {
+		mutex_lock(&nksu_rule_state_lock);
+		nksu_rule_batch_owner = current;
+	}
+	nksu_rule_batch_level++;
+#endif
 	atomic_inc(&rule_batch_depth);
 }
 
 void sepolicy_batch_end(void)
 {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 7, 0)
+	bool outer;
+
+	if (nksu_rule_batch_level)
+		nksu_rule_batch_level--;
+	outer = nksu_rule_batch_level == 0;
+	if (outer) {
+		if (nksu_rule_batch_pdb) {
+			if (nksu_policydb_install(nksu_rule_batch_pdb))
+				pr_err("[selinux]: cannot install updated policy\n");
+			nksu_rule_batch_pdb = NULL;
+		}
+		nksu_rule_batch_owner = NULL;
+		mutex_unlock(&nksu_rule_state_lock);
+	}
+#endif
 	if (atomic_dec_and_test(&rule_batch_depth) && rule_reset_pending) {
 		rule_reset_pending = false;
 		avc_reset();
 	}
 }
 
-#define RULE_LOCK_GET(db)                                  \
-	struct policydb *db;                               \
-	mutex_lock(&selinux_state.policy_mutex);           \
-	db = fmac_get_pdb();                               \
-	if (!db) {                                         \
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+#define RULE_LOCK_GET(db)                     \
+	struct policydb *db;                  \
+	mutex_lock(&selinux_state.policy_mutex); \
+	db = fmac_get_pdb();                  \
+	if (!db) {                            \
 		mutex_unlock(&selinux_state.policy_mutex); \
-		return -ENOENT;                            \
+		return -ENOENT;               \
 	}
 
 #define RULE_UNLOCK(ret)                           \
 	mutex_unlock(&selinux_state.policy_mutex); \
 	if ((ret) == 0)                            \
 		rule_mark_dirty();
+#else
+#define RULE_LOCK_GET(db)                                             \
+	struct policydb *db;                                          \
+	bool __rule_batch = rule_in_batch();                          \
+	if (__rule_batch) {                                           \
+		db = rule_batch_pdb();                                \
+		if (!db)                                              \
+			return -ENOMEM;                               \
+	} else {                                                      \
+		mutex_lock(&nksu_rule_state_lock);                    \
+		db = nksu_policydb_dup_live();                        \
+		if (IS_ERR(db)) {                                     \
+			mutex_unlock(&nksu_rule_state_lock);          \
+			return PTR_ERR(db);                           \
+		}                                                     \
+	}
+
+#define RULE_UNLOCK(ret)                                      \
+	if (!__rule_batch) {                                  \
+		if ((ret) == 0) {                             \
+			int __inst = nksu_policydb_install(db); \
+			if (__inst)                           \
+				(ret) = __inst;               \
+		} else {                                      \
+			nksu_policydb_free(db);               \
+		}                                             \
+		mutex_unlock(&nksu_rule_state_lock);          \
+		if ((ret) == 0)                               \
+			rule_mark_dirty();                    \
+	} else if ((ret) == 0) {                              \
+		rule_mark_dirty();                            \
+	}
+#endif
 
 int sepolicy_add_rule(const char *sname, const char *tname, const char *cname, const char *pname,
 		      int effect, bool invert)
@@ -896,12 +1251,23 @@ int sepolicy_set_enforce(const char *type_name)
 
 int sepolicy_type_exists(const char *type_name)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 	int ret;
 	RULE_LOCK_GET(db);
 
 	ret = symtab_search(&db->p_types, type_name) ? 1 : 0;
 	mutex_unlock(&selinux_state.policy_mutex);
 	return ret;
+#else
+	int ret;
+
+	if (!selinux_state.ss)
+		return -ENOENT;
+	read_lock(&selinux_state.ss->policy_rwlock);
+	ret = symtab_search(&selinux_state.ss->policydb.p_types, type_name) ? 1 : 0;
+	read_unlock(&selinux_state.ss->policy_rwlock);
+	return ret;
+#endif
 }
 
 int sepolicy_add_type_transition(const char *s, const char *t, const char *c, const char *d,
@@ -951,18 +1317,11 @@ int sepolicy_add_genfscon(const char *fs_name, const char *path, const char *ctx
 /* give sname all perms to all types, scoped to a single class */
 int sepolicy_allow_all_types(const char *sname, const char *cname)
 {
-	struct policydb *db;
 	struct type_datum *src = NULL;
 	struct class_datum *cls = NULL;
 	int ret = 0;
 
-	mutex_lock(&selinux_state.policy_mutex);
-
-	db = fmac_get_pdb();
-	if (!db) {
-		ret = -ENOENT;
-		goto out;
-	}
+	RULE_LOCK_GET(db);
 
 	if (sname && *sname && !(src = symtab_search(&db->p_types, sname))) {
 		ret = -ENOENT;
@@ -976,26 +1335,17 @@ int sepolicy_allow_all_types(const char *sname, const char *cname)
 	rule_add_raw(db, src, NULL, cls, NULL, AVTAB_ALLOWED, false);
 	rule_add_raw(db, src, NULL, cls, NULL, AVTAB_AUDITDENY, true);
 out:
-	mutex_unlock(&selinux_state.policy_mutex);
-	if (ret == 0)
-		rule_mark_dirty();
+	RULE_UNLOCK(ret);
 	return ret;
 }
 
 /* give sname every perm on every class to every type — basically unconfined */
 int sepolicy_allow_any_any(const char *sname)
 {
-	struct policydb *db;
 	struct type_datum *src = NULL;
 	int ret = 0;
 
-	mutex_lock(&selinux_state.policy_mutex);
-
-	db = fmac_get_pdb();
-	if (!db) {
-		ret = -ENOENT;
-		goto out;
-	}
+	RULE_LOCK_GET(db);
 
 	if (sname && *sname && !(src = symtab_search(&db->p_types, sname))) {
 		ret = -ENOENT;
@@ -1005,9 +1355,7 @@ int sepolicy_allow_any_any(const char *sname)
 	rule_add_raw(db, src, NULL, NULL, NULL, AVTAB_ALLOWED, false);
 	rule_add_raw(db, src, NULL, NULL, NULL, AVTAB_AUDITDENY, true);
 out:
-	mutex_unlock(&selinux_state.policy_mutex);
-	if (ret == 0)
-		rule_mark_dirty();
+	RULE_UNLOCK(ret);
 	return ret;
 }
 
@@ -1028,28 +1376,18 @@ int sepolicy_add_domain(const char *name)
  */
 int sepolicy_make_audit(void)
 {
-	struct policydb *db;
 	struct avtab_node *node;
 	int i, ret = 0;
 
-	mutex_lock(&selinux_state.policy_mutex);
-
-	db = fmac_get_pdb();
-	if (!db) {
-		ret = -ENOENT;
-		goto out;
-	}
+	RULE_LOCK_GET(db);
 
 	for (i = 0; i < db->te_avtab.nslot; i++) {
-		for (node = db->te_avtab.htable[i]; node; node = node->next) {
+		for (node = nksu_avtab_bucket(&db->te_avtab, i); node; node = node->next) {
 			if (node->key.specified & AVTAB_AUDITDENY)
 				node->datum.u.data = ~0U;
 		}
 	}
-out:
-	mutex_unlock(&selinux_state.policy_mutex);
-	if (ret == 0)
-		rule_mark_dirty();
+	RULE_UNLOCK(ret);
 	return ret;
 }
 #endif /* CONFIG_NKSU_DEBUG */

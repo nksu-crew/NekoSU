@@ -30,6 +30,7 @@
 #include <linux/printk.h>
 #include <linux/ptrace.h>
 #include <linux/slab.h>
+#include <linux/spinlock.h>
 #include <linux/string.h>
 #include <linux/types.h>
 #include <linux/uaccess.h>
@@ -61,6 +62,23 @@
  */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
 typedef struct selinux_state nksu_fake_state_t;
+#endif
+
+/*
+ * On 4.9/5.x-ss the policy tables live in struct selinux_ss (reached through
+ * selinux_state.ss) and the status page/lock live there too.  5.7 moved them
+ * onto struct selinux_state itself.
+ */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 7, 0)
+static struct selinux_ss fake_ss;
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+#define NKSU_STATUS_PAGE (selinux_state.status_page)
+#define NKSU_STATUS_LOCK_OBJ (selinux_state.status_lock)
+#else
+#define NKSU_STATUS_PAGE (selinux_state.ss->status_page)
+#define NKSU_STATUS_LOCK_OBJ (selinux_state.ss->status_lock)
 #endif
 
 /* Last: redirects unexported symbols (selinux_state, ...) through pointers. */
@@ -159,15 +177,15 @@ static void nksu_fake_status_prepare(void)
 	struct selinux_kernel_status *cur, *copy;
 	struct page *page;
 
-	mutex_lock(&selinux_state.status_lock);
+	mutex_lock(&NKSU_STATUS_LOCK_OBJ);
 	if (fake_status)
 		goto out;
-	if (!selinux_state.status_page) {
+	if (!NKSU_STATUS_PAGE) {
 		pr_warn("[selinux_hide] status page not ready\n");
 		goto out;
 	}
 
-	cur = page_address(selinux_state.status_page);
+	cur = page_address(NKSU_STATUS_PAGE);
 	if (!cur->enforcing && !late_load) {
 		pr_warn("[selinux_hide] permissive, fake status skipped\n");
 		goto out;
@@ -201,7 +219,7 @@ static void nksu_fake_status_prepare(void)
 	pr_info("[selinux_hide] fake status ready: sequence=%u policyload=%u enforcing=%u\n",
 		copy->sequence, copy->policyload, copy->enforcing);
 out:
-	mutex_unlock(&selinux_state.status_lock);
+	mutex_unlock(&NKSU_STATUS_LOCK_OBJ);
 }
 
 static int nksu_status_open(struct inode *inode, struct file *filp)
@@ -210,9 +228,9 @@ static int nksu_status_open(struct inode *inode, struct file *filp)
 		void *page;
 		int ret;
 
-		mutex_lock(&selinux_state.status_lock);
+		mutex_lock(&NKSU_STATUS_LOCK_OBJ);
 		page = fake_status;
-		mutex_unlock(&selinux_state.status_lock);
+		mutex_unlock(&NKSU_STATUS_LOCK_OBJ);
 
 		if (page) {
 			filp->private_data = page;
@@ -295,7 +313,19 @@ static void nksu_clean_compute_av(u32 ssid, u32 tsid, u16 tclass, struct av_deci
 #define NKSU_BOUNDED_TRANSITION(old, new) nksu_bounded_transition_fn(&selinux_state, old, new)
 #endif
 
+/*
+ * The LSM setprocattr hook lost its struct task_struct argument in 5.9; keep
+ * both call signatures behind one parameter list.
+ */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 9, 0)
+typedef int (*nksu_setprocattr_fn)(struct task_struct *p, char *name, void *value, size_t size);
+#define NKSU_SETPROC_PARAMS struct task_struct *p, char *name, void *value, size_t size
+#define NKSU_SETPROC_ARGS p, name, value, size
+#else
 typedef int (*nksu_setprocattr_fn)(const char *name, void *value, size_t size);
+#define NKSU_SETPROC_PARAMS const char *name, void *value, size_t size
+#define NKSU_SETPROC_ARGS name, value, size
+#endif
 
 /* security_bounded_transition(), resolved in nksu_hide_enable(); optional. */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
@@ -339,18 +369,23 @@ static u32 nksu_ptrace_parent_sid(void)
 	return sid;
 }
 
-static int __nocfi nksu_setprocattr(const char *name, void *value, size_t size);
+static int __nocfi nksu_setprocattr(NKSU_SETPROC_PARAMS);
 
 static struct nksu_lsm_hook nksu_setprocattr_hook =
 	NKSU_LSM_HOOK_INIT(setprocattr, "selinux_setprocattr", nksu_setprocattr);
 
-static int __nocfi nksu_setprocattr(const char *name, void *value, size_t size)
+static int __nocfi nksu_setprocattr(NKSU_SETPROC_PARAMS)
 {
 	struct task_security_struct *tsec;
 	struct cred *new;
 	u32 mysid, sid = 0, ptsid;
 	int error;
 	char *str = value;
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 9, 0)
+	if (p != current)
+		goto call_orig;
+#endif
 
 	if (likely(current_uid().val < NKSU_APP_UID_MIN))
 		goto call_orig;
@@ -421,7 +456,7 @@ abort_change:
 	return error;
 
 call_orig:
-	return ((nksu_setprocattr_fn)nksu_setprocattr_hook.original)(name, value, size);
+	return ((nksu_setprocattr_fn)nksu_setprocattr_hook.original)(NKSU_SETPROC_ARGS);
 }
 
 static ssize_t nksu_write_context(struct file *file, char *buf, size_t size)
@@ -514,7 +549,11 @@ out:
  */
 static int nksu_clean_policy_prepare(void)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 	struct selinux_policy *pol = nksu_orig_policy_get();
+#else
+	struct policydb *pol = nksu_orig_policy_get();
+#endif
 	struct policy_file fp;
 	size_t len;
 	void *data;
@@ -525,7 +564,11 @@ static int nksu_clean_policy_prepare(void)
 	if (!pol)
 		return -EAGAIN;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 	len = pol->policydb.len + (size_t)pol->policydb.p_types.nprim * (sizeof(u32) + sizeof(u64));
+#else
+	len = pol->len + (size_t)pol->p_types.nprim * (sizeof(u32) + sizeof(u64));
+#endif
 	if (!len || len > NKSU_POLICY_BLOB_MAX)
 		return -EINVAL;
 
@@ -536,7 +579,11 @@ static int nksu_clean_policy_prepare(void)
 	fp.data = data;
 	fp.len = len;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 	ret = policydb_write(&pol->policydb, &fp);
+#else
+	ret = policydb_write(pol, &fp);
+#endif
 	if (ret) {
 		vfree(data);
 		return ret;
@@ -644,9 +691,24 @@ static int nksu_hide_enable(void)
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
 	nksu_engine_init();
-#else
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 	fake_state.initialized = true;
 	fake_state.policy = nksu_orig_policy_get();
+#else
+	/*
+	 * Build a throwaway state whose ss keeps the untouched policydb but
+	 * shares the live sidtab (and class map), so contexts resolved here
+	 * stay valid for the live policy.
+	 */
+	memset(&fake_ss, 0, sizeof(fake_ss));
+	fake_ss.policydb = *nksu_orig_policy_get();
+	fake_ss.sidtab = selinux_state.ss->sidtab;
+	fake_ss.map = selinux_state.ss->map;
+	fake_ss.latest_granting = selinux_state.ss->latest_granting;
+	rwlock_init(&fake_ss.policy_rwlock);
+	mutex_init(&fake_ss.status_lock);
+	fake_state.initialized = true;
+	fake_state.ss = &fake_ss;
 #endif
 
 	nksu_bounded_transition_fn =
@@ -858,12 +920,12 @@ void nksu_selinux_hide_exit(void)
 
 	nksu_clean_policy_release();
 
-	mutex_lock(&selinux_state.status_lock);
+	mutex_lock(&NKSU_STATUS_LOCK_OBJ);
 	if (fake_status) {
 		__free_page(fake_status);
 		fake_status = NULL;
 	}
-	mutex_unlock(&selinux_state.status_lock);
+	mutex_unlock(&NKSU_STATUS_LOCK_OBJ);
 }
 
 #if defined(__clang__)

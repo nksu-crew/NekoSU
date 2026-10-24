@@ -29,6 +29,7 @@
 #include <linux/task_work.h>
 #include <linux/tracepoint.h>
 #include <linux/types.h>
+#include <linux/uaccess.h>
 #include <asm/ptrace.h>
 
 #include "hook/tools.h"
@@ -284,6 +285,7 @@ static void nksu_umount_run(void)
 			continue;
 		}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 		if (!path_umount) {
 			pr_err("[umount] path_umount is unresolved\n");
 			path_put(&path);
@@ -291,6 +293,21 @@ static void nksu_umount_run(void)
 			continue;
 		}
 		ret = path_umount(&path, snapshot[i].flags);
+#else
+		if (!sys_umount) {
+			pr_err("[umount] sys_umount is unresolved\n");
+			path_put(&path);
+			failed = true;
+			continue;
+		}
+		{
+			mm_segment_t old_fs = get_fs();
+
+			set_fs(KERNEL_DS);
+			ret = sys_umount((char __user *)target, snapshot[i].flags);
+			set_fs(old_fs);
+		}
+#endif
 		if (ret) {
 			pr_info("[umount] %s failed: %d\n", target, ret);
 			failed = true;
@@ -730,6 +747,11 @@ static void nksu_mount_probes_exit(void)
 }
 
 #else /* !CONFIG_KPROBES */
+
+/* Keep the layout bookkeeping (used by the umount start path) compiled in. */
+static bool nksu_mount_layout_ready;
+static bool nksu_mount_layout_seen;
+static DEFINE_MUTEX(nksu_mount_layout_lock);
 
 int nksu_mount_id_set_layout(u32 mnt_id_off, u32 mnt_off)
 {

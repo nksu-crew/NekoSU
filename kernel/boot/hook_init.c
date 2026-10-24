@@ -4,6 +4,8 @@
 #include <linux/completion.h>
 #include <linux/cred.h>
 #include <linux/string.h>
+#include <linux/tracepoint.h>
+#include <linux/binfmts.h>
 #include "hook/syscall.h"
 #include "hook/dispatch.h"
 #include "hook/hook.h"
@@ -182,6 +184,7 @@ static long handle__NR_execveat(struct pt_regs *regs)
  * unload_temp_syscall() at the zygote stage.  The control-fd prctl grant lives
  * in manager/daemon.c and is armed earlier, at second_stage.
  */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0)
 static const struct syscall_hook boot_syscall_hooks[] = {
 	{ __NR_execve, handle__NR_execve },
 	{ __NR_execveat, handle__NR_execveat },
@@ -245,9 +248,106 @@ static void unload_temp_syscall(void)
 		nksu_unhook_syscall(boot_syscall_hooks[i].nr);
 	nksu_dispatch_set_unconditional(false);
 }
+#else
+/*
+ * 4.9 has no pt_regs-based syscall table entries, so the boot watcher uses the
+ * sched_process_exec tracepoint instead.  It only has to spot the first zygote
+ * (init's stage argv is not needed: the SELinux component waits for the policy
+ * itself and is armed from init_thread_fn below).  The init.rc read/fstat
+ * proxies are installed with native signatures by boot/init_rc.c.
+ */
+static struct tracepoint *tp_boot_exec;
+
+struct nksu_boot_tp_ctx {
+	const char *name;
+	struct tracepoint **out;
+};
+
+static void nksu_boot_tp_cb(struct tracepoint *tp, void *priv)
+{
+	struct nksu_boot_tp_ctx *ctx = priv;
+
+	if (*ctx->out)
+		return;
+	if (strcmp(tp->name, ctx->name) == 0)
+		*ctx->out = tp;
+}
+
+static void nksu_boot_exec(void *data, struct task_struct *p, pid_t old_pid,
+			   struct linux_binprm *bprm)
+{
+	const char *base;
+
+	(void)data;
+	(void)old_pid;
+
+	if (!bprm || !bprm->filename || READ_ONCE(zygote_seen))
+		return;
+	if (p->pid == 1 || !uid_eq(task_euid(p), GLOBAL_ROOT_UID))
+		return;
+
+	base = strrchr(bprm->filename, '/');
+	base = base ? base + 1 : bprm->filename;
+	if (strncmp(base, "app_process", 11))
+		return;
+
+	WRITE_ONCE(zygote_seen, true);
+	pr_info("nksu: zygote is starting\n");
+	notify_stage();
+}
+
+static bool temp_syscall_loaded;
+
+int load_temp_syscall(void)
+{
+	struct nksu_boot_tp_ctx ctx = { .name = "sched_process_exec", .out = &tp_boot_exec };
+	int ret;
+
+	for_each_kernel_tracepoint(nksu_boot_tp_cb, &ctx);
+	if (!tp_boot_exec) {
+		pr_err("[hook]: sched_process_exec tracepoint not found\n");
+		return -ENOENT;
+	}
+
+	ret = tracepoint_probe_register(tp_boot_exec, nksu_boot_exec, NULL);
+	if (ret) {
+		pr_err("[hook]: cannot register boot exec probe: %d\n", ret);
+		tp_boot_exec = NULL;
+		return ret;
+	}
+	temp_syscall_loaded = true;
+	return 0;
+}
+
+static void unload_temp_syscall(void)
+{
+	if (!temp_syscall_loaded)
+		return;
+	temp_syscall_loaded = false;
+
+	nksu_init_rc_exit();
+	if (tp_boot_exec) {
+		tracepoint_probe_unregister(tp_boot_exec, nksu_boot_exec, NULL);
+		tracepoint_synchronize_unregister();
+		tp_boot_exec = NULL;
+	}
+}
+#endif
 
 static int init_thread_fn(void *data)
 {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 17, 0)
+	/*
+	 * No init-stage argv to watch on 4.9: arm the early components and the
+	 * SELinux hook right away (the latter waits for the policy itself),
+	 * then only wait for zygote to bring the feature group up.
+	 */
+	if (!early_loaded && nksu_init_early_components() == 0)
+		early_loaded = true;
+	if (!selinux_loaded && nksu_init_selinux_components() == 0)
+		selinux_loaded = true;
+#endif
+
 	/*
      * The watcher follows init until the zygote starts; at that point every
      * component is up and there is nothing left to wait for, so it leaves on

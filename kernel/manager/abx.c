@@ -13,6 +13,7 @@
 #include <linux/string.h>
 #include <linux/types.h>
 
+#include "kernel_compat.h"
 #include "manager/abx.h"
 
 #define ABX_TOKEN_START_DOCUMENT 0
