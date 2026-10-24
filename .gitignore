@@ -26,3 +26,16 @@ logcat.log
 # Rust host check artifacts
 neko/target/
 Cargo.lock
+
+# Out-of-tree kernel module build artifacts
+kernel/*.o
+kernel/**/*.o
+kernel/*.ko
+kernel/*.mod
+kernel/*.mod.c
+kernel/.*.cmd
+kernel/**/.*.cmd
+kernel/.tmp_versions/
+kernel/.cache.mk
+kernel/modules.order
+kernel/Module.symvers
