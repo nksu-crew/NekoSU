@@ -35,6 +35,16 @@
 #include "guards.h"
 #include "symbol/symbol.h"
 
+/*
+ * kallsyms_lookup_name() is reached through a function pointer recovered at
+ * runtime. The CFI type hash the module emits for that call may differ from
+ * the one vmlinux recorded, so opt this file out of CFI instrumentation like
+ * the other users of resolved symbols do.
+ */
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((no_sanitize("cfi"))), apply_to = function)
+#endif
+
 typedef unsigned long (*kallsyms_lookup_name_t)(const char *name);
 
 /*
@@ -149,7 +159,18 @@ static int ksym_resolve_lookup_name(void)
 	return 0;
 }
 
-unsigned long nksu_ksym_lookup(const char *name)
+/*
+ * kallsyms_lookup_name() lives in vmlinux and its CFI type hash does not
+ * always match the one this module emits for the pointer type, which panics
+ * on 5.15 full-CFI kernels:
+ *
+ *     CFI failure (target: kallsyms_lookup_name+0x0/0x1a4)
+ *      nksu_ksym_lookup+0x14c/0x1d4 [nksu]
+ *
+ * Opt this function out of CFI so the indirect call is not checked, like the
+ * other kallsyms-resolved calls in symbol_compat.c.
+ */
+unsigned long __nocfi nksu_ksym_lookup(const char *name)
 {
 	unsigned long addr;
 	struct ksym_entry *e;
@@ -210,4 +231,8 @@ void nksu_ksym_dump(void)
 void nksu_ksym_dump(void)
 {
 }
+#endif
+
+#if defined(__clang__)
+#pragma clang attribute pop
 #endif
