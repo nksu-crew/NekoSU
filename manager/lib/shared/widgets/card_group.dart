@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-const double cardGroupOuterRadius = 24;
+const double cardGroupOuterRadius = 16;
 const double cardGroupInnerRadius = 4;
 const double cardGroupGap = 2;
 
