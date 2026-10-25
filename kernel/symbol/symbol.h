@@ -9,9 +9,9 @@
  *
  * Android GKI/KMI kernels no longer export many internal symbols (SELinux,
  * cred, namespace, ...). A module that references one directly fails to load
- * with "Unknown symbol xxx (err -2)". This module scans the compressed
- * kallsyms table in kernel memory at runtime, resolves *all* symbols
- * (exported or not) and caches them for name-based lookups.
+ * with "Unknown symbol xxx (err -2)". This module recovers the address of
+ * kallsyms_lookup_name() with a one-shot kprobe, resolves *all* symbols
+ * (exported or not) through it and caches them for name-based lookups.
  *
  * Typical usage:
  *   during init:
@@ -24,7 +24,7 @@
 
 /*
  * Resolve a kernel symbol and return its address, or 0 on failure.
- * Results are cached; repeated lookups do not rescan.
+ * Results are cached; repeated lookups do not re-resolve.
  */
 unsigned long nksu_ksym_lookup(const char *name);
 

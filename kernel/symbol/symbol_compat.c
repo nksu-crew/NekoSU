@@ -168,10 +168,8 @@ int nksu_symbol_compat_init(void)
 	int missing = 0;
 
 	/*
-	 * The file primitives come first: the first lookup runs the kallsyms
-	 * scan (the /proc/kallsyms and vmcoreinfo paths need these very
-	 * pointers), and once they are filled that path is available again for
-	 * every later lookup.
+	 * The file primitives are resolved alongside the rest; the module's
+	 * state files and SELinux relabel paths reach them through this layer.
 	 */
 	NKSU_RESOLVE(nksu_filp_open, "filp_open");
 	NKSU_RESOLVE(nksu_kernel_read, "kernel_read");
