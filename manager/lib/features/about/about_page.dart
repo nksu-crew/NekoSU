@@ -72,7 +72,7 @@ class _AboutPageState extends State<AboutPage> {
       applicationVersion: _version,
       applicationIcon: Padding(
         padding: const EdgeInsets.all(8),
-        child: Image.asset('assets/images/app_icon.png', width: 48, height: 48),
+        child: Image.asset('assets/images/app_icon.webp', width: 48, height: 48),
       ),
     );
   }
@@ -177,7 +177,7 @@ class _AboutHero extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 16),
       child: Column(
         children: [
-          Image.asset('assets/images/app_icon.png', width: 64, height: 64),
+          Image.asset('assets/images/app_icon.webp', width: 64, height: 64),
           const SizedBox(height: 16),
           Text(
             l10n.appTitle,
