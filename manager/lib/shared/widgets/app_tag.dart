@@ -6,19 +6,14 @@ class AppTag extends StatelessWidget {
     required this.label,
     required this.color,
     this.backgroundOpacity = 0.15,
-    this.monospace = false,
   });
 
   final String label;
   final Color color;
   final double backgroundOpacity;
-  final bool monospace;
 
   @override
   Widget build(BuildContext context) {
-    final baseStyle = Theme.of(context).textTheme.labelSmall
-        ?.copyWith(color: color);
-
     return DecoratedBox(
       decoration: BoxDecoration(
         color: color.withValues(alpha: backgroundOpacity),
@@ -28,9 +23,7 @@ class AppTag extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         child: Text(
           label,
-          style: monospace
-              ? baseStyle?.copyWith(fontFamily: FontFamily.monospace)
-              : baseStyle,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color),
         ),
       ),
     );
