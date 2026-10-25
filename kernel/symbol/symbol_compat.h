@@ -167,7 +167,7 @@ extern typeof(tasklist_lock) *nksu_tasklist_lock;
  * passes the offset by value and returns it separately, so translate here and
  * keep every call site identical across versions.
  */
-static inline ssize_t nksu_kread(struct file *file, void *buf, size_t count, loff_t *pos)
+static inline ssize_t __nocfi nksu_kread(struct file *file, void *buf, size_t count, loff_t *pos)
 {
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0)
 	int ret = nksu_kernel_read(file, *pos, (char *)buf, count);
@@ -180,7 +180,7 @@ static inline ssize_t nksu_kread(struct file *file, void *buf, size_t count, lof
 #endif
 }
 
-static inline ssize_t nksu_kwrite(struct file *file, const void *buf, size_t count, loff_t *pos)
+static inline ssize_t __nocfi nksu_kwrite(struct file *file, const void *buf, size_t count, loff_t *pos)
 {
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0)
 	ssize_t ret = nksu_kernel_write(file, (const char *)buf, count, *pos);
@@ -194,14 +194,14 @@ static inline ssize_t nksu_kwrite(struct file *file, const void *buf, size_t cou
 }
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 7, 0)
-static inline void *nksu_symtab_search(struct symtab *s, const char *name)
+static inline void __nocfi *nksu_symtab_search(struct symtab *s, const char *name)
 {
 	if (!s || !s->table || !nksu_hashtab_search)
 		return NULL;
 	return nksu_hashtab_search(s->table, name);
 }
 
-static inline int nksu_symtab_insert(struct symtab *s, char *name, void *datum)
+static inline int __nocfi nksu_symtab_insert(struct symtab *s, char *name, void *datum)
 {
 	int rc;
 
