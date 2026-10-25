@@ -81,7 +81,7 @@ class ListRow extends StatelessWidget {
                     if (supporting != null) ...[
                       const SizedBox(height: 2),
                       DefaultTextStyle.merge(
-                        style: theme.textTheme.bodySmall?.copyWith(
+                        style: theme.textTheme.bodyMedium?.copyWith(
                           color: secondaryColor,
                         ),
                         child: supporting!,
@@ -200,7 +200,7 @@ class _CardItemState extends State<CardItem> {
             titleTextStyle: theme.textTheme.bodyLarge?.copyWith(
               color: scheme.onSurface,
             ),
-            subtitleTextStyle: theme.textTheme.bodySmall?.copyWith(
+            subtitleTextStyle: theme.textTheme.bodyMedium?.copyWith(
               color: scheme.onSurfaceVariant,
             ),
           ),

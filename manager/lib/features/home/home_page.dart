@@ -340,7 +340,7 @@ class _DeviceInfoListState extends State<_DeviceInfoList> {
       _InfoEntry(label: l10n.kernelVersion, value: _kernelVersion),
       _InfoEntry(label: l10n.androidVersion, value: _androidVersion),
       _InfoEntry(label: l10n.deviceModel, value: _model),
-      _InfoEntry(label: l10n.fingerprint, value: _fingerprint),
+      _InfoEntry(label: l10n.fingerprint, value: _fingerprint, monospace: true),
     ];
 
     return CardGroup(
@@ -350,10 +350,15 @@ class _DeviceInfoListState extends State<_DeviceInfoList> {
 }
 
 class _InfoEntry {
-  const _InfoEntry({required this.label, required this.value});
+  const _InfoEntry({
+    required this.label,
+    required this.value,
+    this.monospace = false,
+  });
 
   final String label;
   final String value;
+  final bool monospace;
 }
 
 class _DeviceInfoRow extends StatelessWidget {
@@ -365,7 +370,14 @@ class _DeviceInfoRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       title: Text(entry.label),
-      subtitle: Text(entry.value, maxLines: 2, overflow: TextOverflow.ellipsis),
+      subtitle: Text(
+        entry.value,
+        maxLines: 3,
+        overflow: TextOverflow.ellipsis,
+        style: entry.monospace
+            ? const TextStyle(fontFamily: 'monospace')
+            : null,
+      ),
     );
   }
 }
