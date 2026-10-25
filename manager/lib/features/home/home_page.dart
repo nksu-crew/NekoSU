@@ -340,7 +340,7 @@ class _DeviceInfoListState extends State<_DeviceInfoList> {
       _InfoEntry(label: l10n.kernelVersion, value: _kernelVersion),
       _InfoEntry(label: l10n.androidVersion, value: _androidVersion),
       _InfoEntry(label: l10n.deviceModel, value: _model),
-      _InfoEntry(label: l10n.fingerprint, value: _fingerprint, monospace: true),
+      _InfoEntry(label: l10n.fingerprint, value: _fingerprint),
     ];
 
     return CardGroup(

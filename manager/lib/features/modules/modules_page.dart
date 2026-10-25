@@ -882,6 +882,7 @@ class _ModuleCardState extends State<_ModuleCard> {
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   color: scheme.onSurfaceVariant,
                                   decoration: textDecoration,
+                                  fontFamily: 'monospace',
                                 ),
                               ),
                             if (module.author.isNotEmpty)
@@ -890,6 +891,7 @@ class _ModuleCardState extends State<_ModuleCard> {
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   color: scheme.onSurfaceVariant,
                                   decoration: textDecoration,
+                                  fontFamily: 'monospace',
                                 ),
                               ),
                           ],
@@ -927,6 +929,7 @@ class _ModuleCardState extends State<_ModuleCard> {
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: scheme.onSurfaceVariant,
                           decoration: textDecoration,
+                          fontFamily: 'monospace',
                         ),
                       ),
                     ),
@@ -941,11 +944,13 @@ class _ModuleCardState extends State<_ModuleCard> {
                           AppTag(
                             label: l10n.modulesMetamodule,
                             color: scheme.primary,
+                            monospace: true,
                           ),
                         if (module.update)
                           AppTag(
                             label: l10n.modulesUpdate,
                             color: scheme.tertiary,
+                            monospace: true,
                           ),
                       ],
                     ),

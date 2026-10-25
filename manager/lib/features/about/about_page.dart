@@ -72,7 +72,11 @@ class _AboutPageState extends State<AboutPage> {
       applicationVersion: _version,
       applicationIcon: Padding(
         padding: const EdgeInsets.all(8),
-        child: Image.asset('assets/images/app_icon.webp', width: 48, height: 48),
+        child: Image.asset(
+          'assets/images/app_icon.webp',
+          width: 48,
+          height: 48,
+        ),
       ),
     );
   }
