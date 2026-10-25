@@ -11,7 +11,6 @@ import 'package:nekosu/features/modules/webui_page.dart';
 import 'package:nekosu/l10n/app_localizations.dart';
 import 'package:nekosu/shared/app_feedback.dart';
 import 'package:nekosu/shared/layout_insets.dart';
-import 'package:nekosu/shared/widgets/app_popup_menu.dart';
 import 'package:nekosu/shared/widgets/app_sliver_app_bar.dart';
 import 'package:nekosu/shared/widgets/app_status_view.dart';
 import 'package:nekosu/shared/widgets/app_tag.dart';
@@ -452,7 +451,7 @@ class _ModulesPageState extends State<ModulesPage> {
                     final update = updateCheck?.update;
                     return Padding(
                       padding: EdgeInsets.only(
-                        bottom: index == _modules.length - 1 ? 0 : 10,
+                        bottom: index == _modules.length - 1 ? 0 : 13,
                       ),
                       child: _ModuleCard(
                         module: module,
@@ -823,8 +822,6 @@ class _ModuleCard extends StatefulWidget {
   State<_ModuleCard> createState() => _ModuleCardState();
 }
 
-enum _ModuleMenu { uninstall }
-
 class _ModuleCardState extends State<_ModuleCard> {
   bool _expanded = false;
 
@@ -849,7 +846,7 @@ class _ModuleCardState extends State<_ModuleCard> {
 
     return Material(
       color: scheme.surfaceBright,
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(16),
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -873,13 +870,17 @@ class _ModuleCardState extends State<_ModuleCard> {
                             Text(
                               module.title,
                               style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                // Match the compact title line of the
+                                // reference card (20dp at the default size).
+                                height: 1.25,
                                 decoration: textDecoration,
                               ),
                             ),
                             if (module.version.isNotEmpty)
                               Text(
                                 '${l10n.modulesVersion}: ${module.version}',
-                                style: theme.textTheme.bodyMedium?.copyWith(
+                                style: theme.textTheme.bodySmall?.copyWith(
                                   color: scheme.onSurfaceVariant,
                                   decoration: textDecoration,
                                 ),
@@ -887,7 +888,7 @@ class _ModuleCardState extends State<_ModuleCard> {
                             if (module.author.isNotEmpty)
                               Text(
                                 '${l10n.modulesAuthor}: ${module.author}',
-                                style: theme.textTheme.bodyMedium?.copyWith(
+                                style: theme.textTheme.bodySmall?.copyWith(
                                   color: scheme.onSurfaceVariant,
                                   decoration: textDecoration,
                                 ),
@@ -967,7 +968,7 @@ class _ModuleCardState extends State<_ModuleCard> {
               children: [
                 Expanded(
                   child: Wrap(
-                    spacing: 8,
+                    spacing: 12,
                     runSpacing: 8,
                     children: [
                       if (actionsVisible && module.hasActionScript)
@@ -1031,26 +1032,17 @@ class _ModuleCardState extends State<_ModuleCard> {
                       : pendingRemoval
                       ? widget.onUndoRemove
                       : widget.onRemove,
+                  // Permanent uninstall stays reachable without an extra
+                  // overflow button, matching the reference card layout.
+                  onLongPress: widget.busy || pendingRemoval
+                      ? null
+                      : widget.onUninstall,
                   icon: pendingRemoval
                       ? Icons.refresh_rounded
                       : Icons.delete_rounded,
                   label: pendingRemoval
                       ? l10n.modulesUndoRemove
                       : l10n.modulesRemove,
-                ),
-                const SizedBox(width: 4),
-                AppPopupMenu<_ModuleMenu>(
-                  enabled: !widget.busy,
-                  tooltip: l10n.modulesMore,
-                  icon: Icons.more_vert_rounded,
-                  onSelected: (_) => widget.onUninstall(),
-                  items: [
-                    AppPopupMenuItem(
-                      value: _ModuleMenu.uninstall,
-                      label: l10n.modulesUninstall,
-                      destructive: true,
-                    ),
-                  ],
                 ),
               ],
             ),
@@ -1065,11 +1057,13 @@ class _ModuleCardButton extends StatelessWidget {
   const _ModuleCardButton({
     required this.onPressed,
     required this.icon,
+    this.onLongPress,
     this.label,
     this.tooltip,
   });
 
   final VoidCallback? onPressed;
+  final VoidCallback? onLongPress;
   final IconData icon;
   final String? label;
   final String? tooltip;
@@ -1077,12 +1071,11 @@ class _ModuleCardButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textStyle = Theme.of(context).textTheme.labelMedium;
-    final button = FilledButton.tonal(
+    Widget button = FilledButton.tonal(
       onPressed: onPressed,
       style: FilledButton.styleFrom(
         minimumSize: const Size(52, 36),
         padding: const EdgeInsets.symmetric(horizontal: 12),
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         textStyle: textStyle,
         shape: const StadiumBorder(),
       ),
@@ -1094,6 +1087,9 @@ class _ModuleCardButton extends StatelessWidget {
         ],
       ),
     );
+    if (onLongPress != null) {
+      button = GestureDetector(onLongPress: onLongPress, child: button);
+    }
     if (tooltip == null) return button;
     return Tooltip(message: tooltip!, child: button);
   }

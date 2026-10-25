@@ -282,9 +282,9 @@
   "outputWaiting": "Waiting for output...",
   "outputNoOutput": "No output",
   "modulesMore": "More",
-  "modulesRemove": "Remove",
+  "modulesRemove": "Uninstall",
   "modulesUndoRemove": "Undo",
-  "modulesUninstall": "Uninstall now",
+  "modulesUninstall": "Uninstall permanently",
   "modulesUninstallConfirm": "Permanently delete \"{name}\"? This cannot be undone.",
   "@modulesUninstallConfirm": {
     "placeholders": {
@@ -294,7 +294,7 @@
     }
   },
   "modulesMetamodule": "Meta",
-  "modulesPendingRemoval": "Pending removal",
+  "modulesPendingRemoval": "Pending uninstall",
   "modulesUpdate": "Update pending",
   "modulesUpdateNewVersionTitle": "New version available",
   "modulesUpdateNow": "Update",
@@ -306,7 +306,7 @@
   "modulesUpdateDownloadFailed": "Update download failed",
   "modulesVersion": "Version",
   "modulesAuthor": "Author",
-  "modulesRemoveHint": "The module will be removed on the next boot.",
+  "modulesRemoveHint": "The module will be uninstalled on the next boot.",
   "settingsGeneral": "General",
   "themeTitle": "Theme mode",
   "themeSystem": "Follow system",
