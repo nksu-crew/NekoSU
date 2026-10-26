@@ -2,6 +2,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+// flutter_markdown_plus still exposes legacy material types in its public API.
+// ignore: deprecated_member_use
+import 'package:flutter/material.dart' as legacy;
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -743,7 +746,9 @@ class _ModuleUpdateDialogState extends State<_ModuleUpdateDialog> {
   }
 
   MarkdownStyleSheet _markdownStyle(ThemeData theme, ColorScheme scheme) {
-    final base = MarkdownStyleSheet.fromTheme(theme);
+    // The markdown package still consumes the legacy ThemeData type, which the
+    // compatibility bridge maps from the current material_ui theme.
+    final base = MarkdownStyleSheet.fromTheme(legacy.Theme.of(context));
     final body = theme.textTheme.bodyMedium?.copyWith(height: 1.5);
     return base.copyWith(
       p: body,

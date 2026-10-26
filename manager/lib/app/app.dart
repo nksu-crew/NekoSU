@@ -1,6 +1,5 @@
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:nekosu/app/app_shell.dart';
 import 'package:nekosu/app/app_theme.dart';
 import 'package:nekosu/core/settings_controller.dart';
@@ -58,11 +57,9 @@ class _MyAppState extends State<MyApp> {
 
         return MaterialApp(
           onGenerateTitle: (context) => AppLocalizations.of(context)!.appTitle,
-          localizationsDelegates: const [
+          localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
             AppLocalizations.delegate,
-            GlobalMaterialLocalizations.delegate,
-            GlobalWidgetsLocalizations.delegate,
-            GlobalCupertinoLocalizations.delegate,
+            ...GlobalMaterialLocalizations.delegates,
           ],
           supportedLocales: const [Locale('en', ''), Locale('zh', '')],
           locale: settings.locale,
@@ -75,10 +72,17 @@ class _MyAppState extends State<MyApp> {
             fontWeight: settings.fontWeight.value,
           ),
           themeMode: settings.flutterThemeMode,
-          builder: (context, child) => Material(
-            type: MaterialType.transparency,
-            child: child ?? const SizedBox.shrink(),
-          ),
+          builder: (context, child) =>
+              // Legacy third-party widgets (for example liquid_glass_widgets
+              // and flutter_markdown_plus) still read Theme and Material
+              // localizations from package:flutter/material.dart.
+              // ignore: deprecated_member_use
+              MaterialUiCompatibilityBridge(
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: child ?? const SizedBox.shrink(),
+                ),
+              ),
           home: const AppShell(),
         );
       },
