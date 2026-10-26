@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:nekosu/core/ncore_ffi.dart';
 import 'package:nekosu/core/settings_controller.dart';
 import 'package:nekosu/l10n/app_localizations.dart';

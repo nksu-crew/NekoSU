@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:nekosu/core/output_events.dart';
 import 'package:nekosu/core/output_log.dart';
 import 'package:nekosu/l10n/app_localizations.dart';

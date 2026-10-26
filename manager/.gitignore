@@ -45,3 +45,5 @@ app.*.map.json
 /android/app/release
 
 pubspec.lock
+app_localizations.dart
+app_localizations_*.dart

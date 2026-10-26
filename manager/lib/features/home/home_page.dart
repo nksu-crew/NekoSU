@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:device_info_plus/device_info_plus.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:nekosu/core/ncore_ffi.dart';
 import 'package:nekosu/data/install_status.dart';
 import 'package:nekosu/features/about/about_page.dart';

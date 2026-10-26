@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:nekosu/core/ncore_ffi.dart';
 import 'package:nekosu/data/apps.dart';
 import 'package:nekosu/features/apps/app_detail_page.dart';

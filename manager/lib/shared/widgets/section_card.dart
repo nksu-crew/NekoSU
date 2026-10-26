@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:nekosu/shared/widgets/card_group.dart';
 
 class SectionLabel extends StatelessWidget {

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_displaymode/flutter_displaymode.dart';
 import 'package:nekosu/core/display_mode_controller.dart';
 import 'package:nekosu/l10n/app_localizations.dart';

@@ -1,6 +1,6 @@
 import 'dart:isolate';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:nekosu/core/install_bridge.dart';
 import 'package:nekosu/core/ncore_ffi.dart';
 import 'package:nekosu/core/output_events.dart';

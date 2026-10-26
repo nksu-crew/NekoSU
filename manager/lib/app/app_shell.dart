@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:nekosu/app/navigation_bar.dart';
 import 'package:nekosu/core/settings_controller.dart';
 import 'package:nekosu/features/apps/app_list_page.dart';

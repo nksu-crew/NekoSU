@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:nekosu/core/log_export.dart';
 import 'package:nekosu/core/settings_controller.dart';

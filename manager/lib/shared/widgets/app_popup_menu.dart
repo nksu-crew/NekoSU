@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:nekosu/shared/widgets/card_group.dart';
 
 /// Horizontal alignment of the popup relative to its trigger.
