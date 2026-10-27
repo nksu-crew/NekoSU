@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import me.nekosu.aqnya.R
 import me.nekosu.aqnya.ui.component.AppDialog
 import me.nekosu.aqnya.ui.component.CardGroup
+import me.nekosu.aqnya.ui.component.CardItem
 import me.nekosu.aqnya.ui.component.ExpressiveTextField
 import me.nekosu.aqnya.ui.component.ModeLabel
 import me.nekosu.aqnya.ui.component.currentListItemShapes
@@ -703,64 +704,70 @@ fun AppDetailScreen(
 
 @Composable
 private fun AppIdentityItem(app: AppInfo) {
-    SegmentedListItem(
-        shapes = currentListItemShapes(),
-        colors =
-            ListItemDefaults.segmentedColors(
-                containerColor = MaterialTheme.colorScheme.surfaceBright,
-            ),
-        leadingContent = {
+    CardItem {
+        Column(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
             Surface(
-                modifier = Modifier.size(44.dp),
-                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier.size(72.dp),
+                shape = MaterialTheme.shapes.large,
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
             ) {
                 AppIcon(
                     packageName = app.packageName,
-                    modifier = Modifier.fillMaxSize().padding(3.dp),
+                    modifier = Modifier.fillMaxSize().padding(4.dp),
                 )
             }
-        },
-        content = {
+
+            Spacer(Modifier.height(16.dp))
+
             Text(
                 text = app.name,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.headlineSmall,
+                textAlign = TextAlign.Center,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-        },
-        supportingContent = {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+
+            Spacer(Modifier.height(4.dp))
+
+            Text(
+                text = app.packageName,
+                style =
+                    MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                    ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+
+            Spacer(Modifier.height(10.dp))
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    text = app.packageName,
-                    style =
-                        MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = FontFamily.Monospace,
-                        ),
+                    text = stringResource(R.string.app_uid_tag, app.uid),
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = stringResource(R.string.app_uid_tag, app.uid),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                if (app.isSystem) {
+                    ModeLabel(
+                        label = stringResource(R.string.app_tag_system),
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                     )
-                    if (app.isSystem) {
-                        ModeLabel(
-                            label = stringResource(R.string.app_tag_system),
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                        )
-                    }
                 }
             }
-        },
-    )
+        }
+    }
 }
 
 @Composable
