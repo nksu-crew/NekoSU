@@ -337,6 +337,85 @@ NKSU_SYMBOL_FN(struct group_info *, groups_alloc, (int gidsetsize), (gidsetsize)
 NKSU_SYMBOL_VOID_FN(set_groups, (struct cred *new, struct group_info *group_info),
 		    (new, group_info))
 NKSU_SYMBOL_FN(int, unshare_fs_struct, (void), ())
+
+/*
+ * SELinux internals.  These symbols are called by the policy/rule engine in
+ * tight loops; keep their indirect calls in the same __nocfi wrappers so the
+ * engine files can drop their file-wide CFI opt-outs too.
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+NKSU_SYMBOL_FN(void *, symtab_search, (struct symtab *s, const char *name), (s, name))
+NKSU_SYMBOL_FN(int, symtab_insert, (struct symtab *s, char *name, void *datum),
+	       (s, name, datum))
+#endif
+NKSU_SYMBOL_FN(struct avtab_node *, avtab_search_node,
+	       (struct avtab *h, struct avtab_key *key), (h, key))
+NKSU_SYMBOL_FN(struct avtab_node *, avtab_search_node_next, (struct avtab_node *node, int tclass),
+	       (node, tclass))
+NKSU_SYMBOL_FN(struct avtab_node *, avtab_insert_nonunique,
+	       (struct avtab *h, struct avtab_key *key, struct avtab_datum *datum),
+	       (h, key, datum))
+NKSU_SYMBOL_FN(int, avtab_alloc, (struct avtab *h, u32 nr), (h, nr))
+NKSU_SYMBOL_VOID_FN(avtab_destroy, (struct avtab *h), (h))
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
+NKSU_SYMBOL_FN(struct filename_trans_datum *, policydb_filenametr_search,
+	       (struct policydb *p, struct filename_trans_key *key), (p, key))
+#endif
+NKSU_SYMBOL_FN(int, policydb_write, (struct policydb *p, void *fp), (p, fp))
+NKSU_SYMBOL_FN(int, policydb_read, (struct policydb *p, void *fp), (p, fp))
+NKSU_SYMBOL_VOID_FN(policydb_destroy, (struct policydb *p), (p))
+NKSU_SYMBOL_FN(int, ebitmap_set_bit, (struct ebitmap *e, unsigned long bit, int value),
+	       (e, bit, value))
+NKSU_SYMBOL_FN(int, ebitmap_get_bit, (struct ebitmap *e, unsigned long bit), (e, bit))
+NKSU_SYMBOL_VOID_FN(ebitmap_destroy, (struct ebitmap *e), (e))
+NKSU_SYMBOL_FN(int, ebitmap_cpy, (struct ebitmap *dst, struct ebitmap *src), (dst, src))
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0)
+NKSU_SYMBOL_VOID_FN(avc_ss_reset, (u32 seqno), (seqno))
+#else
+NKSU_SYMBOL_VOID_FN(avc_ss_reset, (void *avc, u32 seqno), (avc, seqno))
+#endif
+NKSU_SYMBOL_VOID_FN(selnl_notify_policyload, (u32 seqno), (seqno))
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+NKSU_SYMBOL_FN(int, security_context_to_sid,
+	       (const char *scontext, u32 scontext_len, u32 *sid, gfp_t gfp_flags),
+	       (scontext, scontext_len, sid, gfp_flags))
+NKSU_SYMBOL_FN(int, avc_has_perm,
+	       (u32 ssid, u32 tsid, u16 tclass, u32 requested,
+		struct common_audit_data *auditdata),
+	       (ssid, tsid, tclass, requested, auditdata))
+#else
+NKSU_SYMBOL_FN(int, security_context_to_sid,
+	       (struct selinux_state *state, const char *scontext, u32 scontext_len, u32 *sid,
+		gfp_t gfp_flags),
+	       (state, scontext, scontext_len, sid, gfp_flags))
+NKSU_SYMBOL_FN(int, security_sid_to_context,
+	       (struct selinux_state *state, u32 sid, char **scontext, u32 *scontext_len),
+	       (state, sid, scontext, scontext_len))
+NKSU_SYMBOL_VOID_FN(security_compute_av_user,
+		      (struct selinux_state *state, u32 ssid, u32 tsid, u16 tclass,
+		       struct av_decision *avd),
+		      (state, ssid, tsid, tclass, avd))
+NKSU_SYMBOL_FN(int, avc_has_perm,
+	       (struct selinux_state *state, u32 ssid, u32 tsid, u16 tclass, u32 requested,
+		struct common_audit_data *auditdata),
+	       (state, ssid, tsid, tclass, requested, auditdata))
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+NKSU_SYMBOL_FN(int, __vfs_setxattr_noperm,
+	       (struct mnt_idmap *idmap, struct dentry *dentry, const char *name,
+		const void *value, size_t size, int flags),
+	       (idmap, dentry, name, value, size, flags))
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
+NKSU_SYMBOL_FN(int, __vfs_setxattr_noperm,
+	       (struct user_namespace *mnt_userns, struct dentry *dentry, const char *name,
+		const void *value, size_t size, int flags),
+	       (mnt_userns, dentry, name, value, size, flags))
+#else
+NKSU_SYMBOL_FN(int, __vfs_setxattr_noperm,
+	       (struct dentry *dentry, const char *name, const void *value, size_t size,
+		int flags),
+	       (dentry, name, value, size, flags))
+#endif
 #endif
 
 /*
@@ -350,39 +429,44 @@ NKSU_SYMBOL_FN(int, unshare_fs_struct, (void), ())
 #define set_cred_ucounts nksu_set_cred_ucounts_fn
 #endif
 #define switch_task_namespaces nksu_switch_task_namespaces_fn
-#define avc_ss_reset nksu_avc_ss_reset
-#define selnl_notify_policyload nksu_selnl_notify_policyload
+#define avc_ss_reset nksu_avc_ss_reset_fn
+#define selnl_notify_policyload nksu_selnl_notify_policyload_fn
 #define selinux_status_update_policyload nksu_selinux_status_update_policyload
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+#define symtab_search nksu_symtab_search_fn
+#define symtab_insert nksu_symtab_insert_fn
+#else
 #define symtab_search nksu_symtab_search
 #define symtab_insert nksu_symtab_insert
-#define avtab_search_node nksu_avtab_search_node
-#define avtab_search_node_next nksu_avtab_search_node_next
-#define avtab_insert_nonunique nksu_avtab_insert_nonunique
-#define avtab_alloc nksu_avtab_alloc
-#define avtab_destroy nksu_avtab_destroy
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
-#define policydb_filenametr_search nksu_policydb_filenametr_search
 #endif
-#define policydb_write nksu_policydb_write
-#define policydb_read nksu_policydb_read
-#define policydb_destroy nksu_policydb_destroy
-#define ebitmap_set_bit nksu_ebitmap_set_bit
-#define ebitmap_get_bit nksu_ebitmap_get_bit
-#define ebitmap_destroy nksu_ebitmap_destroy
-#define ebitmap_cpy nksu_ebitmap_cpy
+#define avtab_search_node nksu_avtab_search_node_fn
+#define avtab_search_node_next nksu_avtab_search_node_next_fn
+#define avtab_insert_nonunique nksu_avtab_insert_nonunique_fn
+#define avtab_alloc nksu_avtab_alloc_fn
+#define avtab_destroy nksu_avtab_destroy_fn
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
+#define policydb_filenametr_search nksu_policydb_filenametr_search_fn
+#endif
+#define policydb_write nksu_policydb_write_fn
+#define policydb_read nksu_policydb_read_fn
+#define policydb_destroy nksu_policydb_destroy_fn
+#define ebitmap_set_bit nksu_ebitmap_set_bit_fn
+#define ebitmap_get_bit nksu_ebitmap_get_bit_fn
+#define ebitmap_destroy nksu_ebitmap_destroy_fn
+#define ebitmap_cpy nksu_ebitmap_cpy_fn
 #define hashtab_destroy nksu_hashtab_destroy
 #define hashtab_map nksu_hashtab_map
-#define security_context_to_sid nksu_security_context_to_sid
-#define avc_has_perm nksu_avc_has_perm
+#define security_context_to_sid nksu_security_context_to_sid_fn
+#define avc_has_perm nksu_avc_has_perm_fn
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
-#define security_sid_to_context nksu_security_sid_to_context
+#define security_sid_to_context nksu_security_sid_to_context_fn
 #define security_context_str_to_sid nksu_security_context_str_to_sid
-#define security_compute_av_user nksu_security_compute_av_user
+#define security_compute_av_user nksu_security_compute_av_user_fn
 #endif
 #define vfs_mkdir nksu_vfs_mkdir
 #define vfs_unlink nksu_vfs_unlink
 #define lookup_one_len nksu_lookup_one_len
-#define __vfs_setxattr_noperm nksu___vfs_setxattr_noperm
+#define __vfs_setxattr_noperm nksu___vfs_setxattr_noperm_fn
 #define task_work_add nksu_task_work_add_fn
 #define change_pid nksu_change_pid_fn
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)

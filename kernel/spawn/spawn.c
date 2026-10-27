@@ -50,13 +50,6 @@
 #define nksu_kernel_thread_run(fn, arg, name, flags) kernel_thread((fn), (arg), (flags))
 #endif
 
-/*
- * The resolved primitives are invoked through pointers; a foreign function
- * pointer can fail the compiler's CFI type check, so opt this file out.
- */
-#if defined(__clang__)
-#pragma clang attribute push(__attribute__((no_sanitize("cfi"))), apply_to = function)
-#endif
 
 struct nksu_spawn {
 	char *path;
@@ -130,7 +123,7 @@ static char **nksu_spawn_dup_strv(char *const *src)
 }
 
 /* The task that becomes the userspace program. */
-static int nksu_spawn_child(void *data)
+static int __nocfi nksu_spawn_child(void *data)
 {
 	struct nksu_spawn *work = data;
 	bool wait_proc = work->wait == NKSU_SPAWN_WAIT_PROC;
@@ -199,7 +192,7 @@ out:
 }
 
 /* Supervisor: reaps the helper for WAIT_PROC, otherwise detaches it. */
-static int nksu_spawn_supervisor(void *data)
+static int __nocfi nksu_spawn_supervisor(void *data)
 {
 	struct nksu_spawn *work = data;
 	pid_t pid;
@@ -244,7 +237,7 @@ static int nksu_spawn_supervisor(void *data)
 	return 0;
 }
 
-int nksu_spawn(const struct nksu_spawn_args *args)
+int __nocfi nksu_spawn(const struct nksu_spawn_args *args)
 {
 	struct nksu_spawn *work;
 	struct task_struct *tsk;
@@ -326,7 +319,3 @@ oom:
 	nksu_spawn_free(work);
 	return -ENOMEM;
 }
-
-#if defined(__clang__)
-#pragma clang attribute pop
-#endif

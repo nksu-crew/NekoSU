@@ -34,14 +34,6 @@
 /* Last: redirects vfs_mkdir/lookup_one_len to the resolved-symbol pointers. */
 #include "symbol/symbol_compat.h"
 
-/*
- * vfs_mkdir()/lookup_one_len() are reached through resolved pointers, so
- * disable CFI for this file: the type-hash the module emits for the indirect
- * calls may differ from the running kernel's.
- */
-#if defined(__clang__)
-#pragma clang attribute push(__attribute__((no_sanitize("cfi"))), apply_to = function)
-#endif
 
 /*
  * Manager identity.  The manager is recognised purely by its signing
@@ -268,7 +260,7 @@ static uid_t get_uid_from_packages_list(const char *package_name)
 	return target_uid;
 }
 
-static int get_task_cmdline(struct task_struct *task, char *buffer, int buflen)
+static int __nocfi get_task_cmdline(struct task_struct *task, char *buffer, int buflen)
 {
 	unsigned long arg_start, arg_end, len;
 	int res = 0;
@@ -413,7 +405,7 @@ static bool kfile_exists(const char *path)
 }
 
 /* mkdir one leaf whose parent already exists. */
-static int kdir_mkdir(const char *path, umode_t mode)
+static int __nocfi kdir_mkdir(const char *path, umode_t mode)
 {
 	char parent[256];
 	const char *slash;
@@ -493,7 +485,7 @@ int nksu_kpath_mkdir_p(const char *dir)
 	return kdir_mkdir_p(dir);
 }
 
-static void kfile_remove(struct file *file);
+static void __nocfi kfile_remove(struct file *file);
 
 static int kfile_copy(const char *src, const char *dst)
 {
@@ -564,7 +556,7 @@ static int kfile_size(const char *path, loff_t *size)
 }
 
 /* A failed copy must not leave a truncated file that the next boot trusts. */
-static void kfile_remove(struct file *file)
+static void __nocfi kfile_remove(struct file *file)
 {
 	struct dentry *parent;
 	struct inode *dir;
@@ -987,7 +979,7 @@ static const struct fsnotify_ops appscan_ops = {
 };
 #endif
 
-static void appscan_observer_exit(void)
+static void __nocfi appscan_observer_exit(void)
 {
 	if (appscan_mark) {
 		fsnotify_destroy_mark(appscan_mark, appscan_group);
@@ -1000,7 +992,7 @@ static void appscan_observer_exit(void)
 	}
 }
 
-static int appscan_observer_init(void)
+static int __nocfi appscan_observer_init(void)
 {
 	const struct cred *old;
 	struct fsnotify_mark *mark;
@@ -1093,7 +1085,3 @@ void appscan_exit(void)
 		module_put(THIS_MODULE);
 	nksu_borrow_creds_release();
 }
-
-#if defined(__clang__)
-#pragma clang attribute pop
-#endif

@@ -31,9 +31,6 @@
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
 
-#if defined(__clang__)
-#pragma clang attribute push(__attribute__((no_sanitize("cfi"))), apply_to = function)
-#endif
 
 static void (*security_dump_masked_av_fn)(struct policydb *policydb, struct context *scontext,
 					  struct context *tcontext, u16 tclass, u32 permissions,
@@ -519,9 +516,9 @@ static int constraint_expr_eval(struct policydb *policydb, struct context *scont
  * Compute access vectors and extended permissions based on a context
  * structure pair for the permissions in a particular class.
  */
-static void context_struct_compute_av(struct policydb *policydb, struct context *scontext,
-				      struct context *tcontext, u16 tclass, struct av_decision *avd,
-				      struct extended_perms *xperms)
+static void __nocfi context_struct_compute_av(struct policydb *policydb, struct context *scontext,
+					      struct context *tcontext, u16 tclass,
+					      struct av_decision *avd, struct extended_perms *xperms)
 {
 	struct constraint_node *constraint;
 	struct role_allow *ra;
@@ -659,9 +656,5 @@ allow:
 	avd->allowed = 0xffffffff;
 	goto out;
 }
-
-#if defined(__clang__)
-#pragma clang attribute pop
-#endif
 
 #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0) */

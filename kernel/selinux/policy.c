@@ -37,15 +37,6 @@
 #include "ss/hashtab.h"
 
 #include "symbol/symbol_compat.h"
-/*
- * This file calls resolved unexported kernel functions through pointers.
- * Disable CFI for its functions so those indirect calls are not type-hash
- * checked (the module's build headers may hash differently than the running
- * kernel). Functions the kernel calls back live in other files.
- */
-#if defined(__clang__)
-#pragma clang attribute push(__attribute__((no_sanitize("cfi"))), apply_to = function)
-#endif
 
 /* the pre-hook policy, restored on unload */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
@@ -659,7 +650,3 @@ void sepolicy_exit(void)
 {
 	pr_info("[selinux]: sepolicy exit\n");
 }
-
-#if defined(__clang__)
-#pragma clang attribute pop
-#endif

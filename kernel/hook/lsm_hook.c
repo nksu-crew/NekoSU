@@ -9,9 +9,9 @@
  * build headers can differ from the running kernel's.  The table is bounded
  * with kallsyms_lookup_size_offset().
  *
- * The whole file calls resolved-but-unexported functions through pointers and
- * patches RO data through a fixmap, so it drops the CFI check at its own call
- * sites the same way the rest of the selinux subsystem does.
+ * The LSM hook path calls kallsyms_lookup_size_offset() through a resolved
+ * pointer and patches RO data through a fixmap; nksu_lsm_hook() is __nocfi so
+ * only that indirect call drops the CFI check.
  */
 #include "klog.h"
 #include <asm/barrier.h>
@@ -33,10 +33,6 @@
 #include "hook/lsm_hook.h"
 #include "hook/patch.h"
 #include "symbol/symbol.h"
-
-#if defined(__clang__)
-#pragma clang attribute push(__attribute__((no_sanitize("cfi"))), apply_to = function)
-#endif
 
 static DEFINE_MUTEX(nksu_lsm_hook_lock);
 
@@ -60,7 +56,7 @@ static int nksu_lsm_update_scall(struct lsm_static_call *scall, void *value)
 }
 #endif
 
-int nksu_lsm_hook(struct nksu_lsm_hook *hook)
+int __nocfi nksu_lsm_hook(struct nksu_lsm_hook *hook)
 {
 	int ret = 0;
 	struct security_hook_list *entry = NULL;
@@ -323,7 +319,3 @@ void nksu_lsm_unhook(struct nksu_lsm_hook *hook)
 	pr_info("[lsm_hook] restored %s\n", hook->target_name);
 	mutex_unlock(&nksu_lsm_hook_lock);
 }
-
-#if defined(__clang__)
-#pragma clang attribute pop
-#endif

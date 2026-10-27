@@ -84,22 +84,6 @@ static struct selinux_ss fake_ss;
 /* Last: redirects unexported symbols (selinux_state, ...) through pointers. */
 #include "symbol/symbol_compat.h"
 
-/*
- * This file calls several resolved-but-unexported kernel functions through
- * pointers (policydb_write, avc_has_perm, security_*_to_sid, and the saved
- * f_op handlers), exactly like selinux.c / policy.c / rule.c / manager.c, so it
- * disables CFI for its own functions the same way they do.  Without it the
- * first indirect call panics with "CFI failure (target: policydb_write)" when
- * the module was built by a different clang than the running kernel.
- *
- * Note this only drops the checks at *our* call sites: the compiler still
- * emits the .cfi_jt stub for address-taken functions, so the handlers nksu
- * installs into selinuxfs f_ops remain valid targets for the kernel's own
- * indirect calls.
- */
-#if defined(__clang__)
-#pragma clang attribute push(__attribute__((no_sanitize("cfi"))), apply_to = function)
-#endif
 
 /* Feature name in the registry, and the key in the persistent enabled set. */
 #define NKSU_HIDE_FEATURE_NAME "selinux_hide"
@@ -222,7 +206,7 @@ out:
 	mutex_unlock(&NKSU_STATUS_LOCK_OBJ);
 }
 
-static int nksu_status_open(struct inode *inode, struct file *filp)
+static int __nocfi nksu_status_open(struct inode *inode, struct file *filp)
 {
 	if (likely(current_uid().val >= NKSU_APP_UID_MIN && nksu_hide_running)) {
 		void *page;
@@ -459,7 +443,7 @@ call_orig:
 	return ((nksu_setprocattr_fn)nksu_setprocattr_hook.original)(NKSU_SETPROC_ARGS);
 }
 
-static ssize_t nksu_write_context(struct file *file, char *buf, size_t size)
+static ssize_t __nocfi nksu_write_context(struct file *file, char *buf, size_t size)
 {
 	char *canon = NULL;
 	u32 sid, len;
@@ -492,7 +476,7 @@ out:
 	return length;
 }
 
-static ssize_t nksu_write_access(struct file *file, char *buf, size_t size)
+static ssize_t __nocfi nksu_write_access(struct file *file, char *buf, size_t size)
 {
 	char *scon = NULL, *tcon = NULL;
 	u32 ssid, tsid;
@@ -605,7 +589,7 @@ static void nksu_clean_policy_release(void)
 }
 
 /* /sys/fs/selinux/policy: hand apps the clean policy instead of the live one. */
-static ssize_t nksu_read_policy(struct file *filp, char __user *buf, size_t count, loff_t *ppos)
+static ssize_t __nocfi nksu_read_policy(struct file *filp, char __user *buf, size_t count, loff_t *ppos)
 {
 	if (likely(current_uid().val < NKSU_APP_UID_MIN) || !nksu_hide_running ||
 	    !clean_policy_data)
@@ -927,7 +911,3 @@ void nksu_selinux_hide_exit(void)
 	}
 	mutex_unlock(&NKSU_STATUS_LOCK_OBJ);
 }
-
-#if defined(__clang__)
-#pragma clang attribute pop
-#endif
