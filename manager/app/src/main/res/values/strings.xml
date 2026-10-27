@@ -115,8 +115,6 @@
     <string name="app_allow_root">Allow Root Access</string>
     <string name="app_root_access_summary">Run this app with the configured identity and capabilities</string>
     <string name="app_root_configuration">Root configuration</string>
-    <string name="app_status_granted">Granted</string>
-    <string name="app_status_denied">Denied</string>
     <string name="app_caps_selected">%1$d / %2$d selected</string>
     <string name="app_capabilities">Capabilities</string>
     <string name="app_enable_root_first">Please enable Root access first</string>

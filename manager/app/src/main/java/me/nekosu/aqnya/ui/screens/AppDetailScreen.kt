@@ -20,7 +20,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Badge
-import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Lock
@@ -805,14 +804,11 @@ private fun AuthorizationSwitchItem(
             )
         },
         supportingContent = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = stringResource(R.string.app_root_access_summary),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                AuthorizationStatus(granted = allowed)
-            }
+            Text(
+                text = stringResource(R.string.app_root_access_summary),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         },
         trailingContent = {
             Switch(
@@ -821,36 +817,6 @@ private fun AuthorizationSwitchItem(
             )
         },
     )
-}
-
-@Composable
-private fun AuthorizationStatus(granted: Boolean) {
-    val scheme = MaterialTheme.colorScheme
-
-    Surface(
-        shape = MaterialTheme.shapes.small,
-        color = if (granted) scheme.primaryContainer else scheme.surfaceContainerHighest,
-        contentColor = if (granted) scheme.onPrimaryContainer else scheme.onSurfaceVariant,
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = if (granted) Icons.Rounded.Check else Icons.Rounded.Close,
-                contentDescription = null,
-                modifier = Modifier.size(15.dp),
-            )
-            Text(
-                text =
-                    stringResource(
-                        if (granted) R.string.app_status_granted else R.string.app_status_denied,
-                    ),
-                style = MaterialTheme.typography.labelMedium,
-            )
-        }
-    }
 }
 
 @Composable
