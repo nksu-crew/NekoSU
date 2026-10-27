@@ -21,12 +21,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Gavel
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.NewReleases
-import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -176,7 +176,7 @@ private fun AboutScreenContent(
                             title = stringResource(R.string.about_repository),
                             summary = stringResource(R.string.about_repository_summary),
                             icon = Icons.Rounded.Code,
-                            trailingIcon = Icons.Rounded.OpenInNew,
+                            trailingIcon = Icons.AutoMirrored.Rounded.OpenInNew,
                             onClick = onRepositoryClick,
                         )
                     }
