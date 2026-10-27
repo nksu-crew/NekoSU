@@ -38,25 +38,30 @@ jobs:
       - name: Download build artifacts
         run: |
           set -euo pipefail
-          gh run download "${{ steps.run.outputs.run_id }}" -p 'ko-*' -D artifacts/ko
+          gh run download "${{ steps.run.outputs.run_id }}" -D artifacts
           find artifacts -maxdepth 3 -type f -printf '%p %s\n'
 
       - name: Collect assets
         run: |
           set -euo pipefail
           mkdir -p release-assets
-          run_id="${{ steps.run.outputs.run_id }}"
-          artifact_id="$(gh api "repos/${GH_REPO}/actions/runs/${run_id}/artifacts" --jq '.artifacts[] | select(.name == "app-release.apk") | .id')"
-          if [ -z "$artifact_id" ]; then
-            echo "APK artifact not found" >&2
+
+          mapfile -t apks < <(find artifacts -type f -name '*.apk')
+          if [ "${#apks[@]}" -ne 1 ]; then
+            echo "expected exactly one APK artifact, found ${#apks[@]}" >&2
             exit 1
           fi
-          curl -fsSL \
-            -H "Authorization: token ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            -o "release-assets/NekoSU-${TAG}.apk" \
-            "https://api.github.com/repos/${GH_REPO}/actions/artifacts/${artifact_id}/zip"
-          find artifacts -name '*_nksu.ko' -exec cp {} release-assets/ \;
+          cp "${apks[0]}" "release-assets/NekoSU-${TAG}.apk"
+
+          mapfile -t kos < <(find artifacts -type f -name '*_nksu.ko')
+          if [ "${#kos[@]}" -eq 0 ]; then
+            echo "no kernel module artifacts found" >&2
+            exit 1
+          fi
+          for ko in "${kos[@]}"; do
+            cp "$ko" release-assets/
+          done
+
           (cd release-assets && sha256sum * > SHA256SUMS)
           ls -lh release-assets
 

@@ -1,0 +1,362 @@
+package me.nekosu.aqnya.ui.screens.install
+
+import android.app.Application
+import android.content.Context
+import android.net.Uri
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import me.nekosu.aqnya.data.installer.VendorBootInstaller
+import me.nekosu.aqnya.data.kernel.KernelInfo
+import me.nekosu.aqnya.data.shell.RootShell
+import me.nekosu.aqnya.util.LocaleHelper
+
+/** 日志刷新间隔，避免每来一行都做一次 O(n) 拼接并触发整页重组。 */
+private const val LOG_EMIT_INTERVAL_MS = 50L
+
+/**
+ * 安装方式，与 KernelSU 的安装页对应：
+ *  - [FILE]     选择镜像（不需要 root，仅生成补丁镜像）
+ *  - [DIRECT]   直接安装到当前 slot（需要 root + GKI）
+ *  - [INACTIVE] 安装到非活动 slot（需要 root + GKI + A/B）
+ */
+enum class InstallMethod { FILE, DIRECT, INACTIVE }
+
+/**
+ * 内核模块（LKM）的选择，对齐 KernelSU 的 `LkmSelection`：
+ *  - [Auto]  按设备 KMI 自动匹配随 APK 打包的 nksu.ko；
+ *  - [Kmi]   用户在弹窗里显式选择的 KMI 对应的打包模块；
+ *  - [Local] 用户选择的本地 .ko 文件。
+ *
+ * 打包的候选模块不再平铺，只通过 KMI 选择弹窗选取。
+ */
+sealed interface LkmSelection {
+    data object Auto : LkmSelection
+
+    data class Kmi(
+        val kmi: String,
+    ) : LkmSelection
+
+    data class Local(
+        val uri: Uri,
+        val name: String,
+    ) : LkmSelection
+}
+
+/**
+ * 安装页面的可观察状态。
+ */
+data class InstallUiState(
+    val kernelVersion: String? = null,
+    val isGki: Boolean = false,
+    val currentKmi: String? = null,
+    /** assets/ko 中的全部候选，仅用于内部匹配。 */
+    val koCandidates: List<String> = emptyList(),
+    /** 按设备 KMI 自动匹配到的打包模块名；无候选时为 null。 */
+    val autoKo: String? = null,
+    val lkmSelection: LkmSelection = LkmSelection.Auto,
+    val method: InstallMethod = InstallMethod.FILE,
+    val vendorBootUri: Uri? = null,
+    val vendorBootName: String? = null,
+    val rootAvailable: Boolean = false,
+    val directTarget: String? = null,
+    val inactiveTarget: String? = null,
+    val running: Boolean = false,
+    val done: Boolean = false,
+    val success: Boolean? = null,
+    val message: String = "",
+) {
+    val directReady: Boolean get() = rootAvailable && directTarget != null
+
+    val inactiveReady: Boolean get() = rootAvailable && inactiveTarget != null
+
+    /** 有可用的内核模块（自动匹配或本地文件）。 */
+    val hasKernelModule: Boolean
+        get() = lkmSelection is LkmSelection.Local || autoKo != null
+
+    val canInstall: Boolean
+        get() =
+            !running &&
+                hasKernelModule &&
+                when (method) {
+                    InstallMethod.FILE -> vendorBootUri != null
+                    InstallMethod.DIRECT -> directReady
+                    InstallMethod.INACTIVE -> inactiveReady
+                }
+}
+
+/**
+ * vendor_boot 安装流程的状态持有者。
+ *
+ * 通过 [KernelInfo] 展示 JNI 查询到的内核版本 / KMI，并据此自动选择匹配的
+ * nksu.ko；模块不再全部列出，只保留一个「使用本地 LKM」入口（对齐 KernelSU）。
+ * 安装方式与 KernelSU 对齐：选择镜像、直接安装、安装到非活动 slot；后两者
+ * 只有在启动阶段检测到 root 且存在对应 vendor_boot 分区时才显示。
+ */
+class InstallViewModel(
+    app: Application,
+) : AndroidViewModel(app) {
+    private val _uiState = MutableStateFlow(InstallUiState())
+    val uiState: StateFlow<InstallUiState> = _uiState.asStateFlow()
+
+    private val appContext = app.applicationContext
+
+    init {
+        viewModelScope.launch {
+            RootShell.availability.filterNotNull().collect { hasRoot ->
+                applyRootAvailability(hasRoot)
+            }
+        }
+    }
+
+    // 上一次把日志推送到 UI 的时间戳，用于合并高频输出。
+    private var lastLogEmit = 0L
+
+    /**
+     * 按应用内当前所选语言解析字符串，供安装日志/错误本地化使用。
+     *
+     * 语言切换只会重建 Activity 而不会重建进程，因此这里每次安装时重新读取
+     * 已保存的语言标签，避免沿用旧的 [android.content.res.Resources] 配置。
+     */
+    private fun i18nContext(): Context = LocaleHelper.wrap(appContext, LocaleHelper.savedLanguageTag(appContext))
+
+    /** 载入内核信息与可用的内核模块，只执行一次。 */
+    fun load() {
+        if (_uiState.value.koCandidates.isNotEmpty()) return
+        viewModelScope.launch {
+            val loaded =
+                withContext(Dispatchers.IO) {
+                    val currentKmi = KernelInfo.currentKmi()
+                    val candidates =
+                        runCatching { VendorBootInstaller.koCandidates(appContext) }
+                            .getOrDefault(emptyList())
+                    LoadedKernelInfo(
+                        kernelVersion = KernelInfo.version(),
+                        isGki = KernelInfo.isGki(),
+                        currentKmi = currentKmi,
+                        candidates = candidates,
+                        recommendedKo = KernelInfo.matchKo(candidates, currentKmi),
+                    )
+                }
+            _uiState.update { current ->
+                current.copy(
+                    kernelVersion = loaded.kernelVersion,
+                    isGki = loaded.isGki,
+                    currentKmi = loaded.currentKmi,
+                    koCandidates = loaded.candidates,
+                    autoKo = loaded.recommendedKo,
+                )
+            }
+        }
+    }
+
+    /** root 状态由启动阶段检测；这里只静默查找可直接安装的 vendor_boot 分区。 */
+    private suspend fun applyRootAvailability(hasRoot: Boolean) {
+        val (current, inactive) =
+            withContext(Dispatchers.IO) {
+                if (hasRoot) {
+                    VendorBootInstaller.detectVendorBootPartition() to
+                        VendorBootInstaller.detectInactiveVendorBootPartition()
+                } else {
+                    null to null
+                }
+            }
+        _uiState.update { state ->
+            val method =
+                when (state.method) {
+                    InstallMethod.DIRECT -> if (hasRoot && current != null) state.method else InstallMethod.FILE
+                    InstallMethod.INACTIVE -> if (hasRoot && inactive != null) state.method else InstallMethod.FILE
+                    InstallMethod.FILE -> state.method
+                }
+            state.copy(
+                rootAvailable = hasRoot,
+                directTarget = current,
+                inactiveTarget = inactive,
+                method = method,
+            )
+        }
+    }
+
+    /** 使用本地 .ko 文件。 */
+    fun selectLocalKo(uri: Uri) {
+        if (_uiState.value.running) return
+        val name =
+            uri.lastPathSegment
+                ?.substringAfterLast('/')
+                ?.takeIf { it.isNotBlank() }
+                ?: "nksu.ko"
+        _uiState.update {
+            it.copy(
+                lkmSelection = LkmSelection.Local(uri, name),
+                done = false,
+                success = null,
+                message = "",
+            )
+        }
+    }
+
+    /** 选择某个 KMI（弹窗确认后调用），使用对应的打包模块。 */
+    fun selectKmi(kmi: String) {
+        if (_uiState.value.running) return
+        _uiState.update {
+            it.copy(
+                lkmSelection = LkmSelection.Kmi(kmi),
+                done = false,
+                success = null,
+                message = "",
+            )
+        }
+    }
+
+    /** 清除本地 .ko，回到按 KMI 自动匹配。 */
+    fun clearLocalKo() {
+        if (_uiState.value.running) return
+        _uiState.update {
+            it.copy(
+                lkmSelection = LkmSelection.Auto,
+                done = false,
+                success = null,
+                message = "",
+            )
+        }
+    }
+
+    fun selectMethod(method: InstallMethod) {
+        if (_uiState.value.running || _uiState.value.method == method) return
+        _uiState.update { it.copy(method = method, done = false, success = null, message = "") }
+    }
+
+    fun selectVendorBoot(uri: Uri) {
+        if (_uiState.value.running) return
+        val name =
+            uri.lastPathSegment
+                ?.substringAfterLast('/')
+                ?.takeIf { it.isNotBlank() }
+                ?: uri.toString()
+        _uiState.update {
+            it.copy(
+                method = InstallMethod.FILE,
+                vendorBootUri = uri,
+                vendorBootName = name,
+                done = false,
+                success = null,
+                message = "",
+            )
+        }
+    }
+
+    fun install() {
+        val current = _uiState.value
+        if (current.running || current.done) return
+        if (!current.canInstall) return
+
+        val koName = resolveKoName(current)
+        val koUri = (current.lkmSelection as? LkmSelection.Local)?.uri
+
+        _uiState.update { it.copy(running = true, done = false, success = null, message = "") }
+        lastLogEmit = 0L
+
+        viewModelScope.launch {
+            val log = StringBuilder()
+            val exit =
+                when (current.method) {
+                    InstallMethod.FILE -> runFileInstall(current, koName, koUri, log)
+                    InstallMethod.DIRECT -> runDirectInstall(current.directTarget.orEmpty(), koName, koUri, log)
+                    InstallMethod.INACTIVE -> runDirectInstall(current.inactiveTarget.orEmpty(), koName, koUri, log)
+                }
+
+            val ok = exit == 0
+            _uiState.update {
+                it.copy(
+                    running = false,
+                    done = true,
+                    success = ok,
+                    message = log.toString(),
+                )
+            }
+        }
+    }
+
+    private suspend fun runFileInstall(
+        current: InstallUiState,
+        koName: String?,
+        koUri: Uri?,
+        log: StringBuilder,
+    ): Int {
+        val uri = current.vendorBootUri ?: return -1
+        return runCatching {
+            val ctx = i18nContext()
+            val staged = withContext(Dispatchers.IO) { VendorBootInstaller.stageVendorBoot(ctx, uri) }
+            VendorBootInstaller.install(ctx, staged, koName, koUri) { line -> appendLog(log, line) }
+        }.getOrElse { e ->
+            appendError(log, e)
+            -1
+        }
+    }
+
+    private suspend fun runDirectInstall(
+        partition: String,
+        koName: String?,
+        koUri: Uri?,
+        log: StringBuilder,
+    ): Int =
+        runCatching {
+            VendorBootInstaller.directInstall(i18nContext(), koName, koUri, partition) { line -> appendLog(log, line) }
+        }.getOrElse { e ->
+            appendError(log, e)
+            -1
+        }
+
+    private fun appendLog(
+        log: StringBuilder,
+        line: String,
+    ) {
+        log.append(line).append('\n')
+        val now = System.currentTimeMillis()
+        // 合并高频输出；安装结束时会再推一次完整日志。
+        if (now - lastLogEmit >= LOG_EMIT_INTERVAL_MS) {
+            lastLogEmit = now
+            _uiState.update { it.copy(message = log.toString()) }
+        }
+    }
+
+    private fun appendError(
+        log: StringBuilder,
+        e: Throwable,
+    ) {
+        log.append("ERROR: ").append(e.message).append('\n')
+        _uiState.update { it.copy(message = log.toString()) }
+    }
+
+    /** 把当前选择解析成随包模块名（本地文件返回 null，改用 koUri）。 */
+    private fun resolveKoName(state: InstallUiState): String? =
+        when (val selection = state.lkmSelection) {
+            is LkmSelection.Kmi -> state.koCandidates.firstOrNull { KernelInfo.kmiOf(it) == selection.kmi }
+            LkmSelection.Auto -> state.autoKo
+            is LkmSelection.Local -> null
+        }
+
+    private data class LoadedKernelInfo(
+        val kernelVersion: String?,
+        val isGki: Boolean,
+        val currentKmi: String?,
+        val candidates: List<String>,
+        val recommendedKo: String?,
+    )
+}
+
+class InstallViewModelFactory(
+    private val app: Application,
+) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T = InstallViewModel(app) as T
+}

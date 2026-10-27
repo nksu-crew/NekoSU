@@ -24,6 +24,13 @@ on:
     paths:
       - ".github/workflows/build.yml"
       - ".github/workflows/ko.yml"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+      - "gradle/**"
+      - "gradlew"
+      - "gradlew.bat"
+      - "debug.keystore"
       - "kernel/**"
       - "uapi/**"
       - "manager/**"
@@ -33,6 +40,13 @@ on:
     paths:
       - ".github/workflows/build.yml"
       - ".github/workflows/ko.yml"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+      - "gradle/**"
+      - "gradlew"
+      - "gradlew.bat"
+      - "debug.keystore"
       - "kernel/**"
       - "uapi/**"
       - "manager/**"
@@ -48,8 +62,8 @@ permissions:
 
 jobs:
   # The KO matrix runs in parallel, one Docker image per KMI. Its modules are
-  # downloaded into the Flutter manager's Android assets below, so the APK
-  # always packages the files produced by this run.
+  # downloaded into the Compose manager's assets below, so the APK always
+  # packages the files produced by this run.
   ko:
     uses: ./.github/workflows/ko.yml
     with:
@@ -62,7 +76,7 @@ jobs:
       NDK_VERSION: r29
       ANDROID_NDK_API_LEVEL: "28"
       ANDROID_NDK_HOME: ${{ github.workspace }}/android-ndk
-      KO_OUTPUT_DIR: manager/android/app/src/main/assets/ko
+      KO_OUTPUT_DIR: manager/app/src/main/assets/ko
 
     steps:
     - uses: actions/checkout@v7
@@ -98,23 +112,13 @@ jobs:
         distribution: 'temurin'
         cache: gradle
         cache-dependency-path: |
-          manager/android/**/*.gradle*
-          manager/android/gradle.properties
-          manager/android/gradle/wrapper/gradle-wrapper.properties
-          manager/android/gradle/libs.versions.toml
-
-    - name: Cache Flutter Pub
-      uses: actions/cache@v6
-      with:
-        path: ~/.pub-cache
-        key: flutter-pub-${{ hashFiles('manager/pubspec.yaml', 'manager/pubspec.lock') }}
-        restore-keys: flutter-pub-
-
-    - name: Set up Flutter
-      uses: subosito/flutter-action@v2
-      with:
-        flutter-version: '3.47.7'
-        cache: true
+          build.gradle.kts
+          settings.gradle.kts
+          gradle.properties
+          gradle/wrapper/gradle-wrapper.properties
+          gradle/libs.versions.toml
+          manager/app/build.gradle.kts
+          neko/build.gradle.kts
 
     - name: Cache Android NDK
       id: ndk-cache
@@ -136,7 +140,7 @@ jobs:
 
     # ncore and bootpatcher live under neko/ and are compiled by Gradle through
     # cargo-ndk, so the APK always carries a userspace runtime built from the
-    # same checkout.
+    # same checkout.  The manager reaches them through the libjni bridge.
     - name: Set up Rust
       run: |
         rustup toolchain install stable --profile minimal
@@ -153,7 +157,7 @@ jobs:
 
     - name: List packaged assets
       run: |
-        ls -la manager/android/app/src/main/assets/
+        ls -la manager/app/src/main/assets/
         ls -la "$KO_OUTPUT_DIR"
 
     - name: Decode Release Keystore
@@ -162,7 +166,7 @@ jobs:
       run: |
         set -euo pipefail
         if [ -z "${KEYSTORE_BASE64:-}" ]; then
-          echo "release keystore unavailable; this build will use the debug signing key"
+          echo "release keystore unavailable; this build will be unsigned"
           rm -f release.keystore
           exit 0
         fi
@@ -217,16 +221,18 @@ jobs:
         VERSION_NAME: ${{ steps.version.outputs.version_name }}
       run: |
         set -euo pipefail
-        if [ "$VERSION_CHANNEL" != "canary" ]; then
-          export REQUIRE_RELEASE_SIGNING=true
+        args=(-PversionChannel="$VERSION_CHANNEL")
+        if [ -n "$VERSION_NAME" ]; then
+          args+=("-PversionNameOverride=$VERSION_NAME")
         fi
-        cd manager
-        flutter pub get
-        flutter build apk --release --target-platform android-arm64
+        if [ "$VERSION_CHANNEL" != "canary" ]; then
+          args+=("-PrequireReleaseSigning=true")
+        fi
+        ./gradlew assembleRelease --no-daemon "${args[@]}"
 
     - name: Upload Release Artifact
       uses: actions/upload-artifact@v7
       with:
         name: release-${{ steps.version.outputs.channel }}
-        path: manager/build/app/outputs/flutter-apk/app-release.apk
+        path: manager/app/build/outputs/apk/release/*.apk
         archive: false

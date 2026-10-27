@@ -9,15 +9,10 @@ captures
 .cxx
 release.keystore
 ktlint
-app/src/main/jniLibs/
+manager/app/src/main/jniLibs/
 .kotlin/
 .ccache/
-manager/android/app/src/main/assets/ko/
-manager/.dart_tool/
-manager/.flutter-plugins-dependencies
-manager/build/
-manager/android/key.properties
-manager/android/app/release-keystore.jks
+manager/app/src/main/assets/ko/
 # Local kernel debug artifacts
 last_kmsg
 dmesg.log

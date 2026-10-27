@@ -8,8 +8,8 @@
  *   - the on-wire payload layout of every flag.
  *
  * It is included by the kernel module (kernel/manager/ioctl.h) and the ncore
- * userspace runtime (neko/ncore); the Flutter manager reaches the same ABI
- * through the Rust FFI bridge (neko/ffi).  Keep it portable between kernel and userspace:
+ * userspace runtime (neko/ncore); the Compose manager reaches the same ABI
+ * through the Rust JNI bridge (neko/jni).  Keep it portable between kernel and userspace:
  * only <linux/ioctl.h> and <linux/types.h> may be used.
  */
 #ifndef NKSU_UAPI_IOCTL_H

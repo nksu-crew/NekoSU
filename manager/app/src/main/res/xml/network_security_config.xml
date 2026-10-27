@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  模块 WebUI 从 https://mui.kernelsu.org 加载，但会 fetch 本机守护进程
+  （例如 teesim 的 http://127.0.0.1:8790/...）。Android 9+ 默认禁止明文
+  HTTP，跨源 fetch 会直接以 ERR_CLEARTEXT_NOT_PERMITTED 失败（表现为
+  “TypeError: Failed to fetch”）。这里仅对回环地址放行明文，与 KernelSU
+  的 network_security_config 保持一致。
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <domain includeSubdomains="true">0.0.0.0</domain>
+        <domain includeSubdomains="true">::1</domain>
+        <domain includeSubdomains="true">localhost</domain>
+    </domain-config>
+</network-security-config>

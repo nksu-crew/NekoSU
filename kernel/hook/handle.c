@@ -680,7 +680,8 @@ long hook__NR_execveat(struct pt_regs *regs)
  * An authorized app may ask the kernel for root directly from native
  * code.  Only setresuid() is usable for that: Android's app seccomp policy
  * allows setresuid(2) but kills the process with SIGSYS on setuid(2) /
- * setreuid(2), and all callers go through setresuid (see ffi readFile).
+ * setreuid(2), and all callers go through setresuid (see the JNI readFile
+ * bridge in neko/jni).
  *
  * When the call targets root, escalate from the profile just before the real
  * syscall runs; the caller is root by then, so the original call succeeds
