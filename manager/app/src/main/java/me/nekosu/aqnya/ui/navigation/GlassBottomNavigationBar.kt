@@ -58,15 +58,15 @@ import dev.chrisbanes.haze.glass.hazeGlass
 import kotlin.math.abs
 
 /** Floating glass bar metrics tuned to the iOS 26 floating tab bar. */
-val GlassBottomBarHeight = 68.dp
-val GlassBottomBarHorizontalPadding = 16.dp
+val GlassBottomBarHeight = 64.dp
+val GlassBottomBarHorizontalPadding = 20.dp
 val GlassBottomBarVerticalPadding = 10.dp
 
 /**
  * Bottom scroll clearance for tab content: bar height + vertical padding on
  * both sides + the floating gap between content and the bar.
  */
-val GlassBottomBarContentPadding = 120.dp
+val GlassBottomBarContentPadding = 116.dp
 
 /** Clearance for the stock Material 3 navigation bar (80 dp) plus a 16 dp gap. */
 val StandardBottomBarContentPadding = 96.dp
@@ -92,12 +92,13 @@ fun GlassBottomNavigationBar(
     val scheme = MaterialTheme.colorScheme
     val isDark = scheme.surfaceContainer.luminance() < 0.5f
     val barShape = remember { RoundedCornerShape(GlassBottomBarHeight / 2) }
-    val selectionShape = remember { RoundedCornerShape(26.dp) }
+    val selectionShape = remember { RoundedCornerShape(24.dp) }
 
     /*
-     * The bar is a single Haze Glass surface.  The selection is a tinted
-     * liquid bubble drawn on top of it rather than a second blur pass: that
-     * keeps the refraction coherent and avoids a "glass inside glass" look.
+     * The bar is a single Haze Glass surface.  The selection is a clear
+     * liquid-glass highlight rather than a coloured block or a second blur
+     * pass: that keeps the refraction coherent and leaves the accent colour
+     * on the icon and label only.
      */
     val barStyle =
         remember(isDark) {
@@ -105,22 +106,22 @@ fun GlassBottomNavigationBar(
                 shape(barShape)
                 backgroundColor(
                     if (isDark) {
-                        Color(0xFF0B0D11).copy(alpha = 0.28f)
+                        Color(0xFF0B0D11).copy(alpha = 0.26f)
                     } else {
-                        Color.White.copy(alpha = 0.22f)
+                        Color.White.copy(alpha = 0.18f)
                     },
                 )
                 tint(
                     if (isDark) {
-                        Color.White.copy(alpha = 0.04f)
+                        Color.White.copy(alpha = 0.03f)
                     } else {
-                        Color.White.copy(alpha = 0.08f)
+                        Color.White.copy(alpha = 0.06f)
                     },
                 )
-                edgeShadow(Color.Black.copy(alpha = if (isDark) 0.34f else 0.12f))
-                specularIntensity(if (isDark) 0.48f else 0.66f)
+                edgeShadow(Color.Black.copy(alpha = if (isDark) 0.32f else 0.10f))
+                specularIntensity(if (isDark) 0.52f else 0.70f)
                 lightPosition(Alignment.TopCenter)
-                chromaticAberrationStrength(0.06f)
+                chromaticAberrationStrength(0.07f)
             }
         }
 
@@ -133,11 +134,11 @@ fun GlassBottomNavigationBar(
         }
 
     val selectionFill =
-        remember(isDark, scheme.primary, scheme.primaryContainer) {
+        remember(isDark) {
             Brush.verticalGradient(
-                0f to scheme.primaryContainer.copy(alpha = 0.82f),
-                0.6f to scheme.primaryContainer.copy(alpha = 0.68f),
-                1f to scheme.primary.copy(alpha = if (isDark) 0.30f else 0.18f),
+                0f to Color.White.copy(alpha = if (isDark) 0.10f else 0.22f),
+                0.6f to Color.White.copy(alpha = if (isDark) 0.03f else 0.07f),
+                1f to Color.Transparent,
             )
         }
 
@@ -193,11 +194,11 @@ fun GlassBottomNavigationBar(
                         transformOrigin = TransformOrigin.Center
                     }
                     .shadow(
-                        elevation = 12.dp,
+                        elevation = 8.dp,
                         shape = selectionShape,
                         clip = false,
-                        ambientColor = Color.Black.copy(alpha = if (isDark) 0.22f else 0.08f),
-                        spotColor = Color.Black.copy(alpha = if (isDark) 0.30f else 0.14f),
+                        ambientColor = Color.Black.copy(alpha = if (isDark) 0.16f else 0.06f),
+                        spotColor = Color.Black.copy(alpha = if (isDark) 0.24f else 0.10f),
                     )
                     .clip(selectionShape)
                     .background(selectionFill)
@@ -223,7 +224,7 @@ fun GlassBottomNavigationBar(
                 GlassBottomBarItem(
                     item = item,
                     selected = index == selectedIndex,
-                    selectedColor = scheme.onPrimaryContainer,
+                    selectedColor = scheme.primary,
                     unselectedColor = scheme.onSurfaceVariant.copy(alpha = 0.9f),
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                     onClick = { onTabClick(index) },
