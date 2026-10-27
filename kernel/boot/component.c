@@ -117,7 +117,7 @@ int nksu_components_init_all(void)
 
 void __nocfi nksu_components_exit_from(enum nksu_init_stage stage)
 {
-	enum nksu_init_stage current;
+	enum nksu_init_stage s;
 	unsigned int i;
 
 	if ((unsigned int)stage >= NKSU_STAGE_COUNT)
@@ -131,6 +131,6 @@ void __nocfi nksu_components_exit_from(enum nksu_init_stage stage)
 			comp->exit();
 	}
 
-	for (current = stage; current < NKSU_STAGE_COUNT; current++)
-		nksu_ready &= ~BIT(current);
+	for (s = stage; s < NKSU_STAGE_COUNT; s++)
+		nksu_ready &= ~BIT(s);
 }
