@@ -10,6 +10,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Badge
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Lock
@@ -50,9 +52,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import me.nekosu.aqnya.R
 import me.nekosu.aqnya.ui.component.AppDialog
-import me.nekosu.aqnya.ui.component.AppListItem
 import me.nekosu.aqnya.ui.component.AppTopAppBar
-import me.nekosu.aqnya.ui.component.CardGroup
 import me.nekosu.aqnya.ui.component.ExpressiveTextField
 import me.nekosu.aqnya.ui.component.ModeLabel
 
@@ -592,115 +592,92 @@ fun AppDetailScreen(
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(innerPadding),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             item {
-                AppIdentityHeader(app = app, allowed = allowed)
+                AppIdentityHeader(app = app)
             }
 
             item {
-                Column {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SectionTitle(stringResource(R.string.app_authorization_section))
-                        AuthorizationCard(
-                            allowed = allowed,
-                            onToggle = { value ->
-                                haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
-                                val newCaps =
-                                    if (!value) {
-                                        emptySet()
-                                    } else if (caps.isEmpty()) {
-                                        DEFAULT_CAPS
-                                    } else {
-                                        caps
-                                    }
-                                val newDomain = if (!value) "u:r:nksu:s0" else domain
-                                val newNs = if (!value) NksuNamespace.INHERITED else ns
-                                allowed = value
-                                caps = newCaps
-                                domain = newDomain
-                                ns = newNs
-                                save(
-                                    allowedValue = value,
-                                    capsValue = newCaps,
-                                    domainValue = newDomain,
-                                    nsValue = newNs,
-                                )
-                            },
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SectionTitle(stringResource(R.string.app_authorization_section))
+                    AuthorizationCard(
+                        allowed = allowed,
+                        onToggle = { value ->
+                            haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
+                            val newCaps =
+                                if (!value) {
+                                    emptySet()
+                                } else if (caps.isEmpty()) {
+                                    DEFAULT_CAPS
+                                } else {
+                                    caps
+                                }
+                            val newDomain = if (!value) "u:r:nksu:s0" else domain
+                            val newNs = if (!value) NksuNamespace.INHERITED else ns
+                            allowed = value
+                            caps = newCaps
+                            domain = newDomain
+                            ns = newNs
+                            save(
+                                allowedValue = value,
+                                capsValue = newCaps,
+                                domainValue = newDomain,
+                                nsValue = newNs,
+                            )
+                        },
+                    )
+                }
+            }
+
+            item {
+                AnimatedVisibility(
+                    visible = allowed,
+                    enter =
+                        expandVertically(
+                            animationSpec = motionScheme.defaultSpatialSpec(),
+                            expandFrom = Alignment.Top,
+                        ) + fadeIn(animationSpec = motionScheme.defaultEffectsSpec()),
+                    exit =
+                        shrinkVertically(
+                            animationSpec = motionScheme.fastSpatialSpec(),
+                            shrinkTowards = Alignment.Top,
+                        ) + fadeOut(animationSpec = motionScheme.fastEffectsSpec()),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(top = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        SectionTitle(stringResource(R.string.app_root_configuration))
+                        ConfigurationCard(
+                            rootUid = rootUidText,
+                            caps = caps,
+                            domain = domain,
+                            ns = ns,
+                            onEditUid = { showUidDialog = true },
+                            onEditCaps = { showCapsSheet = true },
+                            onEditDomain = { showDomainDialog = true },
+                            onEditNamespace = { showNsDialog = true },
                         )
                     }
-
-                    AnimatedVisibility(
-                        visible = allowed,
-                        enter =
-                            expandVertically(
-                                animationSpec = motionScheme.defaultSpatialSpec(),
-                                expandFrom = Alignment.Top,
-                            ) + fadeIn(animationSpec = motionScheme.defaultEffectsSpec()),
-                        exit =
-                            shrinkVertically(
-                                animationSpec = motionScheme.fastSpatialSpec(),
-                                shrinkTowards = Alignment.Top,
-                            ) + fadeOut(animationSpec = motionScheme.fastEffectsSpec()),
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(top = 24.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            SectionTitle(stringResource(R.string.app_root_configuration))
-                            CardGroup {
-                                item {
-                                    ConfigurationItem(
-                                        title = stringResource(R.string.app_root_uid),
-                                        summary = rootUidText,
-                                        icon = Icons.Rounded.Badge,
-                                        onClick = { showUidDialog = true },
-                                    )
-                                }
-                                item {
-                                    ConfigurationItem(
-                                        title = stringResource(R.string.app_capabilities),
-                                        summary =
-                                            stringResource(
-                                                R.string.app_caps_selected,
-                                                caps.size,
-                                                LinuxCap.entries.size,
-                                            ),
-                                        icon = Icons.Rounded.Tune,
-                                        onClick = { showCapsSheet = true },
-                                    )
-                                }
-                                item {
-                                    ConfigurationItem(
-                                        title = stringResource(R.string.app_selinux_domain),
-                                        summary = domain,
-                                        icon = Icons.Rounded.Shield,
-                                        onClick = { showDomainDialog = true },
-                                    )
-                                }
-                                item {
-                                    ConfigurationItem(
-                                        title = stringResource(R.string.app_mount_namespace),
-                                        summary = stringResource(ns.labelRes),
-                                        icon = Icons.Rounded.Layers,
-                                        onClick = { showNsDialog = true },
-                                    )
-                                }
-                            }
-                        }
-                    }
                 }
+            }
+
+            item {
+                Text(
+                    text = stringResource(R.string.app_authorization_autosave),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
             }
         }
     }
 }
 
 @Composable
-private fun AppIdentityHeader(
-    app: AppInfo,
-    allowed: Boolean,
-) {
+private fun AppIdentityHeader(app: AppInfo) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -764,18 +741,15 @@ private fun AuthorizationCard(
     allowed: Boolean,
     onToggle: (Boolean) -> Unit,
 ) {
+    val scheme = MaterialTheme.colorScheme
     val motionScheme = MaterialTheme.motionScheme
 
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
-        colors =
-            CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceBright,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-            ),
+        colors = CardDefaults.cardColors(containerColor = scheme.surfaceContainerHigh),
     ) {
-        Row(
+        Column(
             modifier =
                 Modifier
                     .fillMaxWidth()
@@ -784,66 +758,160 @@ private fun AuthorizationCard(
                         role = Role.Switch,
                         onValueChange = onToggle,
                     ).padding(20.dp),
-            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Surface(
-                modifier = Modifier.size(48.dp),
-                shape = MaterialTheme.shapes.medium,
-                color =
-                    MaterialTheme.colorScheme.surfaceContainerHigh,
-                contentColor =
-                    MaterialTheme.colorScheme.onSurfaceVariant,
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    AnimatedContent(
-                        targetState = allowed,
-                        transitionSpec = {
-                            (
-                                fadeIn(animationSpec = motionScheme.defaultEffectsSpec()) +
-                                    scaleIn(
-                                        initialScale = 0.7f,
-                                        animationSpec = motionScheme.defaultSpatialSpec(),
-                                    )
-                            ).togetherWith(
-                                fadeOut(animationSpec = motionScheme.fastEffectsSpec()) +
-                                    scaleOut(
-                                        targetScale = 0.7f,
-                                        animationSpec = motionScheme.fastSpatialSpec(),
-                                    ),
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    modifier = Modifier.size(52.dp),
+                    shape = MaterialTheme.shapes.medium,
+                    color = if (allowed) scheme.primaryContainer else scheme.surfaceContainerHighest,
+                    contentColor = if (allowed) scheme.onPrimaryContainer else scheme.onSurfaceVariant,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        AnimatedContent(
+                            targetState = allowed,
+                            transitionSpec = {
+                                (
+                                    fadeIn(animationSpec = motionScheme.defaultEffectsSpec()) +
+                                        scaleIn(
+                                            initialScale = 0.7f,
+                                            animationSpec = motionScheme.defaultSpatialSpec(),
+                                        )
+                                ).togetherWith(
+                                    fadeOut(animationSpec = motionScheme.fastEffectsSpec()) +
+                                        scaleOut(
+                                            targetScale = 0.7f,
+                                            animationSpec = motionScheme.fastSpatialSpec(),
+                                        ),
+                                )
+                            },
+                            label = "authorization_lock",
+                        ) { granted ->
+                            Icon(
+                                imageVector = if (granted) Icons.Rounded.LockOpen else Icons.Rounded.Lock,
+                                contentDescription = null,
                             )
-                        },
-                        label = "authorization_lock",
-                    ) { granted ->
-                        Icon(
-                            imageVector = if (granted) Icons.Rounded.LockOpen else Icons.Rounded.Lock,
-                            contentDescription = null,
-                        )
+                        }
                     }
                 }
+
+                Spacer(Modifier.width(16.dp))
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.app_allow_root),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        text = stringResource(R.string.app_root_access_summary),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
+
+                Spacer(Modifier.width(12.dp))
+
+                Switch(checked = allowed, onCheckedChange = null)
             }
 
-            Spacer(Modifier.width(16.dp))
+            Spacer(Modifier.height(14.dp))
 
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.app_allow_root),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Text(
-                    text = stringResource(R.string.app_root_access_summary),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
-            Spacer(Modifier.width(12.dp))
-
-            Switch(checked = allowed, onCheckedChange = null)
+            AuthorizationStatus(granted = allowed)
         }
     }
+}
+
+@Composable
+private fun AuthorizationStatus(granted: Boolean) {
+    val scheme = MaterialTheme.colorScheme
+
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = if (granted) scheme.primaryContainer else scheme.surfaceContainerHighest,
+        contentColor = if (granted) scheme.onPrimaryContainer else scheme.onSurfaceVariant,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = if (granted) Icons.Rounded.Check else Icons.Rounded.Close,
+                contentDescription = null,
+                modifier = Modifier.size(15.dp),
+            )
+            Text(
+                text =
+                    stringResource(
+                        if (granted) R.string.app_status_granted else R.string.app_status_denied,
+                    ),
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ConfigurationCard(
+    rootUid: String,
+    caps: Set<LinuxCap>,
+    domain: String,
+    ns: NksuNamespace,
+    onEditUid: () -> Unit,
+    onEditCaps: () -> Unit,
+    onEditDomain: () -> Unit,
+    onEditNamespace: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+    ) {
+        Column {
+            ConfigurationItem(
+                title = stringResource(R.string.app_root_uid),
+                summary = rootUid,
+                icon = Icons.Rounded.Badge,
+                onClick = onEditUid,
+            )
+            ConfigurationDivider()
+            ConfigurationItem(
+                title = stringResource(R.string.app_capabilities),
+                summary =
+                    stringResource(
+                        R.string.app_caps_selected,
+                        caps.size,
+                        LinuxCap.entries.size,
+                    ),
+                icon = Icons.Rounded.Tune,
+                onClick = onEditCaps,
+            )
+            ConfigurationDivider()
+            ConfigurationItem(
+                title = stringResource(R.string.app_selinux_domain),
+                summary = domain,
+                icon = Icons.Rounded.Shield,
+                onClick = onEditDomain,
+            )
+            ConfigurationDivider()
+            ConfigurationItem(
+                title = stringResource(R.string.app_mount_namespace),
+                summary = stringResource(ns.labelRes),
+                icon = Icons.Rounded.Layers,
+                onClick = onEditNamespace,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ConfigurationDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(horizontal = 16.dp),
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+    )
 }
 
 @Composable
@@ -853,24 +921,39 @@ private fun ConfigurationItem(
     icon: ImageVector,
     onClick: () -> Unit,
 ) {
-    AppListItem(
-        title = title,
-        modifier = Modifier.fillMaxWidth(),
-        summary = summary,
-        leading = {
+    ListItem(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable(role = Role.Button, onClick = onClick),
+        colors =
+            ListItemDefaults.colors(
+                containerColor = Color.Transparent,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                supportingContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ),
+        leadingContent = {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
             )
         },
-        trailing = {
+        headlineContent = { Text(title) },
+        supportingContent = {
+            Text(
+                text = summary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        trailingContent = {
             Icon(
                 imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         },
-        onClick = onClick,
     )
 }
 
@@ -880,7 +963,7 @@ private fun SectionTitle(text: String) {
         text = text,
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp),
+        modifier = Modifier.padding(horizontal = 4.dp),
     )
 }
 

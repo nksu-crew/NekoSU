@@ -113,6 +113,7 @@
     <string name="app_allow_root">允许 Root 访问</string>
     <string name="app_root_access_summary">使用配置的身份与能力运行此应用</string>
     <string name="app_root_configuration">Root 配置</string>
+    <string name="app_authorization_autosave">更改会自动保存</string>
     <string name="app_caps_selected">%1$d / %2$d 已选</string>
     <string name="app_capabilities">Capabilities（能力）</string>
     <string name="app_enable_root_first">请先启用 Root 授权</string>
