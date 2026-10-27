@@ -19,7 +19,6 @@ webkit = "1.17.1"
 profileinstaller = "1.4.1"
 ktlint = "14.2.0"
 haze = "2.0.1"
-backdrop = "2.0.1"
 graphicsShapes = "1.1.0"
 
 [libraries]
@@ -47,7 +46,6 @@ androidx-webkit = { module = "androidx.webkit:webkit", version.ref = "webkit" }
 androidx-profileinstaller = { module = "androidx.profileinstaller:profileinstaller", version.ref = "profileinstaller" }
 haze = { module = "dev.chrisbanes.haze:haze", version.ref = "haze" }
 haze-blur = { module = "dev.chrisbanes.haze:haze-blur", version.ref = "haze" }
-backdrop = { module = "io.github.kyant0:backdrop", version.ref = "backdrop" }
 androidx-graphics-shapes = { group = "androidx.graphics", name = "graphics-shapes", version.ref = "graphicsShapes" }
 
 [plugins]

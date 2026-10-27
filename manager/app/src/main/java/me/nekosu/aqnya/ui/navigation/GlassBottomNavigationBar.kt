@@ -5,6 +5,8 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -32,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
@@ -41,17 +44,14 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kyant.backdrop.Backdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
-import com.kyant.backdrop.highlight.Highlight
-import com.kyant.backdrop.shadow.InnerShadow
-import com.kyant.backdrop.shadow.Shadow
+import dev.chrisbanes.haze.HazeInput
+import dev.chrisbanes.haze.HazePerformanceMode
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.blur.HazeBlurStyle
+import dev.chrisbanes.haze.blur.HazeColorEffect
+import dev.chrisbanes.haze.blur.hazeBlur
 import me.nekosu.aqnya.ui.theme.ContinuousCornerShape
 import kotlin.math.abs
 
@@ -73,16 +73,15 @@ val StandardBottomBarContentPadding = 96.dp
 val LocalBottomBarClearance = compositionLocalOf { GlassBottomBarContentPadding }
 
 /**
- * Floating liquid-glass bottom bar backed by the `io.github.kyant0:backdrop`
+ * Floating liquid-glass bottom bar backed by the `dev.chrisbanes.haze:haze`
  * library.
  *
- * The caller must wrap the content shown behind the bar with
- * `Modifier.layerBackdrop(backdrop)` and build the backdrop with
- * `rememberLayerBackdrop`.
+ * The caller must mark the content shown behind the bar with
+ * `Modifier.hazeSource(hazeState)`.
  */
 @Composable
 fun GlassBottomNavigationBar(
-    backdrop: Backdrop,
+    hazeState: HazeState,
     items: List<BottomNavItem>,
     selectedIndex: Int,
     onTabClick: (Int) -> Unit,
@@ -103,63 +102,73 @@ fun GlassBottomNavigationBar(
         )
     val selectionTop = scheme.primaryContainer.copy(alpha = if (isDark) 0.55f else 0.62f)
     val selectionBottom = scheme.primaryContainer.copy(alpha = if (isDark) 0.35f else 0.42f)
+    val barFallback = scheme.surfaceContainer
+
+    // The white first stop gives the bar an iOS-style specular highlight.
+    val barBrush =
+        Brush.verticalGradient(
+            0f to Color.White.copy(alpha = if (isDark) 0.08f else 0.22f),
+            0.22f to barTop,
+            1f to barBottom,
+        )
+    val selectionBrush =
+        Brush.verticalGradient(
+            0f to Color.White.copy(alpha = if (isDark) 0.18f else 0.42f),
+            0.20f to selectionTop,
+            1f to selectionBottom,
+        )
+    val barRim =
+        Brush.verticalGradient(
+            colors =
+                listOf(
+                    Color.White.copy(alpha = if (isDark) 0.28f else 0.75f),
+                    Color.White.copy(alpha = 0.04f),
+                ),
+        )
+    val selectionRim =
+        Brush.verticalGradient(
+            colors =
+                listOf(
+                    Color.White.copy(alpha = if (isDark) 0.38f else 0.65f),
+                    Color.White.copy(alpha = 0.04f),
+                ),
+        )
+
+    val barStyle =
+        remember(barBrush, barFallback) {
+            HazeBlurStyle {
+                blurRadius(24.dp)
+                // Match the rest of the app: Haze's default noise looks dirty on
+                // light content, and the bottom bar is small enough to keep clear.
+                noiseFactor(0f)
+                colorEffects(listOf(HazeColorEffect.tint(barBrush)))
+                fallbackColorEffect(HazeColorEffect.tint(barFallback))
+            }
+        }
 
     BoxWithConstraints(
         modifier =
             modifier
                 .height(GlassBottomBarHeight)
                 .fillMaxWidth()
-                .drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { barShape },
-                    effects = {
-                        vibrancy()
-                        blur(12.dp.toPx())
-                        lens(28.dp.toPx(), 36.dp.toPx(), depthEffect = true)
-                    },
-                    highlight = {
-                        Highlight.Default.copy(
-                            width = 0.7.dp,
-                            blurRadius = 0.35.dp,
-                            alpha = if (isDark) 0.55f else 0.9f,
-                        )
-                    },
-                    shadow = {
-                        Shadow(
-                            radius = 24.dp,
-                            offset = DpOffset(0.dp, 10.dp),
-                            color = Color.Black.copy(alpha = if (isDark) 0.34f else 0.16f),
-                        )
-                    },
-                    innerShadow = {
-                        InnerShadow(
-                            radius = 16.dp,
-                            offset = DpOffset(0.dp, 4.dp),
-                            color = Color.Black.copy(alpha = if (isDark) 0.28f else 0.10f),
-                            alpha = 0.7f,
-                        )
-                    },
-                    onDrawSurface = {
-                        drawRect(
-                            brush =
-                                Brush.verticalGradient(
-                                    colors = listOf(barTop, barBottom),
-                                ),
-                        )
-                        drawRect(
-                            brush =
-                                Brush.verticalGradient(
-                                    colors =
-                                        listOf(
-                                            Color.White.copy(alpha = if (isDark) 0.05f else 0.18f),
-                                            Color.Transparent,
-                                        ),
-                                    endY = size.height * 0.5f,
-                                ),
-                        )
-                    },
+                .shadow(
+                    elevation = 24.dp,
+                    shape = barShape,
+                    clip = false,
+                    ambientColor = Color.Black.copy(alpha = if (isDark) 0.30f else 0.12f),
+                    spotColor = Color.Black.copy(alpha = if (isDark) 0.38f else 0.18f),
                 )
                 .clip(barShape)
+                .hazeBlur(
+                    input = HazeInput.Sources(hazeState),
+                    style = barStyle,
+                    performanceMode = HazePerformanceMode.Default,
+                )
+                .border(
+                    width = 0.7.dp,
+                    brush = barRim,
+                    shape = barShape,
+                )
                 .padding(4.dp),
     ) {
         val tabWidth = maxWidth / items.size
@@ -185,55 +194,19 @@ fun GlassBottomNavigationBar(
                         scaleY = 1f - (stretch - 1f) * 0.35f
                         transformOrigin = TransformOrigin.Center
                     }
-                    .drawBackdrop(
-                        backdrop = backdrop,
-                        shape = { selectionShape },
-                        effects = {
-                            vibrancy()
-                            blur(6.dp.toPx())
-                            lens(16.dp.toPx(), 22.dp.toPx(), chromaticAberration = true)
-                        },
-                        highlight = {
-                            Highlight.Default.copy(
-                                width = 0.5.dp,
-                                blurRadius = 0.25.dp,
-                                alpha = 0.85f,
-                            )
-                        },
-                        shadow = {
-                            Shadow(
-                                radius = 12.dp,
-                                offset = DpOffset(0.dp, 3.dp),
-                                color = Color.Black.copy(alpha = if (isDark) 0.22f else 0.10f),
-                            )
-                        },
-                        innerShadow = {
-                            InnerShadow(
-                                radius = 10.dp,
-                                offset = DpOffset(0.dp, 2.dp),
-                                color = Color.Black.copy(alpha = if (isDark) 0.22f else 0.10f),
-                                alpha = 0.8f,
-                            )
-                        },
-                        onDrawSurface = {
-                            drawRect(
-                                brush =
-                                    Brush.verticalGradient(
-                                        colors = listOf(selectionTop, selectionBottom),
-                                    ),
-                            )
-                            drawRect(
-                                brush =
-                                    Brush.verticalGradient(
-                                        colors =
-                                            listOf(
-                                                Color.White.copy(alpha = 0.16f),
-                                                Color.Transparent,
-                                            ),
-                                        endY = size.height * 0.45f,
-                                    ),
-                            )
-                        },
+                    .shadow(
+                        elevation = 10.dp,
+                        shape = selectionShape,
+                        clip = false,
+                        ambientColor = Color.Black.copy(alpha = if (isDark) 0.20f else 0.08f),
+                        spotColor = Color.Black.copy(alpha = if (isDark) 0.26f else 0.12f),
+                    )
+                    .clip(selectionShape)
+                    .background(selectionBrush)
+                    .border(
+                        width = 0.5.dp,
+                        brush = selectionRim,
+                        shape = selectionShape,
                     ),
         )
 

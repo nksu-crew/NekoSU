@@ -38,8 +38,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.delay
 import me.nekosu.aqnya.core.navigation.AppRoute
 import me.nekosu.aqnya.data.prefs.AppPreferences
@@ -181,12 +181,7 @@ fun MainScreen() {
         }
     }
 
-    val backgroundColor = MaterialTheme.colorScheme.surfaceContainer
-    val backdrop =
-        rememberLayerBackdrop {
-            drawRect(backgroundColor)
-            drawContent()
-        }
+    val hazeState = rememberHazeState()
 
     CompositionLocalProvider(LocalBottomBarClearance provides bottomBarClearance) {
         Box(Modifier.fillMaxSize()) {
@@ -202,7 +197,7 @@ fun MainScreen() {
                         Modifier
                             .fillMaxSize()
                             .padding(innerPadding)
-                            .then(if (glassStyle) Modifier.layerBackdrop(backdrop) else Modifier),
+                            .then(if (glassStyle) Modifier.hazeSource(hazeState) else Modifier),
                 ) {
                     NavHost(
                         navController = navController,
@@ -331,7 +326,7 @@ fun MainScreen() {
 
                     NavBarStyle.GLASS -> {
                         GlassBottomNavigationBar(
-                            backdrop = backdrop,
+                            hazeState = hazeState,
                             items = navItems,
                             selectedIndex = selectedIndex,
                             onTabClick = onTabClick,
