@@ -2,10 +2,12 @@
 package me.nekosu.aqnya.ui.navigation
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +24,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -32,7 +35,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -86,13 +92,12 @@ fun GlassBottomNavigationBar(
     val scheme = MaterialTheme.colorScheme
     val isDark = scheme.surfaceContainer.luminance() < 0.5f
     val barShape = remember { RoundedCornerShape(GlassBottomBarHeight / 2) }
-    val selectionShape = remember { RoundedCornerShape(28.dp) }
+    val selectionShape = remember { RoundedCornerShape(26.dp) }
 
     /*
-     * Use Haze's material engine rather than stacking hand-made blur,
-     * gradients and borders.  It supplies the optical refraction, specular
-     * rim, edge shadow and Fresnel response that make the glass read as a
-     * physical surface; the explicit writes only tune it to this theme.
+     * The bar is a single Haze Glass surface.  The selection is a tinted
+     * liquid bubble drawn on top of it rather than a second blur pass: that
+     * keeps the refraction coherent and avoids a "glass inside glass" look.
      */
     val barStyle =
         remember(isDark) {
@@ -100,40 +105,48 @@ fun GlassBottomNavigationBar(
                 shape(barShape)
                 backgroundColor(
                     if (isDark) {
-                        Color(0xFF0B0D11).copy(alpha = 0.34f)
+                        Color(0xFF0B0D11).copy(alpha = 0.28f)
                     } else {
-                        Color.White.copy(alpha = 0.26f)
+                        Color.White.copy(alpha = 0.22f)
                     },
                 )
                 tint(
                     if (isDark) {
-                        Color.White.copy(alpha = 0.03f)
+                        Color.White.copy(alpha = 0.04f)
                     } else {
-                        Color.White.copy(alpha = 0.07f)
+                        Color.White.copy(alpha = 0.08f)
                     },
                 )
-                edgeShadow(Color.Black.copy(alpha = if (isDark) 0.34f else 0.10f))
-                specularIntensity(if (isDark) 0.38f else 0.55f)
+                edgeShadow(Color.Black.copy(alpha = if (isDark) 0.34f else 0.12f))
+                specularIntensity(if (isDark) 0.48f else 0.66f)
                 lightPosition(Alignment.TopCenter)
-                chromaticAberrationStrength(0.05f)
+                chromaticAberrationStrength(0.06f)
             }
         }
 
-    val selectionStyle =
+    val barBorder =
+        remember(isDark) {
+            Brush.verticalGradient(
+                0f to Color.White.copy(alpha = if (isDark) 0.22f else 0.48f),
+                1f to Color.White.copy(alpha = if (isDark) 0.02f else 0.08f),
+            )
+        }
+
+    val selectionFill =
         remember(isDark, scheme.primary, scheme.primaryContainer) {
-            GlassStyle.clear.then {
-                shape(selectionShape)
-                backgroundColor(
-                    scheme.primaryContainer.copy(
-                        alpha = if (isDark) 0.30f else 0.38f,
-                    ),
-                )
-                tint(scheme.primary.copy(alpha = if (isDark) 0.16f else 0.09f))
-                edgeShadow(Color.Black.copy(alpha = if (isDark) 0.28f else 0.08f))
-                specularIntensity(if (isDark) 0.42f else 0.60f)
-                lightPosition(Alignment.TopCenter)
-                chromaticAberrationStrength(0.08f)
-            }
+            Brush.verticalGradient(
+                0f to scheme.primaryContainer.copy(alpha = 0.82f),
+                0.6f to scheme.primaryContainer.copy(alpha = 0.68f),
+                1f to scheme.primary.copy(alpha = if (isDark) 0.30f else 0.18f),
+            )
+        }
+
+    val selectionBorder =
+        remember(isDark) {
+            Brush.verticalGradient(
+                0f to Color.White.copy(alpha = if (isDark) 0.34f else 0.62f),
+                1f to Color.White.copy(alpha = 0.04f),
+            )
         }
 
     BoxWithConstraints(
@@ -153,43 +166,53 @@ fun GlassBottomNavigationBar(
                     style = barStyle,
                     performanceMode = HazePerformanceMode.Default,
                 )
-                .padding(4.dp),
+                .border(1.dp, barBorder, barShape)
+                .padding(6.dp),
     ) {
         val tabWidth = maxWidth / items.size
         val animatedIndex by animateFloatAsState(
             targetValue = selectedIndex.toFloat(),
-            animationSpec = spring(dampingRatio = 0.72f, stiffness = 420f),
+            animationSpec = spring(dampingRatio = 0.66f, stiffness = 500f),
             label = "glassTabIndicator",
         )
         // Stretch the glass while it travels between tabs, then let it settle
         // back into a capsule.  This is the "liquid" part of the selection.
         val stretch =
-            1f + (abs(animatedIndex - selectedIndex) * 0.08f).coerceAtMost(0.14f)
+            1f + (abs(animatedIndex - selectedIndex) * 0.10f).coerceAtMost(0.16f)
 
         Box(
             modifier =
                 Modifier
                     .align(Alignment.CenterStart)
-                    .offset(x = tabWidth * animatedIndex + 4.dp)
-                    .width(tabWidth - 8.dp)
-                    .height(maxHeight - 8.dp)
+                    .offset(x = tabWidth * animatedIndex + 2.dp)
+                    .width(tabWidth - 4.dp)
+                    .height(maxHeight - 4.dp)
                     .graphicsLayer {
                         scaleX = stretch
-                        scaleY = 1f - (stretch - 1f) * 0.35f
+                        scaleY = 1f - (stretch - 1f) * 0.45f
                         transformOrigin = TransformOrigin.Center
                     }
                     .shadow(
-                        elevation = 10.dp,
+                        elevation = 12.dp,
                         shape = selectionShape,
                         clip = false,
-                        ambientColor = Color.Black.copy(alpha = if (isDark) 0.20f else 0.08f),
-                        spotColor = Color.Black.copy(alpha = if (isDark) 0.26f else 0.12f),
+                        ambientColor = Color.Black.copy(alpha = if (isDark) 0.22f else 0.08f),
+                        spotColor = Color.Black.copy(alpha = if (isDark) 0.30f else 0.14f),
                     )
-                    .hazeGlass(
-                        input = HazeInput.Sources(hazeState),
-                        style = selectionStyle,
-                        performanceMode = HazePerformanceMode.Default,
-                    ),
+                    .clip(selectionShape)
+                    .background(selectionFill)
+                    .drawWithContent {
+                        drawContent()
+                        drawRect(
+                            brush =
+                                Brush.verticalGradient(
+                                    0f to Color.White.copy(alpha = if (isDark) 0.12f else 0.28f),
+                                    0.55f to Color.Transparent,
+                                    endY = size.height * 0.55f,
+                                ),
+                        )
+                    }
+                    .border(1.dp, selectionBorder, selectionShape),
         )
 
         Row(
@@ -200,7 +223,7 @@ fun GlassBottomNavigationBar(
                 GlassBottomBarItem(
                     item = item,
                     selected = index == selectedIndex,
-                    selectedColor = scheme.primary,
+                    selectedColor = scheme.onPrimaryContainer,
                     unselectedColor = scheme.onSurfaceVariant.copy(alpha = 0.9f),
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                     onClick = { onTabClick(index) },
@@ -221,7 +244,11 @@ private fun GlassBottomBarItem(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
-    val contentColor = if (selected) selectedColor else unselectedColor
+    val contentColor by animateColorAsState(
+        targetValue = if (selected) selectedColor else unselectedColor,
+        animationSpec = tween(180),
+        label = "glassTabContentColor",
+    )
     val labelWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
 
     val iconScale by animateFloatAsState(
@@ -237,7 +264,8 @@ private fun GlassBottomBarItem(
 
     Column(
         modifier =
-            modifier.clickable(
+            modifier.selectable(
+                selected = selected,
                 interactionSource = interactionSource,
                 indication = null,
                 role = Role.Tab,
