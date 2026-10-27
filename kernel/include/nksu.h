@@ -17,16 +17,11 @@
 #include <uapi/version.h>
 
 /*
- * Component groups.  Late load runs all of them at once; a first-stage
- * (vendor_boot) load stages them: the early group at second_stage, and the
- * feature group once /data and the zygote are available.
+ * Component registration and staged lifecycle live in boot/component.h.  A
+ * late load runs every stage at once; a first-stage (vendor_boot) load arms
+ * the early stage at second_stage, and the feature stage once /data and the
+ * zygote are available.
  */
-int nksu_init_early_components(void);
-void nksu_exit_early_components(void);
-int nksu_init_selinux_components(void);
-void nksu_exit_selinux_components(void);
-int nksu_init_feature_components(void);
-void nksu_exit_feature_components(void);
 
 /*
  * The kernel module's version.  The manager compares it with its own copy so it

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 nksu-y += core.o
-nksu-y += boot/hook_init.o boot/init_rc.o boot/safe_mode.o
+nksu-y += boot/component.o boot/hook_init.o boot/init_rc.o boot/safe_mode.o
 nksu-y += hook/handle.o hook/syscall.o hook/dispatch.o hook/get_arg.o hook/patch.o hook/lsm_hook.o
 nksu-y += manager/manager.o manager/ioctl.o manager/feature.o manager/abx.o manager/daemon.o manager/umount.o
 nksu-y += privilege/privilege.o privilege/profile.o privilege/ns.o
@@ -30,6 +30,7 @@ ifeq ($(CONFIG_LTO_CLANG),y)
     CFLAGS_manager/ioctl.o := -flto=thin
     CFLAGS_manager/feature.o := -flto=thin
     CFLAGS_manager/manager.o := -flto=thin -O3
+    CFLAGS_boot/component.o := -flto=thin
     CFLAGS_boot/init_rc.o := -flto=thin
     CFLAGS_selinux/rule.o := -flto=thin
     CFLAGS_selinux/rule_file.o := -flto=thin

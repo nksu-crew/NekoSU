@@ -14,6 +14,7 @@
 #include "selinux/selinux.h"
 #include "nksu.h"
 #include "boot/init_rc.h"
+#include "component.h"
 #include "klog.h"
 
 enum init_boot_stage {
@@ -62,9 +63,6 @@ static DECLARE_COMPLETION(init_done);
 static bool stage_pending;
 static bool init_exiting;
 static bool zygote_seen;
-static bool early_loaded;
-static bool selinux_loaded;
-static bool features_loaded;
 
 static void notify_stage(void)
 {
@@ -339,14 +337,14 @@ static int init_thread_fn(void *data)
 {
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 17, 0)
 	/*
-	 * No init-stage argv to watch on 4.9: arm the early components and the
+	 * No init-stage argv to watch on 4.9: arm the early stage and the
 	 * SELinux hook right away (the latter waits for the policy itself),
-	 * then only wait for zygote to bring the feature group up.
+	 * then only wait for zygote to bring the feature stage up.
 	 */
-	if (!early_loaded && nksu_init_early_components() == 0)
-		early_loaded = true;
-	if (!selinux_loaded && nksu_init_selinux_components() == 0)
-		selinux_loaded = true;
+	if (nksu_components_init(NKSU_STAGE_EARLY))
+		pr_err("nksu: early component init failed\n");
+	if (nksu_components_init(NKSU_STAGE_SELINUX))
+		pr_err("nksu: SELinux hook init failed\n");
 #endif
 
 	/*
@@ -375,21 +373,13 @@ static int init_thread_fn(void *data)
          * look absent).
          */
 		if (READ_ONCE(boot_stage) == INIT_SECOND_STAGE) {
-			if (!early_loaded) {
-				if (nksu_init_early_components() == 0)
-					early_loaded = true;
-				else
-					pr_err("nksu: early component init failed\n");
-			}
-			if (!selinux_loaded) {
-				if (nksu_init_selinux_components() == 0)
-					selinux_loaded = true;
-				else
-					pr_err("nksu: SELinux hook init failed\n");
-			}
+			if (nksu_components_init(NKSU_STAGE_EARLY))
+				pr_err("nksu: early component init failed\n");
+			if (nksu_components_init(NKSU_STAGE_SELINUX))
+				pr_err("nksu: SELinux hook init failed\n");
 		}
 
-		if (READ_ONCE(zygote_seen) && !features_loaded) {
+		if (READ_ONCE(zygote_seen)) {
 			/*
              * Drop the temporary boot watcher first: the steady-state hooks
              * (and the daemon fd grant) install into the same slots.
@@ -399,12 +389,9 @@ static int init_thread_fn(void *data)
 			/* Let the execve() that announced zygote settle. */
 			msleep(100);
 
-			if (!selinux_loaded && nksu_init_selinux_components() == 0)
-				selinux_loaded = true;
-
-			if (nksu_init_feature_components() == 0)
-				features_loaded = true;
-			else
+			if (nksu_components_init(NKSU_STAGE_SELINUX))
+				pr_err("nksu: SELinux hook init failed\n");
+			if (nksu_components_init(NKSU_STAGE_FEATURE))
 				pr_err("nksu: feature init failed\n");
 
 			/* Zygote was the last boot stage to watch for. */
@@ -482,15 +469,6 @@ err_dispatch:
 void hook_exit(void)
 {
 	stop_init_thread();
-
-	if (READ_ONCE(features_loaded))
-		nksu_exit_feature_components();
-
-	if (READ_ONCE(selinux_loaded))
-		nksu_exit_selinux_components();
-
-	if (READ_ONCE(early_loaded))
-		nksu_exit_early_components();
-
+	nksu_components_exit_from(NKSU_STAGE_EARLY);
 	unload_temp_syscall();
 }
