@@ -698,15 +698,6 @@ fun AppDetailScreen(
                     }
                 }
             }
-
-            item {
-                Text(
-                    text = stringResource(R.string.app_authorization_autosave),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 4.dp),
-                )
-            }
         }
     }
 }
