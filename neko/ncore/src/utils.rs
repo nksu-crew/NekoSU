@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 use anyhow::{Context, Error, Ok, Result, bail};
 use rustix::process::setpgid;
 use std::{

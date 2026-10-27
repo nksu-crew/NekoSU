@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * nksu SELinux entry point — wait for policy, dup it, inject our domain,
  * load rules, go.

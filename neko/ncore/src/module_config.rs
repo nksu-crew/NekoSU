@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 use anyhow::{Context, Result, bail};
 use log::{debug, warn};
 use std::collections::HashMap;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 package me.nekosu.aqnya.data.shell
 
 import kotlinx.coroutines.flow.MutableStateFlow

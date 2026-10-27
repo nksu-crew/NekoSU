@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: GPL-3.0-or-later */
 /*
  * Cleanup / scope-guard helpers for nksu, built on GCC/Clang's
  * __attribute__((__cleanup__(fn))) extension: fn(&var) runs automatically when
@@ -44,7 +44,7 @@
 #endif
 
 #ifndef NKSU_HAVE_LINUX_CLEANUP
-/* Backport of include/linux/cleanup.h (v6.5+, GPL-2.0). */
+/* Backport of include/linux/cleanup.h (v6.5+). */
 
 #ifndef __cleanup
 #define __cleanup(func) __attribute__((__cleanup__(func)))

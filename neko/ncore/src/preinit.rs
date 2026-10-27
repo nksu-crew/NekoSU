@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Preinit: copy each enabled module's `preinit/` dir to the preinit partition (/metadata). On the
 //! next boot the runner embedded in the kernel executes their `preinit.conf` before SELinux policy
 //! is loaded, see kernel/preinit/runner/runner.c.

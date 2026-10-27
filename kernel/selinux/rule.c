@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * SELinux rule manipulation — add allow/deny/xperm rules, type rules, type
  * state and type-attribute associations to the running policy.

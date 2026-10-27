@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 MDIR := $(realpath $(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 IDIR := $(MDIR)/include
 

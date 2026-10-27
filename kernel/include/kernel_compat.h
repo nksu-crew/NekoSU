@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: GPL-3.0-or-later */
 /*
  * Version compatibility shims for older kernels (notably 4.9).
  *

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 @file:OptIn(ExperimentalSerializationApi::class)
 
 package me.nekosu.aqnya.ui.screens

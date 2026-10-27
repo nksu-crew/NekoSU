@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Metamodule management
 //!
 //! This module handles all metamodule-related functionality.

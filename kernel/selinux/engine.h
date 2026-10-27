@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: GPL-3.0-or-later */
 #ifndef _NKSU_SELINUX_ENGINE_H
 #define _NKSU_SELINUX_ENGINE_H
 

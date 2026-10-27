@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #![deny(clippy::all, clippy::pedantic)]
 #![warn(clippy::nursery)]
 #![allow(

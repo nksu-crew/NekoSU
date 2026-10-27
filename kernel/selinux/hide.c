@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * SELinux hiding, ported from KernelSU's feature/selinux_hide.c.
  *

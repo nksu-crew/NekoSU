@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
 #ifndef NKSU_MANAGER_FEATURE_H
 #define NKSU_MANAGER_FEATURE_H
 

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
 /* anonfd.c */
 int fmac_anonfd_init(void);
 void fmac_anonfd_exit(void);

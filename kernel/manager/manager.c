@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "klog.h"
 #include "guards.h"
 #include "manager/manager.h"

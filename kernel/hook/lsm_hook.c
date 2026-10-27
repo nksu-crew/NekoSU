@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * Runtime patching of an existing LSM hook slot, ported from KernelSU's
  * hook/lsm_hook.c (see hook/lsm_hook.h for why).

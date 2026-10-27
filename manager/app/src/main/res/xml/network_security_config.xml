@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <!--
   模块 WebUI 从 https://mui.kernelsu.org 加载，但会 fetch 本机守护进程
   （例如 teesim 的 http://127.0.0.1:8790/...）。Android 9+ 默认禁止明文

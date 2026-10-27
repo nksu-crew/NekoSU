@@ -1,4 +1,5 @@
 #!/system/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
 ############################################
 # NekoSU installer script
 # mostly from module_installer.sh

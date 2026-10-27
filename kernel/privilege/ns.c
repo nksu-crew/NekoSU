@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "klog.h"
 #include <linux/nsproxy.h>
 #include <linux/fs_struct.h>

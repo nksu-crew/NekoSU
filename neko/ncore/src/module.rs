@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #[allow(clippy::wildcard_imports)]
 use crate::utils::*;
 use crate::{

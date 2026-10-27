@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * Policy lifecycle: duplicate the live policy, mutate it, restore it, and
  * apply NekoSU's static rule set.

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: GPL-3.0-or-later */
 /*
  * Profile storage — a single RCU-protected snapshot containing all managed
  * UID profiles.  Entries are sorted by uid for binary search; SELinux domain

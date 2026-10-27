@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Hot install: make a freshly installed module live without a reboot.
 //!
 //! A module opts in from customize.sh with `MODULE_HOT_INSTALL_REQUEST=true` (and optionally

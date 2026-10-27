@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 package me.nekosu.aqnya.data.prefs
 
 import android.content.Context

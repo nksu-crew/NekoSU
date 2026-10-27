@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 package me.nekosu.aqnya.ui.screens
 
 import android.content.Intent
@@ -166,7 +167,7 @@ data class LicenseItem(
 enum class LicenseType {
     Apache2,
     MIT,
-    GPL3,
+    GPL3OrLater,
     BSD3,
 }
 
@@ -174,7 +175,7 @@ private fun getLicense(type: LicenseType): String =
     when (type) {
         LicenseType.Apache2 -> "Apache Software License 2.0"
         LicenseType.MIT -> "MIT License"
-        LicenseType.GPL3 -> "GNU general public license Version 3"
+        LicenseType.GPL3OrLater -> "GNU General Public License v3.0 or later"
         LicenseType.BSD3 -> "BSD 3-Clause \"New\" or \"Revised\" License"
     }
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #![cfg(target_os = "android")]
 //! Rust replacement for the manager's former C++ JNI layer.
 

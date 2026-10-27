@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: GPL-3.0-or-later */
 /*
  * nksu's cleanup classes: the resources the module allocates most often, plus
  * a mutex guard, expressed with the macros from cleanup.h.

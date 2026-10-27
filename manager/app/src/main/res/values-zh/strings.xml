@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <resources>
     <string name="app_name">NekoSU</string>
     <string name="installed">已安装</string>
@@ -83,7 +84,7 @@
     <string name="about_version">版本</string>
     <string name="about_tagline">为 Android 打造的内核级 Root 方案</string>
     <string name="about_project">项目</string>
-    <string name="about_license_short">GPL-3.0 开源许可</string>
+    <string name="about_license_short">GPL-3.0-or-later 开源许可</string>
     <string name="about_repository">仓库</string>
     <string name="about_repository_summary">在 GitHub 仓库查看源码</string>
     <string name="about_open_source">开放源代码许可</string>

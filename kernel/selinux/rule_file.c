@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * Decoder for the sepolicy batch the daemon sends through IOC_SET_SEPOLICY.
  *

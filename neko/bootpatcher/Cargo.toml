@@ -1,7 +1,9 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 [package]
 name = "bootpatcher"
 version = "1.0.3"
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 anyhow.workspace = true

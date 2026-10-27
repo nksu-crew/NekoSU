@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 package me.nekosu.aqnya.data.kernel
 
 import me.nekosu.aqnya.core.Ncore

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * Vendored SELinux policy engine for 6.6+, where the kernel stopped exporting
  * the context/SID/AV helpers the hiding feature answers userspace from.

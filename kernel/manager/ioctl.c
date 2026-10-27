@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "klog.h"
 #include <linux/fs.h>
 #include <linux/mount.h>

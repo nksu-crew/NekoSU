@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 use crate::module::{ScriptWait, handle_updated_modules, prune_modules};
 use crate::{
     assets, defs, ksucalls, metamodule, restorecon,

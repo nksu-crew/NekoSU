@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 use std::process::Command;
 
 fn get_git_version() -> Result<(u32, String), std::io::Error> {

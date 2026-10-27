@@ -2,7 +2,7 @@
 
 NekoSU's userspace runtime.
 
-- `ncore/` — ported from [KernelSU](https://github.com/tiann/KernelSU) (GPL-3.0).
+- `ncore/` — ported from [KernelSU](https://github.com/tiann/KernelSU) (GPL-3.0-or-later).
   The KernelSU kernel interface is replaced by a NekoSU adapter in `ncore/src/ksucalls.rs`.
 - `bootpatcher/` — NekoSU's v3/v4 `vendor_boot` patcher. It installs the LKM in
   `lib/modules/nksu.ko` and updates `modules.load` / `modules.dep`, preserving

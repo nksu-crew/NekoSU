@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 nksu-y += core.o
 nksu-y += boot/hook_init.o boot/init_rc.o boot/safe_mode.o
 nksu-y += hook/handle.o hook/syscall.o hook/dispatch.o hook/get_arg.o hook/patch.o hook/lsm_hook.o
