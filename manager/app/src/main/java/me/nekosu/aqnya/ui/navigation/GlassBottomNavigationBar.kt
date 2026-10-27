@@ -114,6 +114,25 @@ fun GlassBottomNavigationBar(
             }
         }
 
+    val selectionStyle =
+        remember(isDark) {
+            GlassStyle.clear.then {
+                shape(selectionShape)
+                backgroundColor(
+                    if (isDark) {
+                        Color.White.copy(alpha = 0.10f)
+                    } else {
+                        Color.Black.copy(alpha = 0.10f)
+                    },
+                )
+                tint(Color.Transparent)
+                edgeShadow(Color.Black.copy(alpha = if (isDark) 0.22f else 0.10f))
+                specularIntensity(0.90f)
+                lightPosition(Alignment.TopCenter)
+                chromaticAberrationStrength(0f)
+            }
+        }
+
     BoxWithConstraints(
         modifier =
             modifier
