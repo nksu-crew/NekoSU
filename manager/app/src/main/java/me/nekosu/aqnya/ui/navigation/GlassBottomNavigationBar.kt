@@ -5,8 +5,6 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -24,6 +22,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -33,9 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -46,13 +43,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.chrisbanes.haze.ExperimentalHazeApi
 import dev.chrisbanes.haze.HazeInput
 import dev.chrisbanes.haze.HazePerformanceMode
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.blur.HazeBlurStyle
-import dev.chrisbanes.haze.blur.HazeColorEffect
-import dev.chrisbanes.haze.blur.hazeBlur
-import me.nekosu.aqnya.ui.theme.ContinuousCornerShape
+import dev.chrisbanes.haze.glass.GlassStyle
+import dev.chrisbanes.haze.glass.hazeGlass
 import kotlin.math.abs
 
 /** Floating glass bar metrics tuned to the iOS 26 floating tab bar. */
@@ -73,12 +69,12 @@ val StandardBottomBarContentPadding = 96.dp
 val LocalBottomBarClearance = compositionLocalOf { GlassBottomBarContentPadding }
 
 /**
- * Floating liquid-glass bottom bar backed by the `dev.chrisbanes.haze:haze`
- * library.
+ * Floating liquid-glass bottom bar built on Haze's Glass material.
  *
  * The caller must mark the content shown behind the bar with
  * `Modifier.hazeSource(hazeState)`.
  */
+@OptIn(ExperimentalHazeApi::class)
 @Composable
 fun GlassBottomNavigationBar(
     hazeState: HazeState,
@@ -89,60 +85,54 @@ fun GlassBottomNavigationBar(
 ) {
     val scheme = MaterialTheme.colorScheme
     val isDark = scheme.surfaceContainer.luminance() < 0.5f
-    val barShape = remember { ContinuousCornerShape(GlassBottomBarHeight / 2) }
-    val selectionShape = remember { ContinuousCornerShape(28.dp) }
+    val barShape = remember { RoundedCornerShape(GlassBottomBarHeight / 2) }
+    val selectionShape = remember { RoundedCornerShape(28.dp) }
 
-    val barTop =
-        (if (isDark) Color(0xFF16181D) else Color.White).copy(
-            alpha = if (isDark) 0.58f else 0.52f,
-        )
-    val barBottom =
-        (if (isDark) Color(0xFF090A0D) else Color(0xFFF4F4F8)).copy(
-            alpha = if (isDark) 0.68f else 0.42f,
-        )
-    val selectionTop = scheme.primaryContainer.copy(alpha = if (isDark) 0.55f else 0.62f)
-    val selectionBottom = scheme.primaryContainer.copy(alpha = if (isDark) 0.35f else 0.42f)
-    val barFallback = scheme.surfaceContainer
-
-    // The white first stop gives the bar an iOS-style specular highlight.
-    val barBrush =
-        Brush.verticalGradient(
-            0f to Color.White.copy(alpha = if (isDark) 0.08f else 0.22f),
-            0.22f to barTop,
-            1f to barBottom,
-        )
-    val selectionBrush =
-        Brush.verticalGradient(
-            0f to Color.White.copy(alpha = if (isDark) 0.18f else 0.42f),
-            0.20f to selectionTop,
-            1f to selectionBottom,
-        )
-    val barRim =
-        Brush.verticalGradient(
-            colors =
-                listOf(
-                    Color.White.copy(alpha = if (isDark) 0.28f else 0.75f),
-                    Color.White.copy(alpha = 0.04f),
-                ),
-        )
-    val selectionRim =
-        Brush.verticalGradient(
-            colors =
-                listOf(
-                    Color.White.copy(alpha = if (isDark) 0.38f else 0.65f),
-                    Color.White.copy(alpha = 0.04f),
-                ),
-        )
-
+    /*
+     * Use Haze's material engine rather than stacking hand-made blur,
+     * gradients and borders.  It supplies the optical refraction, specular
+     * rim, edge shadow and Fresnel response that make the glass read as a
+     * physical surface; the explicit writes only tune it to this theme.
+     */
     val barStyle =
-        remember(barBrush, barFallback) {
-            HazeBlurStyle {
-                blurRadius(24.dp)
-                // Match the rest of the app: Haze's default noise looks dirty on
-                // light content, and the bottom bar is small enough to keep clear.
-                noiseFactor(0f)
-                colorEffects(listOf(HazeColorEffect.tint(barBrush)))
-                fallbackColorEffect(HazeColorEffect.tint(barFallback))
+        remember(isDark) {
+            GlassStyle.regular.then {
+                shape(barShape)
+                backgroundColor(
+                    if (isDark) {
+                        Color(0xFF0B0D11).copy(alpha = 0.34f)
+                    } else {
+                        Color.White.copy(alpha = 0.26f)
+                    },
+                )
+                tint(
+                    if (isDark) {
+                        Color.White.copy(alpha = 0.03f)
+                    } else {
+                        Color.White.copy(alpha = 0.07f)
+                    },
+                )
+                edgeShadow(Color.Black.copy(alpha = if (isDark) 0.34f else 0.10f))
+                specularIntensity(if (isDark) 0.38f else 0.55f)
+                lightPosition(Alignment.TopCenter)
+                chromaticAberrationStrength(0.05f)
+            }
+        }
+
+    val selectionStyle =
+        remember(isDark, scheme.primary, scheme.primaryContainer) {
+            GlassStyle.clear.then {
+                shape(selectionShape)
+                backgroundColor(
+                    scheme.primaryContainer.copy(
+                        alpha = if (isDark) 0.30f else 0.38f,
+                    ),
+                )
+                tint(scheme.primary.copy(alpha = if (isDark) 0.16f else 0.09f))
+                edgeShadow(Color.Black.copy(alpha = if (isDark) 0.28f else 0.08f))
+                specularIntensity(if (isDark) 0.42f else 0.60f)
+                lightPosition(Alignment.TopCenter)
+                chromaticAberrationStrength(0.08f)
             }
         }
 
@@ -158,16 +148,10 @@ fun GlassBottomNavigationBar(
                     ambientColor = Color.Black.copy(alpha = if (isDark) 0.30f else 0.12f),
                     spotColor = Color.Black.copy(alpha = if (isDark) 0.38f else 0.18f),
                 )
-                .clip(barShape)
-                .hazeBlur(
+                .hazeGlass(
                     input = HazeInput.Sources(hazeState),
                     style = barStyle,
                     performanceMode = HazePerformanceMode.Default,
-                )
-                .border(
-                    width = 0.7.dp,
-                    brush = barRim,
-                    shape = barShape,
                 )
                 .padding(4.dp),
     ) {
@@ -201,12 +185,10 @@ fun GlassBottomNavigationBar(
                         ambientColor = Color.Black.copy(alpha = if (isDark) 0.20f else 0.08f),
                         spotColor = Color.Black.copy(alpha = if (isDark) 0.26f else 0.12f),
                     )
-                    .clip(selectionShape)
-                    .background(selectionBrush)
-                    .border(
-                        width = 0.5.dp,
-                        brush = selectionRim,
-                        shape = selectionShape,
+                    .hazeGlass(
+                        input = HazeInput.Sources(hazeState),
+                        style = selectionStyle,
+                        performanceMode = HazePerformanceMode.Default,
                     ),
         )
 
