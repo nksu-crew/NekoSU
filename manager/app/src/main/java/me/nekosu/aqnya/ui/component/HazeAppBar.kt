@@ -51,10 +51,10 @@ fun rememberHazeAppBarStyle(blurEnabled: Boolean = true): HazeBlurStyle {
 
 /** 同步读取当前值作为初值，避免进入页面时先闪一帧无模糊状态。 */
 @Composable
-fun rememberHazeAppBarEnabled(): Boolean {
+fun rememberBlurEnabled(): Boolean {
     val context = LocalContext.current
-    val flow = remember(context) { AppPreferences.hazeAppBarFlow(context) }
-    val initial = remember(context) { AppPreferences.isHazeAppBarEnabled(context) }
+    val flow = remember(context) { AppPreferences.blurFlow(context) }
+    val initial = remember(context) { AppPreferences.isBlurEnabled(context) }
     return flow.collectAsState(initial = initial).value
 }
 
@@ -72,16 +72,16 @@ fun HazeTopAppBar(
     navigationIcon: @Composable () -> Unit = {},
     actions: @Composable RowScope.() -> Unit = {},
     scrollBehavior: TopAppBarScrollBehavior? = null,
-    hazeEnabled: Boolean? = null,
+    blurEnabled: Boolean? = null,
 ) {
-    val blurEnabled = hazeEnabled ?: rememberHazeAppBarEnabled()
-    val style = rememberHazeAppBarStyle(blurEnabled)
+    val enabled = blurEnabled ?: rememberBlurEnabled()
+    val style = rememberHazeAppBarStyle(enabled)
     TopAppBar(
         title = { Text(title) },
         modifier =
             modifier
                 .background(
-                    if (blurEnabled) {
+                    if (enabled) {
                         Color.Transparent
                     } else {
                         MaterialTheme.colorScheme.surfaceContainer

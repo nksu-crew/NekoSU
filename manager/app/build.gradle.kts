@@ -220,6 +220,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.protobuf)
     implementation(libs.haze)
     implementation(libs.haze.blur)
+    implementation(libs.backdrop)
     implementation(libs.androidx.graphics.shapes)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

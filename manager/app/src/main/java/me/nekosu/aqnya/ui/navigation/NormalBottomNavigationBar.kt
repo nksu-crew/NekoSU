@@ -1,11 +1,13 @@
 package me.nekosu.aqnya.ui.navigation
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.material3.NavigationBar as MaterialNavigationBar
 import androidx.compose.material3.NavigationBarItem as MaterialNavigationBarItem
@@ -15,8 +17,9 @@ fun NormalBottomNavigationBar(
     items: List<BottomNavItem>,
     selectedIndex: Int,
     onTabClick: (Int) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Column {
+    Column(modifier = modifier.fillMaxWidth()) {
         MaterialNavigationBar(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
         ) {

@@ -9,7 +9,7 @@ captures
 .cxx
 release.keystore
 ktlint
-app/src/main/jniLibs/
+manager/app/src/main/jniLibs/
 .kotlin/
 .ccache/
 manager/app/src/main/assets/ko/

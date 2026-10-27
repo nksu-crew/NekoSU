@@ -7,9 +7,9 @@
  *   - the single multiplexed ioctl (IOC_CMD) and its flag set,
  *   - the on-wire payload layout of every flag.
  *
- * It is included by the kernel module (kernel/manager/ioctl.h), the manager
- * app's JNI layer (manager/app/src/main/cpp/libjni) and the ncore userspace
- * runtime (neko/ncore).  Keep it portable between kernel and userspace:
+ * It is included by the kernel module (kernel/manager/ioctl.h) and the ncore
+ * userspace runtime (neko/ncore); the Compose manager reaches the same ABI
+ * through the Rust JNI bridge (neko/jni).  Keep it portable between kernel and userspace:
  * only <linux/ioctl.h> and <linux/types.h> may be used.
  */
 #ifndef NKSU_UAPI_IOCTL_H

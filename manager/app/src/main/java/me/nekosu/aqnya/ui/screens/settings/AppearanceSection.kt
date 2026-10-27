@@ -9,6 +9,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.ViewAgenda
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -28,6 +29,7 @@ import me.nekosu.aqnya.ui.component.AppListItem
 import me.nekosu.aqnya.ui.component.AppSwitch
 import me.nekosu.aqnya.ui.component.CardGroup
 import me.nekosu.aqnya.ui.component.ListRow
+import me.nekosu.aqnya.ui.screens.settings.enums.NavBarStyle
 import me.nekosu.aqnya.ui.screens.settings.enums.ThemeColor
 import me.nekosu.aqnya.ui.screens.settings.enums.ThemeMode
 import me.nekosu.aqnya.ui.theme.ContinuousCornerShape
@@ -37,14 +39,17 @@ fun AppearanceSection(
     currentThemeMode: ThemeMode,
     currentThemeColor: ThemeColor,
     amoledEnabled: Boolean,
-    hazeEnabled: Boolean,
+    blurEnabled: Boolean,
+    currentNavBarStyle: NavBarStyle,
     onThemeChange: (ThemeMode) -> Unit,
     onThemeColorChange: (ThemeColor) -> Unit,
     onAmoledChange: (Boolean) -> Unit,
-    onHazeChange: (Boolean) -> Unit,
+    onBlurChange: (Boolean) -> Unit,
+    onNavBarStyleChange: (NavBarStyle) -> Unit,
 ) {
     var themeMenuExpanded by remember { mutableStateOf(false) }
     var themeColorMenuExpanded by remember { mutableStateOf(false) }
+    var navBarStyleMenuExpanded by remember { mutableStateOf(false) }
 
     CardGroup {
         item {
@@ -129,6 +134,51 @@ fun AppearanceSection(
         }
 
         item {
+            AppListItem(
+                title = stringResource(R.string.settings_nav_bar_style),
+                summary = stringResource(currentNavBarStyle.titleRes),
+                leading = { Icon(Icons.Rounded.ViewAgenda, contentDescription = null) },
+                onClick = { navBarStyleMenuExpanded = true },
+                trailing = {
+                    Box {
+                        DropdownMenu(
+                            expanded = navBarStyleMenuExpanded,
+                            onDismissRequest = { navBarStyleMenuExpanded = false },
+                            shape = ContinuousCornerShape(16.dp),
+                        ) {
+                            NavBarStyle.entries.forEach { style ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            stringResource(style.titleRes),
+                                            fontWeight =
+                                                if (currentNavBarStyle ==
+                                                    style
+                                                ) {
+                                                    FontWeight.SemiBold
+                                                } else {
+                                                    FontWeight.Normal
+                                                },
+                                        )
+                                    },
+                                    onClick = {
+                                        navBarStyleMenuExpanded = false
+                                        onNavBarStyleChange(style)
+                                    },
+                                    trailingIcon = {
+                                        if (currentNavBarStyle == style) {
+                                            Icon(Icons.Rounded.Check, null, Modifier.size(20.dp))
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
+                },
+            )
+        }
+
+        item {
             ListRow(
                 modifier = Modifier.toggleable(value = amoledEnabled, role = Role.Switch, onValueChange = onAmoledChange),
                 icon = { Icon(Icons.Rounded.PhoneAndroid, contentDescription = null) },
@@ -144,15 +194,15 @@ fun AppearanceSection(
 
         item {
             ListRow(
-                modifier = Modifier.toggleable(value = hazeEnabled, role = Role.Switch, onValueChange = onHazeChange),
+                modifier = Modifier.toggleable(value = blurEnabled, role = Role.Switch, onValueChange = onBlurChange),
                 icon = { Icon(Icons.Rounded.BlurOn, contentDescription = null) },
                 headline = {
                     Text(
-                        stringResource(R.string.settings_haze_app_bar),
+                        stringResource(R.string.settings_blur),
                     )
                 },
-                supporting = { Text(stringResource(R.string.settings_haze_app_bar_summary)) },
-                trailing = { AppSwitch(checked = hazeEnabled, onCheckedChange = onHazeChange) },
+                supporting = { Text(stringResource(R.string.settings_blur_summary)) },
+                trailing = { AppSwitch(checked = blurEnabled, onCheckedChange = onBlurChange) },
             )
         }
     }

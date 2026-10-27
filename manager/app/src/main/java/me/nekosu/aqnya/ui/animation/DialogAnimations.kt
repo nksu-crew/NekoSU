@@ -3,39 +3,30 @@ package me.nekosu.aqnya.ui.animation
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 
 /**
- * 对话框动画配置
+ * Dialog animation configuration, matching the Flutter manager's dialogs.
+ *
+ * Flutter's `showDialog` (DialogRoute) cross-fades the dialog over 150 ms with
+ * `Curves.easeOut` on both enter and exit; there is no scale animation.
  */
 object DialogAnimations {
-    /**
-     * 创建对话框进入动画
-     */
-    @Composable
-    fun createEnterAnimation(): EnterTransition =
-        fadeIn(animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec()) +
-            scaleIn(
-                initialScale = 0.8f,
-                animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
-            )
+    private const val DurationMillis = 150
 
-    /**
-     * 创建对话框退出动画
-     */
-    @Composable
+    /** Flutter's `Curves.easeOut`: Cubic(0.0, 0.0, 0.58, 1.0). */
+    private val easing = CubicBezierEasing(0f, 0f, 0.58f, 1f)
+
+    fun createEnterAnimation(): EnterTransition =
+        fadeIn(animationSpec = tween(DurationMillis, easing = easing))
+
     fun createExitAnimation(): ExitTransition =
-        fadeOut(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()) +
-            scaleOut(
-                targetScale = 0.8f,
-                animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
-            )
+        fadeOut(animationSpec = tween(DurationMillis, easing = easing))
 }
 
 /**

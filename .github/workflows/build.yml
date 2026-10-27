@@ -24,18 +24,32 @@ on:
     paths:
       - ".github/workflows/build.yml"
       - ".github/workflows/ko.yml"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+      - "gradle/**"
+      - "gradlew"
+      - "gradlew.bat"
+      - "debug.keystore"
       - "kernel/**"
       - "uapi/**"
-      - "manager/app/**"
+      - "manager/**"
       - "neko/**"
   pull_request:
     branches: [ "main" ]
     paths:
       - ".github/workflows/build.yml"
       - ".github/workflows/ko.yml"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+      - "gradle/**"
+      - "gradlew"
+      - "gradlew.bat"
+      - "debug.keystore"
       - "kernel/**"
       - "uapi/**"
-      - "manager/app/**"
+      - "manager/**"
       - "neko/**"
 
 concurrency:
@@ -47,9 +61,9 @@ permissions:
   actions: read
 
 jobs:
-  # The KO matrix runs in parallel, one Docker image per KMI.  Its modules are
-  # downloaded into the manager's assets below, so Gradle still packages the
-  # files produced by this run.
+  # The KO matrix runs in parallel, one Docker image per KMI. Its modules are
+  # downloaded into the Compose manager's assets below, so the APK always
+  # packages the files produced by this run.
   ko:
     uses: ./.github/workflows/ko.yml
     with:
@@ -97,6 +111,14 @@ jobs:
         java-version: '25'
         distribution: 'temurin'
         cache: gradle
+        cache-dependency-path: |
+          build.gradle.kts
+          settings.gradle.kts
+          gradle.properties
+          gradle/wrapper/gradle-wrapper.properties
+          gradle/libs.versions.toml
+          manager/app/build.gradle.kts
+          neko/build.gradle.kts
 
     - name: Cache Android NDK
       id: ndk-cache
@@ -118,7 +140,7 @@ jobs:
 
     # ncore and bootpatcher live under neko/ and are compiled by Gradle through
     # cargo-ndk, so the APK always carries a userspace runtime built from the
-    # same checkout.
+    # same checkout.  The manager reaches them through the libjni bridge.
     - name: Set up Rust
       run: |
         rustup toolchain install stable --profile minimal
@@ -131,7 +153,7 @@ jobs:
     - name: Cache Rust build artifacts
       uses: Swatinem/rust-cache@v2
       with:
-        workspaces: neko -> build/rust/target
+        workspaces: neko -> ../build/neko/rust/target
 
     - name: List packaged assets
       run: |
@@ -190,7 +212,7 @@ jobs:
         echo "version channel: $channel"
         echo "version name: ${version_name:-generated}"
 
-    - name: Build with Gradle
+    - name: Build manager APK
       env:
         KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         KEY_ALIAS: ${{ secrets.KEY_ALIAS }}

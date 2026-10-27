@@ -50,6 +50,7 @@ import me.nekosu.aqnya.ui.component.KeyEventBlocker
 import me.nekosu.aqnya.ui.component.LogDoneFab
 import me.nekosu.aqnya.ui.component.LogPane
 import me.nekosu.aqnya.ui.component.LogTopBar
+import me.nekosu.aqnya.ui.navigation.LocalBottomBarClearance
 import me.nekosu.aqnya.ui.webui.WebUIActivity
 import me.nekosu.aqnya.util.LogUtils
 
@@ -210,7 +211,7 @@ fun ModuleScreen() {
                                 // 用顶栏高度做内容内边距，列表往上滚时经过顶栏下方。
                                 top = innerPadding.calculateTopPadding() + 12.dp,
                                 // 底部留出空间，避免最后一张卡被安装 FAB / 悬浮导航栏挡住。
-                                bottom = 88.dp,
+                                bottom = LocalBottomBarClearance.current,
                             ),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {

@@ -12,7 +12,7 @@
  * mirroring KernelSU's ksu_register_feature_handler.
  *
  * Feature ids are a wire contract shared with the manager; keep them in sync
- * with manager/app/src/main/cpp/libjni/ioctl.h and ncore.kt.
+ * with the kernel UAPI header and the manager JNI bridge in neko/jni.
  */
 #define NKSU_FEATURE_SELINUX_HIDE 1
 #define NKSU_FEATURE_UMOUNT 2

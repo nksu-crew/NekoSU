@@ -19,9 +19,13 @@ object AppPreferences {
 
     fun amoledFlow(context: Context): Flow<Boolean> = context.prefsFlow { getBoolean("amoled_mode", false) }
 
-    fun isHazeAppBarEnabled(context: Context): Boolean = getPrefs(context).getBoolean("haze_app_bar", false)
+    fun isBlurEnabled(context: Context): Boolean = getPrefs(context).getBoolean("blur", false)
 
-    fun hazeAppBarFlow(context: Context): Flow<Boolean> = context.prefsFlow { getBoolean("haze_app_bar", false) }
+    fun blurFlow(context: Context): Flow<Boolean> = context.prefsFlow { getBoolean("blur", false) }
+
+    fun navBarStyle(context: Context): Int = getPrefs(context).getInt("nav_bar_style", 0)
+
+    fun navBarStyleFlow(context: Context): Flow<Int> = context.prefsFlow { getInt("nav_bar_style", 0) }
 
     fun setShowRules(
         context: Context,
@@ -51,11 +55,18 @@ object AppPreferences {
         getPrefs(context).edit().putBoolean("amoled_mode", value).apply()
     }
 
-    fun setHazeAppBar(
+    fun setBlur(
         context: Context,
         value: Boolean,
     ) {
-        getPrefs(context).edit().putBoolean("haze_app_bar", value).apply()
+        getPrefs(context).edit().putBoolean("blur", value).apply()
+    }
+
+    fun setNavBarStyle(
+        context: Context,
+        value: Int,
+    ) {
+        getPrefs(context).edit().putInt("nav_bar_style", value).apply()
     }
 
     private fun <T> Context.prefsFlow(getValue: SharedPreferences.() -> T): Flow<T> =

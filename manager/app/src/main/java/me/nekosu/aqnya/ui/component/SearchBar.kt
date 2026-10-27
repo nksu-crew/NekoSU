@@ -67,7 +67,7 @@ fun SearchAppBar(
     trailingActions: @Composable (() -> Unit)? = null,
     startInSearchMode: Boolean = false,
 ) {
-    val hazeEnabled = rememberHazeAppBarEnabled()
+    val blurEnabled = rememberBlurEnabled()
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     val motionScheme = MaterialTheme.motionScheme
@@ -154,14 +154,14 @@ fun SearchAppBar(
         modifier =
             Modifier
                 .background(
-                    if (hazeEnabled) {
+                    if (blurEnabled) {
                         Color.Transparent
                     } else {
                         MaterialTheme.colorScheme.surfaceContainer
                     },
                 ).hazeBlur(
                     input = HazeInput.Sources(hazeState),
-                    style = rememberHazeAppBarStyle(hazeEnabled),
+                    style = rememberHazeAppBarStyle(blurEnabled),
                     performanceMode = HazePerformanceMode.Default,
                 ),
         colors =

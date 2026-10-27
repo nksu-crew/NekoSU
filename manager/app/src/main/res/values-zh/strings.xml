@@ -65,8 +65,11 @@
     <string name="settings_theme_color">主题色</string>
     <string name="settings_amoled_black">AMOLED 纯黑</string>
     <string name="settings_amoled_black_summary">深色模式下使用纯黑色背景</string>
-    <string name="settings_haze_app_bar">模糊顶栏</string>
-    <string name="settings_haze_app_bar_summary">为滚动内容后的顶栏启用背景模糊</string>
+    <string name="settings_blur">模糊</string>
+    <string name="settings_blur_summary">为滚动内容后的顶栏启用背景模糊</string>
+    <string name="settings_nav_bar_style">底栏样式</string>
+    <string name="nav_bar_style_standard">标准</string>
+    <string name="nav_bar_style_glass">液态玻璃</string>
 
     <!-- 设置 — 开发者 -->
     <string name="settings_debug">开发者调试</string>

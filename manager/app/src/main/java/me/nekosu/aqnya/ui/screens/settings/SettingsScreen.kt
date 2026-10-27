@@ -38,6 +38,8 @@ import me.nekosu.aqnya.R
 import me.nekosu.aqnya.core.navigation.AppRoute
 import me.nekosu.aqnya.data.prefs.AppPreferences
 import me.nekosu.aqnya.ui.component.HazeTopAppBar
+import me.nekosu.aqnya.ui.navigation.LocalBottomBarClearance
+import me.nekosu.aqnya.ui.screens.settings.enums.NavBarStyle
 import me.nekosu.aqnya.ui.screens.settings.enums.ThemeColor
 import me.nekosu.aqnya.ui.screens.settings.enums.ThemeMode
 import me.nekosu.aqnya.util.LocaleHelper
@@ -57,12 +59,17 @@ fun SettingsScreen(navController: NavController) {
     val currentThemeColor = ThemeColor.fromValue(themeColorValue)
 
     val amoledEnabled by AppPreferences.amoledFlow(mContext).collectAsState(initial = false)
-    var hazeEnabled by remember(mContext) {
-        mutableStateOf(AppPreferences.isHazeAppBarEnabled(mContext))
+    var blurEnabled by remember(mContext) {
+        mutableStateOf(AppPreferences.isBlurEnabled(mContext))
     }
     LaunchedEffect(mContext) {
-        AppPreferences.hazeAppBarFlow(mContext).collect { hazeEnabled = it }
+        AppPreferences.blurFlow(mContext).collect { blurEnabled = it }
     }
+
+    val navBarStyleValue by AppPreferences.navBarStyleFlow(mContext).collectAsState(
+        initial = AppPreferences.navBarStyle(mContext),
+    )
+    val currentNavBarStyle = NavBarStyle.fromValue(navBarStyleValue)
 
     val currentLang =
         LocaleHelper
@@ -83,7 +90,7 @@ fun SettingsScreen(navController: NavController) {
                 state = hazeState,
                 title = stringResource(R.string.settings_title),
                 scrollBehavior = scrollBehavior,
-                hazeEnabled = hazeEnabled,
+                blurEnabled = blurEnabled,
             )
         },
         contentWindowInsets =
@@ -99,7 +106,7 @@ fun SettingsScreen(navController: NavController) {
                     .verticalScroll(rememberScrollState())
                     .padding(innerPadding)
                     .padding(top = 16.dp)
-                    .padding(bottom = 96.dp)
+                    .padding(bottom = LocalBottomBarClearance.current)
                     .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
@@ -115,7 +122,8 @@ fun SettingsScreen(navController: NavController) {
                 currentThemeMode = currentThemeMode,
                 currentThemeColor = currentThemeColor,
                 amoledEnabled = amoledEnabled,
-                hazeEnabled = hazeEnabled,
+                blurEnabled = blurEnabled,
+                currentNavBarStyle = currentNavBarStyle,
                 onThemeChange = { mode ->
                     scope.launch { AppPreferences.setThemeMode(mContext, mode.value) }
                 },
@@ -125,9 +133,12 @@ fun SettingsScreen(navController: NavController) {
                 onAmoledChange = { enabled ->
                     scope.launch { AppPreferences.setAmoled(mContext, enabled) }
                 },
-                onHazeChange = { enabled ->
-                    hazeEnabled = enabled
-                    AppPreferences.setHazeAppBar(mContext, enabled)
+                onBlurChange = { enabled ->
+                    blurEnabled = enabled
+                    AppPreferences.setBlur(mContext, enabled)
+                },
+                onNavBarStyleChange = { style ->
+                    scope.launch { AppPreferences.setNavBarStyle(mContext, style.value) }
                 },
             )
 

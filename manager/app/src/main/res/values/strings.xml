@@ -67,8 +67,11 @@
     <string name="settings_theme_color">Theme Color</string>
     <string name="settings_amoled_black">AMOLED Pure Black</string>
     <string name="settings_amoled_black_summary">Use pure black background in dark mode</string>
-    <string name="settings_haze_app_bar">Blur AppBar</string>
-    <string name="settings_haze_app_bar_summary">Blur the top app bar behind scrolling content</string>
+    <string name="settings_blur">Blur</string>
+    <string name="settings_blur_summary">Blur the top app bar behind scrolling content</string>
+    <string name="settings_nav_bar_style">Navigation bar style</string>
+    <string name="nav_bar_style_standard">Standard</string>
+    <string name="nav_bar_style_glass">Liquid glass</string>
 
     <!-- Setting — debug -->
     <string name="settings_debug">Debug Settings</string>
