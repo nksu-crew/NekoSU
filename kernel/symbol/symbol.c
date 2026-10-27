@@ -35,16 +35,6 @@
 #include "guards.h"
 #include "symbol/symbol.h"
 
-/*
- * kallsyms_lookup_name() is reached through a function pointer recovered at
- * runtime. The CFI type hash the module emits for that call may differ from
- * the one vmlinux recorded, so opt this file out of CFI instrumentation like
- * the other users of resolved symbols do.
- */
-#if defined(__clang__)
-#pragma clang attribute push(__attribute__((no_sanitize("cfi"))), apply_to = function)
-#endif
-
 typedef unsigned long (*kallsyms_lookup_name_t)(const char *name);
 
 /*
@@ -231,8 +221,4 @@ void nksu_ksym_dump(void)
 void nksu_ksym_dump(void)
 {
 }
-#endif
-
-#if defined(__clang__)
-#pragma clang attribute pop
 #endif

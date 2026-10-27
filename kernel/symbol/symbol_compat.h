@@ -8,13 +8,14 @@
  * Problem: these symbols are no longer exported on GKI/KMI kernels. A direct
  * reference makes the module fail to load with "Unknown symbol ... (err -2)".
  *
- * Approach: for each symbol declare a pointer of the same type, fill it at
- * load time via nksu_ksym_lookup(), then use macros to redirect the original
- * name to the pointer. This removes the relocation so unexported symbols can
- * still be called.
+ * Approach: for each function symbol declare a pointer of the same type, fill
+ * it at load time via nksu_ksym_lookup(), and redirect the original name to a
+ * __nocfi wrapper. Data symbols redirect to the pointer directly. This removes
+ * the relocation so unexported symbols can still be called.
  *
- *   extern typeof(alloc_uid) *nksu_alloc_uid;   // function pointer
- *   #define alloc_uid nksu_alloc_uid            // redirect call sites
+ *   extern typeof(alloc_uid) *nksu_alloc_uid;      // function pointer
+ *   NKSU_SYMBOL_FN(...);                           // -> nksu_alloc_uid_fn
+ *   #define alloc_uid nksu_alloc_uid_fn            // redirect call sites
  *
  *   extern typeof(selinux_state) *nksu_selinux_state; // data pointer
  *   #define selinux_state (*nksu_selinux_state)      // dereference
@@ -62,6 +63,29 @@
 #include "avc_ss.h"
 #include "xfrm.h"
 #include "objsec.h"
+
+/*
+ * A resolved function symbol must be called from a __nocfi wrapper: the
+ * indirect call is CFI-checked in the caller, and the module's function type
+ * hash need not match the running kernel's.  Keeping the indirect call in one
+ * wrapper also means individual .c files no longer need a file-wide
+ * no_sanitize("cfi") pragma.
+ *
+ * The wrapper is named nksu_<name>_fn; the macro-redirection block below maps
+ * the original name to it.  _params declares the wrapper's parameters and
+ * _args forwards them to the resolved pointer.
+ */
+#define NKSU_SYMBOL_FN(_ret, _name, _params, _args)                  \
+	static inline __nocfi _ret nksu_##_name##_fn _params         \
+	{                                                             \
+		return nksu_##_name _args;                            \
+	}
+
+#define NKSU_SYMBOL_VOID_FN(_name, _params, _args)                   \
+	static inline __nocfi void nksu_##_name##_fn _params         \
+	{                                                             \
+		nksu_##_name _args;                                   \
+	}
 
 /* function symbols (pointers) */
 extern typeof(alloc_uid) *nksu_alloc_uid;
@@ -239,7 +263,7 @@ extern typeof(fsnotify_add_mark) *nksu_fsnotify_add_mark;
  * fsnotify_add_mark() signature instead (see manager/manager.c).
  */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
-int nksu_fsnotify_add_inode_mark(struct fsnotify_mark *mark, struct inode *inode, int add_flags);
+int __nocfi nksu_fsnotify_add_inode_mark(struct fsnotify_mark *mark, struct inode *inode, int add_flags);
 #endif
 
 /*
@@ -275,16 +299,57 @@ extern typeof(probe_kernel_write) *nksu_probe_kernel_write;
 #define copy_to_kernel_nofault(dst, src, size) nksu_probe_kernel_write((dst), (src), (size))
 #endif
 /*
+ * __nocfi wrappers for the function symbols that used to force a file-wide
+ * CFI opt-out at their call sites.  The wrappers are only needed by the
+ * modules that call the redirected names, so skip them when the definition
+ * file includes this header with NKSU_SYMBOL_COMPAT_NO_MACROS.
+ */
+#ifndef NKSU_SYMBOL_COMPAT_NO_MACROS
+NKSU_SYMBOL_FN(struct user_struct *, alloc_uid, (kuid_t kuid), (kuid))
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0)
+NKSU_SYMBOL_FN(int, set_cred_ucounts, (struct cred *new), (new))
+#endif
+NKSU_SYMBOL_VOID_FN(switch_task_namespaces, (struct task_struct *p, struct nsproxy *new), (p, new))
+NKSU_SYMBOL_FN(struct file *, filp_open, (const char *filename, int flags, umode_t mode),
+	       (filename, flags, mode))
+NKSU_SYMBOL_FN(struct task_struct *, find_task_by_vpid, (pid_t nr), (nr))
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
+NKSU_SYMBOL_FN(int, task_work_add,
+	       (struct task_struct *task, struct callback_head *work,
+		enum task_work_notify_mode notify),
+	       (task, work, notify))
+#else
+NKSU_SYMBOL_FN(int, task_work_add,
+	       (struct task_struct *task, struct callback_head *work, bool notify),
+	       (task, work, notify))
+#endif
+NKSU_SYMBOL_VOID_FN(change_pid, (struct task_struct *task, enum pid_type type, struct pid *pid),
+		    (task, type, pid))
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
+NKSU_SYMBOL_FN(int, path_umount, (struct path *path, int flags), (path, flags))
+#else
+NKSU_SYMBOL_FN(long, sys_umount, (char __user *name, int flags), (name, flags))
+#endif
+NKSU_SYMBOL_VOID_FN(free_uid, (struct user_struct *up), (up))
+NKSU_SYMBOL_FN(int, commit_creds, (struct cred *new), (new))
+NKSU_SYMBOL_VOID_FN(abort_creds, (struct cred *new), (new))
+NKSU_SYMBOL_FN(struct group_info *, groups_alloc, (int gidsetsize), (gidsetsize))
+NKSU_SYMBOL_VOID_FN(set_groups, (struct cred *new, struct group_info *group_info),
+		    (new, group_info))
+NKSU_SYMBOL_FN(int, unshare_fs_struct, (void), ())
+#endif
+
+/*
  * Macro redirection. symbol_compat.c needs the real types to define the
  * variables and cast, so it defines NKSU_SYMBOL_COMPAT_NO_MACROS before
  * including this header, skipping this block.
  */
 #ifndef NKSU_SYMBOL_COMPAT_NO_MACROS
-#define alloc_uid nksu_alloc_uid
+#define alloc_uid nksu_alloc_uid_fn
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0)
-#define set_cred_ucounts nksu_set_cred_ucounts
+#define set_cred_ucounts nksu_set_cred_ucounts_fn
 #endif
-#define switch_task_namespaces nksu_switch_task_namespaces
+#define switch_task_namespaces nksu_switch_task_namespaces_fn
 #define avc_ss_reset nksu_avc_ss_reset
 #define selnl_notify_policyload nksu_selnl_notify_policyload
 #define selinux_status_update_policyload nksu_selinux_status_update_policyload
@@ -318,25 +383,25 @@ extern typeof(probe_kernel_write) *nksu_probe_kernel_write;
 #define vfs_unlink nksu_vfs_unlink
 #define lookup_one_len nksu_lookup_one_len
 #define __vfs_setxattr_noperm nksu___vfs_setxattr_noperm
-#define task_work_add nksu_task_work_add
-#define change_pid nksu_change_pid
+#define task_work_add nksu_task_work_add_fn
+#define change_pid nksu_change_pid_fn
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
-#define path_umount nksu_path_umount
+#define path_umount nksu_path_umount_fn
 #else
-#define sys_umount nksu_sys_umount
+#define sys_umount nksu_sys_umount_fn
 #endif
-#define filp_open nksu_filp_open
+#define filp_open nksu_filp_open_fn
 #define kernel_read nksu_kernel_read
 #define kernel_write nksu_kernel_write
-#define find_task_by_vpid nksu_find_task_by_vpid
-#define free_uid nksu_free_uid
+#define find_task_by_vpid nksu_find_task_by_vpid_fn
+#define free_uid nksu_free_uid_fn
 #define access_process_vm nksu_access_process_vm
 #define tasklist_lock (*nksu_tasklist_lock)
-#define commit_creds nksu_commit_creds
-#define abort_creds nksu_abort_creds
-#define groups_alloc nksu_groups_alloc
-#define set_groups nksu_set_groups
-#define unshare_fs_struct nksu_unshare_fs_struct
+#define commit_creds nksu_commit_creds_fn
+#define abort_creds nksu_abort_creds_fn
+#define groups_alloc nksu_groups_alloc_fn
+#define set_groups nksu_set_groups_fn
+#define unshare_fs_struct nksu_unshare_fs_struct_fn
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0)
 #define wait_for_initramfs nksu_wait_for_initramfs
 #endif

@@ -13,20 +13,6 @@
 #include <fmac.h>
 #include "symbol/symbol_compat.h"
 
-/*
- * The resolved pointers are invoked through indirect calls here too (the
- * fsnotify wrapper), so opt this file out of CFI as every other user of the
- * layer does.  Without it the kernel's CFI check rejects the indirect call to
- * fsnotify_add_mark() (whose type hash does not match the module's) and panics:
- *
- *     Kernel panic - not syncing: CFI failure (target: fsnotify_add_mark+0x0/0x84)
- *      nksu_fsnotify_add_inode_mark+0x50/0x88 [nksu]
- *      appscan_init+0x128/0x1a8 [nksu]
- */
-#if defined(__clang__)
-#pragma clang attribute push(__attribute__((no_sanitize("cfi"))), apply_to = function)
-#endif
-
 /* definitions */
 typeof(alloc_uid) *nksu_alloc_uid;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0)
@@ -149,7 +135,7 @@ typeof(probe_kernel_write) *nksu_probe_kernel_write;
  *   >= 6.10 fsnotify_add_mark(mark, inode, type, flags)
  */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
-int nksu_fsnotify_add_inode_mark(struct fsnotify_mark *mark, struct inode *inode, int add_flags)
+int __nocfi nksu_fsnotify_add_inode_mark(struct fsnotify_mark *mark, struct inode *inode, int add_flags)
 {
 	if (!nksu_fsnotify_add_mark)
 		return -ENOSYS;
@@ -380,7 +366,3 @@ void nksu_symbol_compat_exit(void)
 #endif
 	nksu_flush_signal_handlers = NULL;
 }
-
-#if defined(__clang__)
-#pragma clang attribute pop
-#endif

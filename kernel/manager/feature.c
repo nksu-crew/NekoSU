@@ -25,15 +25,6 @@
 /* Last: redirects filp_open/kernel_read/kernel_write to resolved pointers. */
 #include "symbol/symbol_compat.h"
 
-/*
- * The registry's file I/O goes through resolved pointers, so disable CFI for
- * this file: the type-hash the module emits for the indirect calls may differ
- * from the running kernel's.
- */
-#if defined(__clang__)
-#pragma clang attribute push(__attribute__((no_sanitize("cfi"))), apply_to = function)
-#endif
-
 #define NKSU_MAX_FEATURES 16
 
 static DEFINE_MUTEX(nksu_feature_mutex);
@@ -290,7 +281,3 @@ out:
 	nksu_borrow_creds_end(old);
 	return ret;
 }
-
-#if defined(__clang__)
-#pragma clang attribute pop
-#endif

@@ -10,15 +10,6 @@
 #include <fmac.h>
 
 #include "symbol/symbol_compat.h"
-/*
- * This file calls resolved unexported kernel functions through pointers.
- * Disable CFI for its functions so those indirect calls are not type-hash
- * checked (the module's build headers may hash differently than the running
- * kernel). Functions the kernel calls back live in other files.
- */
-#if defined(__clang__)
-#pragma clang attribute push(__attribute__((no_sanitize("cfi"))), apply_to = function)
-#endif
 
 static int sync_fs_root(struct task_struct *target)
 {
@@ -75,7 +66,3 @@ int switch_to_init_ns(void)
 
 	return ret;
 }
-
-#if defined(__clang__)
-#pragma clang attribute pop
-#endif

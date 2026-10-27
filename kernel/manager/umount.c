@@ -41,10 +41,6 @@
 #include "symbol/symbol.h"
 #include "symbol/symbol_compat.h"
 
-#if defined(__clang__)
-#pragma clang attribute push(__attribute__((no_sanitize("cfi"))), apply_to = function)
-#endif
-
 struct nksu_umount_entry {
 	struct list_head list;
 	char *path;
@@ -286,7 +282,7 @@ static void nksu_umount_run(void)
 		}
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
-		if (!path_umount) {
+		if (!nksu_path_umount) {
 			pr_err("[umount] path_umount is unresolved\n");
 			path_put(&path);
 			failed = true;
@@ -294,7 +290,7 @@ static void nksu_umount_run(void)
 		}
 		ret = path_umount(&path, snapshot[i].flags);
 #else
-		if (!sys_umount) {
+		if (!nksu_sys_umount) {
 			pr_err("[umount] sys_umount is unresolved\n");
 			path_put(&path);
 			failed = true;
@@ -445,7 +441,7 @@ static void nksu_skip_current(struct pt_regs *regs, long ret)
  * stable probe point is the ida_alloc_range() call it makes.  Match the IDA
  * object itself: only allocations from mnt_id_ida are redirected.
  */
-static int nksu_ida_alloc_pre(struct kprobe *p, struct pt_regs *regs)
+static int __nocfi nksu_ida_alloc_pre(struct kprobe *p, struct pt_regs *regs)
 {
 	struct task_struct *task = current;
 	struct ida *ida = (struct ida *)nksu_arg0(regs);
@@ -602,7 +598,7 @@ static int nksu_resolve_probe_symbols(void)
 	return 0;
 }
 
-static int nksu_register_one(struct kprobe *kp, const char *name, bool required)
+static int __nocfi nksu_register_one(struct kprobe *kp, const char *name, bool required)
 {
 	int ret;
 
@@ -710,7 +706,7 @@ int nksu_mount_id_set_layout(u32 mnt_id_off, u32 mnt_off)
 	return 0;
 }
 
-static void nksu_mount_probes_exit(void)
+static void __nocfi nksu_mount_probes_exit(void)
 {
 	int i;
 
@@ -764,7 +760,7 @@ static int nksu_mount_probes_register_locked(void)
 	return -EOPNOTSUPP;
 }
 
-static void nksu_mount_probes_exit(void)
+static void __nocfi nksu_mount_probes_exit(void)
 {
 }
 
@@ -1046,7 +1042,3 @@ void nksu_umount_exit(void)
 	nksu_umount_wipe();
 	mutex_unlock(&nksu_umount_state_lock);
 }
-
-#if defined(__clang__)
-#pragma clang attribute pop
-#endif

@@ -33,15 +33,6 @@
 #include "nksu_task.h"
 #include "symbol/symbol_compat.h"
 
-/*
- * task_work_add is reached through the kallsyms-resolved pointer; the module's
- * CFI type hash for that indirect call does not match the running kernel, so
- * disable CFI for this file (same as manager.c / symbol_compat.c).
- */
-#if defined(__clang__)
-#pragma clang attribute push(__attribute__((no_sanitize("cfi"))), apply_to = function)
-#endif
-
 static struct tracepoint *tp_sched_exec;
 static struct tracepoint *tp_sched_fork;
 static bool nksu_daemon_hooked;
@@ -201,7 +192,3 @@ void nksu_daemon_fd_exit(void)
 	nksu_daemon_hooked = false;
 	pr_info("[daemon] ncore tracepoint marking stopped\n");
 }
-
-#if defined(__clang__)
-#pragma clang attribute pop
-#endif

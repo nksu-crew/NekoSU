@@ -44,15 +44,6 @@
 /* Last: redirects filp_open/kernel_read/kernel_write to resolved pointers. */
 #include "symbol/symbol_compat.h"
 
-/*
- * The store's file I/O goes through resolved pointers, so disable CFI for this
- * file: the type-hash the module emits for the indirect calls may differ from
- * the running kernel's.
- */
-#if defined(__clang__)
-#pragma clang attribute push(__attribute__((no_sanitize("cfi"))), apply_to = function)
-#endif
-
 #define NKSU_PROFILE_FILE "/data/adb/nksu/allow.profile"
 #define NKSU_PROFILE_FILE_MAX (256 * 1024)
 
@@ -379,7 +370,3 @@ void nksu_profile_store_exit(void)
 {
 	nksu_borrow_creds_release();
 }
-
-#if defined(__clang__)
-#pragma clang attribute pop
-#endif

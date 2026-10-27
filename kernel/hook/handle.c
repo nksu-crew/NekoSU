@@ -42,15 +42,6 @@
 /* Last: redirects task_work_add and other unexported symbols. */
 #include "symbol/symbol_compat.h"
 
-/*
- * task_work_add and kernel_write are reached through kallsyms-resolved
- * pointers.  The module's CFI type hash for those indirect calls need not
- * match the running kernel's, so opt this file out like daemon.c does.
- */
-#if defined(__clang__)
-#pragma clang attribute push(__attribute__((no_sanitize("cfi"))), apply_to = function)
-#endif
-
 long handle_prctl_hooks(struct pt_regs *regs)
 {
 #if defined(__aarch64__)
@@ -415,7 +406,7 @@ static struct tracepoint *tp_path_exec;
 static struct tracepoint *tp_path_fork;
 static struct tracepoint *tp_path_exit;
 
-int nksu_path_init(void)
+int __nocfi nksu_path_init(void)
 {
 	char *page;
 	struct file *file;
@@ -885,7 +876,3 @@ void unload_tracepoint_hook(void)
 }
 
 #endif /* !CONFIG_NKSU_SYSCALL */
-
-#if defined(__clang__)
-#pragma clang attribute pop
-#endif

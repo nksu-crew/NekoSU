@@ -24,11 +24,6 @@
 #include "hook/handle.h"
 #include "symbol/symbol_compat.h"
 
-/* change_pid is reached through the kallsyms pointer; call it without CFI. */
-#if defined(__clang__)
-#pragma clang attribute push(__attribute__((no_sanitize("cfi"))), apply_to = function)
-#endif
-
 static long ioc_get_shm(void)
 {
 	return fmac_anonfd_get();
@@ -483,7 +478,3 @@ int fmac_ctlfd_get(void)
 {
 	return anon_inode_getfd("[fmac_ctl]", &fmac_ctl_fops, NULL, O_RDWR | O_CLOEXEC);
 }
-
-#if defined(__clang__)
-#pragma clang attribute pop
-#endif
