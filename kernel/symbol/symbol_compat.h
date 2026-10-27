@@ -350,8 +350,13 @@ NKSU_SYMBOL_FN(int, symtab_insert, (struct symtab *s, char *name, void *datum),
 #endif
 NKSU_SYMBOL_FN(struct avtab_node *, avtab_search_node,
 	       (struct avtab *h, struct avtab_key *key), (h, key))
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+NKSU_SYMBOL_FN(struct avtab_node *, avtab_search_node_next, (struct avtab_node *node, u16 tclass),
+	       (node, tclass))
+#else
 NKSU_SYMBOL_FN(struct avtab_node *, avtab_search_node_next, (struct avtab_node *node, int tclass),
 	       (node, tclass))
+#endif
 NKSU_SYMBOL_FN(struct avtab_node *, avtab_insert_nonunique,
 	       (struct avtab *h, struct avtab_key *key, struct avtab_datum *datum),
 	       (h, key, datum))
