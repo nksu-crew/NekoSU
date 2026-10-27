@@ -10,7 +10,6 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -52,9 +51,10 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import me.nekosu.aqnya.R
 import me.nekosu.aqnya.ui.component.AppDialog
-import me.nekosu.aqnya.ui.component.AppTopAppBar
+import me.nekosu.aqnya.ui.component.CardGroup
 import me.nekosu.aqnya.ui.component.ExpressiveTextField
 import me.nekosu.aqnya.ui.component.ModeLabel
+import me.nekosu.aqnya.ui.component.currentListItemShapes
 
 /** Build an [AppConfig] from the screen's draft values (used for live saving). */
 private fun buildConfig(
@@ -512,7 +512,7 @@ fun AppDetailScreen(
     var showNsDialog by rememberSaveable { mutableStateOf(false) }
     val haptic = LocalHapticFeedback.current
     val motionScheme = MaterialTheme.motionScheme
-    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(rememberTopAppBarState())
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
 
     // 实时保存：任何一处改动都会立即下发，不再需要保存按钮。
     fun save(
@@ -572,8 +572,8 @@ fun AppDetailScreen(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
         topBar = {
-            AppTopAppBar(
-                title = stringResource(R.string.app_profile_title),
+            LargeTopAppBar(
+                title = { Text(stringResource(R.string.app_profile_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
@@ -583,6 +583,11 @@ fun AppDetailScreen(
                     }
                 },
                 scrollBehavior = scrollBehavior,
+                colors =
+                    TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    ),
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -596,38 +601,39 @@ fun AppDetailScreen(
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             item {
-                AppIdentityHeader(app = app)
-            }
-
-            item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SectionTitle(stringResource(R.string.app_authorization_section))
-                    AuthorizationCard(
-                        allowed = allowed,
-                        onToggle = { value ->
-                            haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
-                            val newCaps =
-                                if (!value) {
-                                    emptySet()
-                                } else if (caps.isEmpty()) {
-                                    DEFAULT_CAPS
-                                } else {
-                                    caps
-                                }
-                            val newDomain = if (!value) "u:r:nksu:s0" else domain
-                            val newNs = if (!value) NksuNamespace.INHERITED else ns
-                            allowed = value
-                            caps = newCaps
-                            domain = newDomain
-                            ns = newNs
-                            save(
-                                allowedValue = value,
-                                capsValue = newCaps,
-                                domainValue = newDomain,
-                                nsValue = newNs,
+                    CardGroup {
+                        item { AppIdentityItem(app = app) }
+                        item {
+                            AuthorizationSwitchItem(
+                                allowed = allowed,
+                                onToggle = { value ->
+                                    haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
+                                    val newCaps =
+                                        if (!value) {
+                                            emptySet()
+                                        } else if (caps.isEmpty()) {
+                                            DEFAULT_CAPS
+                                        } else {
+                                            caps
+                                        }
+                                    val newDomain = if (!value) "u:r:nksu:s0" else domain
+                                    val newNs = if (!value) NksuNamespace.INHERITED else ns
+                                    allowed = value
+                                    caps = newCaps
+                                    domain = newDomain
+                                    ns = newNs
+                                    save(
+                                        allowedValue = value,
+                                        capsValue = newCaps,
+                                        domainValue = newDomain,
+                                        nsValue = newNs,
+                                    )
+                                },
                             )
-                        },
-                    )
+                        }
+                    }
                 }
             }
 
@@ -650,16 +656,45 @@ fun AppDetailScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         SectionTitle(stringResource(R.string.app_root_configuration))
-                        ConfigurationCard(
-                            rootUid = rootUidText,
-                            caps = caps,
-                            domain = domain,
-                            ns = ns,
-                            onEditUid = { showUidDialog = true },
-                            onEditCaps = { showCapsSheet = true },
-                            onEditDomain = { showDomainDialog = true },
-                            onEditNamespace = { showNsDialog = true },
-                        )
+                        CardGroup {
+                            item {
+                                ConfigurationItem(
+                                    title = stringResource(R.string.app_root_uid),
+                                    summary = rootUidText,
+                                    icon = Icons.Rounded.Badge,
+                                    onClick = { showUidDialog = true },
+                                )
+                            }
+                            item {
+                                ConfigurationItem(
+                                    title = stringResource(R.string.app_capabilities),
+                                    summary =
+                                        stringResource(
+                                            R.string.app_caps_selected,
+                                            caps.size,
+                                            LinuxCap.entries.size,
+                                        ),
+                                    icon = Icons.Rounded.Tune,
+                                    onClick = { showCapsSheet = true },
+                                )
+                            }
+                            item {
+                                ConfigurationItem(
+                                    title = stringResource(R.string.app_selinux_domain),
+                                    summary = domain,
+                                    icon = Icons.Rounded.Shield,
+                                    onClick = { showDomainDialog = true },
+                                )
+                            }
+                            item {
+                                ConfigurationItem(
+                                    title = stringResource(R.string.app_mount_namespace),
+                                    summary = stringResource(ns.labelRes),
+                                    icon = Icons.Rounded.Layers,
+                                    onClick = { showNsDialog = true },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -677,150 +712,124 @@ fun AppDetailScreen(
 }
 
 @Composable
-private fun AppIdentityHeader(app: AppInfo) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Surface(
-            modifier = Modifier.size(72.dp),
-            shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ) {
-            AppIcon(
-                packageName = app.packageName,
-                modifier = Modifier.fillMaxSize().padding(4.dp),
-            )
-        }
-
-        Spacer(Modifier.width(16.dp))
-
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
+private fun AppIdentityItem(app: AppInfo) {
+    SegmentedListItem(
+        shapes = currentListItemShapes(),
+        colors =
+            ListItemDefaults.segmentedColors(
+                containerColor = MaterialTheme.colorScheme.surfaceBright,
+            ),
+        leadingContent = {
+            Surface(
+                modifier = Modifier.size(44.dp),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                AppIcon(
+                    packageName = app.packageName,
+                    modifier = Modifier.fillMaxSize().padding(3.dp),
+                )
+            }
+        },
+        content = {
             Text(
                 text = app.name,
-                style = MaterialTheme.typography.headlineSmall,
+                style = MaterialTheme.typography.titleMedium,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                text = app.packageName,
-                style =
-                    MaterialTheme.typography.bodySmall.copy(
-                        fontFamily = FontFamily.Monospace,
-                    ),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+        },
+        supportingContent = {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    text = stringResource(R.string.app_uid_tag, app.uid),
-                    style = MaterialTheme.typography.labelMedium,
+                    text = app.packageName,
+                    style =
+                        MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                        ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                if (app.isSystem) {
-                    ModeLabel(
-                        label = stringResource(R.string.app_tag_system),
-                        color = MaterialTheme.colorScheme.onTertiaryContainer,
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(R.string.app_uid_tag, app.uid),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    if (app.isSystem) {
+                        ModeLabel(
+                            label = stringResource(R.string.app_tag_system),
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                        )
+                    }
                 }
             }
-        }
-    }
+        },
+    )
 }
 
 @Composable
-private fun AuthorizationCard(
+private fun AuthorizationSwitchItem(
     allowed: Boolean,
     onToggle: (Boolean) -> Unit,
 ) {
-    val scheme = MaterialTheme.colorScheme
-    val motionScheme = MaterialTheme.motionScheme
+    val shapes = currentListItemShapes()
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = scheme.surfaceContainerHigh),
-    ) {
-        Column(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .toggleable(
-                        value = allowed,
-                        role = Role.Switch,
-                        onValueChange = onToggle,
-                    ).padding(20.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    modifier = Modifier.size(52.dp),
-                    shape = MaterialTheme.shapes.medium,
-                    color = if (allowed) scheme.primaryContainer else scheme.surfaceContainerHighest,
-                    contentColor = if (allowed) scheme.onPrimaryContainer else scheme.onSurfaceVariant,
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        AnimatedContent(
-                            targetState = allowed,
-                            transitionSpec = {
-                                (
-                                    fadeIn(animationSpec = motionScheme.defaultEffectsSpec()) +
-                                        scaleIn(
-                                            initialScale = 0.7f,
-                                            animationSpec = motionScheme.defaultSpatialSpec(),
-                                        )
-                                ).togetherWith(
-                                    fadeOut(animationSpec = motionScheme.fastEffectsSpec()) +
-                                        scaleOut(
-                                            targetScale = 0.7f,
-                                            animationSpec = motionScheme.fastSpatialSpec(),
-                                        ),
-                                )
-                            },
-                            label = "authorization_lock",
-                        ) { granted ->
-                            Icon(
-                                imageVector = if (granted) Icons.Rounded.LockOpen else Icons.Rounded.Lock,
-                                contentDescription = null,
-                            )
-                        }
-                    }
-                }
-
-                Spacer(Modifier.width(16.dp))
-
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.app_allow_root),
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Text(
-                        text = stringResource(R.string.app_root_access_summary),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = scheme.onSurfaceVariant,
-                    )
-                }
-
-                Spacer(Modifier.width(12.dp))
-
-                Switch(checked = allowed, onCheckedChange = null)
+    SegmentedListItem(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clip(shapes.shape)
+                .toggleable(
+                    value = allowed,
+                    role = Role.Switch,
+                    onValueChange = onToggle,
+                ),
+        shapes = shapes,
+        colors =
+            ListItemDefaults.segmentedColors(
+                containerColor = MaterialTheme.colorScheme.surfaceBright,
+            ),
+        leadingContent = {
+            Icon(
+                imageVector = if (allowed) Icons.Rounded.LockOpen else Icons.Rounded.Lock,
+                contentDescription = null,
+                tint =
+                    if (allowed) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+            )
+        },
+        content = {
+            Text(
+                text = stringResource(R.string.app_allow_root),
+                style = MaterialTheme.typography.titleMedium,
+            )
+        },
+        supportingContent = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = stringResource(R.string.app_root_access_summary),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                AuthorizationStatus(granted = allowed)
             }
-
-            Spacer(Modifier.height(14.dp))
-
-            AuthorizationStatus(granted = allowed)
-        }
-    }
+        },
+        trailingContent = {
+            Switch(
+                checked = allowed,
+                onCheckedChange = null,
+            )
+        },
+    )
 }
 
 @Composable
@@ -854,83 +863,19 @@ private fun AuthorizationStatus(granted: Boolean) {
 }
 
 @Composable
-private fun ConfigurationCard(
-    rootUid: String,
-    caps: Set<LinuxCap>,
-    domain: String,
-    ns: NksuNamespace,
-    onEditUid: () -> Unit,
-    onEditCaps: () -> Unit,
-    onEditDomain: () -> Unit,
-    onEditNamespace: () -> Unit,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-    ) {
-        Column {
-            ConfigurationItem(
-                title = stringResource(R.string.app_root_uid),
-                summary = rootUid,
-                icon = Icons.Rounded.Badge,
-                onClick = onEditUid,
-            )
-            ConfigurationDivider()
-            ConfigurationItem(
-                title = stringResource(R.string.app_capabilities),
-                summary =
-                    stringResource(
-                        R.string.app_caps_selected,
-                        caps.size,
-                        LinuxCap.entries.size,
-                    ),
-                icon = Icons.Rounded.Tune,
-                onClick = onEditCaps,
-            )
-            ConfigurationDivider()
-            ConfigurationItem(
-                title = stringResource(R.string.app_selinux_domain),
-                summary = domain,
-                icon = Icons.Rounded.Shield,
-                onClick = onEditDomain,
-            )
-            ConfigurationDivider()
-            ConfigurationItem(
-                title = stringResource(R.string.app_mount_namespace),
-                summary = stringResource(ns.labelRes),
-                icon = Icons.Rounded.Layers,
-                onClick = onEditNamespace,
-            )
-        }
-    }
-}
-
-@Composable
-private fun ConfigurationDivider() {
-    HorizontalDivider(
-        modifier = Modifier.padding(horizontal = 16.dp),
-        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
-    )
-}
-
-@Composable
 private fun ConfigurationItem(
     title: String,
     summary: String,
     icon: ImageVector,
     onClick: () -> Unit,
 ) {
-    ListItem(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .clickable(role = Role.Button, onClick = onClick),
+    SegmentedListItem(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shapes = currentListItemShapes(),
         colors =
-            ListItemDefaults.colors(
-                containerColor = Color.Transparent,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-                supportingContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ListItemDefaults.segmentedColors(
+                containerColor = MaterialTheme.colorScheme.surfaceBright,
             ),
         leadingContent = {
             Icon(
@@ -939,7 +884,7 @@ private fun ConfigurationItem(
                 tint = MaterialTheme.colorScheme.primary,
             )
         },
-        headlineContent = { Text(title) },
+        content = { Text(title) },
         supportingContent = {
             Text(
                 text = summary,
