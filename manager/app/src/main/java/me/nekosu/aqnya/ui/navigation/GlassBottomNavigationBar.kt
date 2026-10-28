@@ -129,10 +129,10 @@ fun GlassBottomNavigationBar(
     val isDark = scheme.surfaceContainer.luminance() < 0.5f
     val barShape = CircleShape
     val containerColor = scheme.surfaceContainer.copy(alpha = 0.40f)
-    // Kept opaque enough that the selected pill still reads as selected on top
-    // of bright, busy backdrops once vibrancy and blur have been applied.
+    // KernelSU's clear-glass pill: the accent tone comes from the selected
+    // icon and label, the surface itself stays at a 10% neutral fill.
     val selectionSurface =
-        if (isDark) Color.White.copy(alpha = 0.26f) else Color.Black.copy(alpha = 0.28f)
+        if (isDark) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.10f)
     val accentColor = scheme.primary
     val tabContentColor = scheme.onSurface
 
