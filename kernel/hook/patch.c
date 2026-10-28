@@ -142,7 +142,7 @@ int nksu_patch_init(void)
 	if (nksu_patch_init_mm)
 		return 0;
 
-	nksu_patch_init_mm = (struct mm_struct *)nksu_ksym_lookup("init_mm");
+	nksu_patch_init_mm = (struct mm_struct *)NKSU_KSYM_LOOKUP("init_mm");
 	return nksu_patch_init_mm ? 0 : -ENOENT;
 }
 

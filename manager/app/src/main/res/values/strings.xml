@@ -70,6 +70,8 @@
     <string name="settings_amoled_black_summary">Use pure black background in dark mode</string>
     <string name="settings_blur">Blur</string>
     <string name="settings_blur_summary">Blur the top app bar behind scrolling content</string>
+    <string name="settings_verify_kernel_symbols">Verify kernel symbols</string>
+    <string name="settings_verify_kernel_symbols_summary">Check the symbols nksu.ko needs against the boot image before patching; disable only if the check cannot be satisfied</string>
     <string name="settings_nav_bar_style">Navigation bar style</string>
     <string name="nav_bar_style_standard">Standard</string>
     <string name="nav_bar_style_glass">Liquid glass</string>
@@ -266,6 +268,10 @@
     <string name="install_method_file">Select vendor_boot image</string>
     <string name="install_recommended">Recommended</string>
     <string name="install_pick_vendor_boot_desc">Choose the vendor_boot image dumped from your device</string>
+    <string name="install_boot_image">Boot image</string>
+    <string name="install_pick_boot_desc">Choose the boot image for kernel symbol verification</string>
+    <string name="install_err_boot_missing">Boot image not selected. It is required for kernel symbol verification; select one or disable the check in Settings.</string>
+    <string name="install_boot_partition_missing">The boot partition could not be found. Disable kernel symbol verification in Settings to install without it.</string>
     <string name="install_select_ko">Kernel module (LKM)</string>
     <string name="install_select_kmi">Select KMI</string>
     <string name="install_use_local_lkm">Use local LKM file</string>
@@ -293,6 +299,8 @@
 
     <!-- Install log / error messages -->
     <string name="install_log_partition">[nksu] vendor_boot: %1$s</string>
+    <string name="install_log_boot_partition">[nksu] boot: %1$s</string>
+    <string name="install_log_err_boot_dump">[nksu] ERROR: failed to read the boot partition for symbol verification</string>
     <string name="install_log_exported">[nksu] exported to: %1$s</string>
     <string name="install_log_export_failed">[nksu] failed to export to Download: %1$s</string>
     <string name="install_log_rollback">[nksu] write failed, restoring the original image</string>

@@ -115,9 +115,9 @@ int __nocfi nksu_lsm_hook(struct nksu_lsm_hook *hook)
 		void *selected_origin = NULL;
 		int (*lookup_size)(unsigned long, unsigned long *, unsigned long *) = NULL;
 
-		lookup_size = (typeof(lookup_size))nksu_ksym_lookup("kallsyms_lookup_size_offset");
+		lookup_size = (typeof(lookup_size))NKSU_KSYM_TRY_LOOKUP("kallsyms_lookup_size_offset");
 
-		scalls_addr = nksu_ksym_lookup("static_calls_table");
+		scalls_addr = NKSU_KSYM_LOOKUP("static_calls_table");
 		if (!scalls_addr) {
 			pr_err("[lsm_hook] no static_calls_table\n");
 			ret = -ENOSYS;
@@ -130,7 +130,7 @@ int __nocfi nksu_lsm_hook(struct nksu_lsm_hook *hook)
 		else
 			pr_warn("[lsm_hook] no kallsyms_lookup_size_offset\n");
 
-		active_addr = nksu_ksym_lookup("lsm_active_cnt");
+		active_addr = NKSU_KSYM_TRY_LOOKUP("lsm_active_cnt");
 		if (active_addr)
 			lsm_active_cnt = *(u32 *)active_addr;
 		if (lsm_active_cnt == 0 || lsm_active_cnt > 20) {
@@ -212,7 +212,7 @@ int __nocfi nksu_lsm_hook(struct nksu_lsm_hook *hook)
 		void **selected_slot = NULL;
 		void *selected_origin = NULL;
 
-		heads_addr = nksu_ksym_lookup("security_hook_heads");
+		heads_addr = NKSU_KSYM_LOOKUP("security_hook_heads");
 		if (!heads_addr) {
 			pr_err("[lsm_hook] no security_hook_heads\n");
 			ret = -ENOENT;

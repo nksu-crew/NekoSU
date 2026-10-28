@@ -72,6 +72,10 @@ fun SettingsScreen(navController: NavController) {
     )
     val currentNavBarStyle = NavBarStyle.fromValue(navBarStyleValue)
 
+    val verifyKernelSymbols by AppPreferences.verifyKernelSymbolsFlow(mContext).collectAsState(
+        initial = AppPreferences.verifyKernelSymbols(mContext),
+    )
+
     val currentLang =
         LocaleHelper
             .savedLanguageTag(mContext)
@@ -147,6 +151,10 @@ fun SettingsScreen(navController: NavController) {
 
             ToolsSection(
                 onExportLog = { LogUtils.exportLogs(mContext) },
+                verifyKernelSymbols = verifyKernelSymbols,
+                onVerifyKernelSymbolsChange = { enabled ->
+                    AppPreferences.setVerifyKernelSymbols(mContext, enabled)
+                },
             )
 
             AboutSection(

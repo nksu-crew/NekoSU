@@ -582,12 +582,12 @@ static int nksu_resolve_probe_symbols(void)
 {
 	if (!nksu_register_kprobe) {
 		nksu_register_kprobe =
-			(typeof(register_kprobe) *)nksu_ksym_lookup("register_kprobe");
+			(typeof(register_kprobe) *)NKSU_KSYM_LOOKUP("register_kprobe");
 		nksu_unregister_kprobe =
-			(typeof(unregister_kprobe) *)nksu_ksym_lookup("unregister_kprobe");
+			(typeof(unregister_kprobe) *)NKSU_KSYM_LOOKUP("unregister_kprobe");
 		nksu_ida_alloc_range =
-			(typeof(ida_alloc_range) *)nksu_ksym_lookup("ida_alloc_range");
-		nksu_mnt_id_ida = (struct ida *)nksu_ksym_lookup("mnt_id_ida");
+			(typeof(ida_alloc_range) *)NKSU_KSYM_LOOKUP("ida_alloc_range");
+		nksu_mnt_id_ida = (struct ida *)NKSU_KSYM_LOOKUP("mnt_id_ida");
 	}
 
 	if (!nksu_register_kprobe || !nksu_unregister_kprobe || !nksu_ida_alloc_range ||

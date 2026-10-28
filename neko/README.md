@@ -6,7 +6,10 @@ NekoSU's userspace runtime.
   The KernelSU kernel interface is replaced by a NekoSU adapter in `ncore/src/ksucalls.rs`.
 - `bootpatcher/` — NekoSU's v3/v4 `vendor_boot` patcher. It installs the LKM in
   `lib/modules/nksu.ko` and updates `modules.load` / `modules.dep`, preserving
-  the ramdisk's compression and the v4 vendor ramdisk table.
+  the ramdisk's compression and the v4 vendor ramdisk table. Before patching it
+  reads the `.nksu_ksymtab` symbol table embedded in the LKM and verifies the
+  required kallsyms entries against the kernel in the supplied boot image
+  (`-b <boot.img>`); `--no-symbol-check` skips that verification.
 - `jni/` — the JNI bridge the Compose manager loads as `libjni.so`.
 
 All three binaries are cross-compiled by Gradle through `cargo-ndk` as part of

@@ -115,6 +115,9 @@ static int ksym_resolve_lookup_name(void)
 	struct kprobe kln_kp;
 	int ret;
 
+	/* Record the bootstrap symbol for bootpatcher's pre-flight check. */
+	NKSU_SYMBOL_EXPORT("kallsyms_lookup_name");
+
 	if (ksym_lookup_name)
 		return 0;
 

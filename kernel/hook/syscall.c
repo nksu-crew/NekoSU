@@ -172,7 +172,7 @@ int syscall_table_resolve(void)
 		return ret;
 	}
 
-	syscall_table = (syscall_fn_t *)nksu_ksym_lookup("sys_call_table");
+	syscall_table = (syscall_fn_t *)NKSU_KSYM_LOOKUP("sys_call_table");
 	if (!syscall_table) {
 		pr_err("nksu: failed to find sys_call_table\n");
 		return -ENOENT;

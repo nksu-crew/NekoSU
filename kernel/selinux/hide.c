@@ -667,7 +667,7 @@ static int nksu_hide_enable(void)
 		return -EAGAIN;
 	}
 
-	write_op = (write_op_fn *)nksu_ksym_lookup("write_op");
+	write_op = (write_op_fn *)NKSU_KSYM_LOOKUP("write_op");
 	if (!write_op) {
 		pr_err("[selinux_hide] symbol 'write_op' not found\n");
 		return -ENOSYS;
@@ -696,12 +696,12 @@ static int nksu_hide_enable(void)
 #endif
 
 	nksu_bounded_transition_fn =
-		(typeof(nksu_bounded_transition_fn))nksu_ksym_lookup("security_bounded_transition");
+		(typeof(nksu_bounded_transition_fn))NKSU_KSYM_TRY_LOOKUP("security_bounded_transition");
 	if (!nksu_bounded_transition_fn)
 		pr_warn("[selinux_hide] security_bounded_transition not found\n");
 
 	nksu_current_is_single_threaded_fn =
-		(typeof(nksu_current_is_single_threaded_fn))nksu_ksym_lookup(
+		(typeof(nksu_current_is_single_threaded_fn))NKSU_KSYM_TRY_LOOKUP(
 			"current_is_single_threaded");
 	if (!nksu_current_is_single_threaded_fn)
 		pr_warn("[selinux_hide] current_is_single_threaded not found\n");
@@ -713,7 +713,7 @@ static int nksu_hide_enable(void)
 	}
 	nksu_hide_hooked = true;
 
-	policy_ops = (struct file_operations *)nksu_ksym_lookup("sel_policy_ops");
+	policy_ops = (struct file_operations *)NKSU_KSYM_TRY_LOOKUP("sel_policy_ops");
 	if (policy_ops) {
 		ssize_t (*new_read)(struct file *, char __user *, size_t, loff_t *) =
 			nksu_read_policy;
@@ -750,7 +750,7 @@ static int nksu_hide_enable(void)
 		goto fail;
 	}
 
-	status_ops = (struct file_operations *)nksu_ksym_lookup("sel_handle_status_ops");
+	status_ops = (struct file_operations *)NKSU_KSYM_TRY_LOOKUP("sel_handle_status_ops");
 	if (status_ops) {
 		int (*new_open)(struct inode *, struct file *) = nksu_status_open;
 

@@ -101,6 +101,13 @@ fun InstallScreen(navController: NavController) {
             if (uri != null) installViewModel.selectLocalKo(uri)
         }
 
+    val pickBoot =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenDocument(),
+        ) { uri ->
+            if (uri != null) installViewModel.selectBoot(uri)
+        }
+
     LaunchedEffect(Unit) { installViewModel.load() }
 
     LaunchedEffect(state.done) {
@@ -236,8 +243,24 @@ fun InstallScreen(navController: NavController) {
                 InstallMethodSection(
                     state = state,
                     onPick = { pickVendorBoot.launch(arrayOf("*/*")) },
+                    onPickBoot = { pickBoot.launch(arrayOf("*/*")) },
                     onSelectMethod = installViewModel::selectMethod,
                 )
+                val directBootMissing =
+                    state.method == InstallMethod.DIRECT &&
+                        state.directTarget != null &&
+                        state.directBootTarget == null
+                val inactiveBootMissing =
+                    state.method == InstallMethod.INACTIVE &&
+                        state.inactiveTarget != null &&
+                        state.inactiveBootTarget == null
+                if (state.verifyKernelSymbols && (directBootMissing || inactiveBootMissing)) {
+                    Text(
+                        text = stringResource(R.string.install_boot_partition_missing),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 KernelModuleSection(
                     state = state,
                     onSelectKmi = { showKmiDialog = true },
@@ -270,6 +293,7 @@ fun InstallScreen(navController: NavController) {
 private fun InstallMethodSection(
     state: InstallUiState,
     onPick: () -> Unit,
+    onPickBoot: () -> Unit,
     onSelectMethod: (InstallMethod) -> Unit,
 ) {
     val options =
@@ -291,6 +315,34 @@ private fun InstallMethodSection(
                     onSelectMethod = onSelectMethod,
                 )
             }
+        }
+
+        // The boot image is only needed for the optional kernel symbol check.
+        item(visible = state.method == InstallMethod.FILE && state.verifyKernelSymbols) {
+            SegmentedListItem(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = !state.running) { onPickBoot() },
+                shapes = currentListItemShapes(),
+                colors = ListItemDefaults.segmentedColors(containerColor = MaterialTheme.colorScheme.surfaceBright),
+                leadingContent = {
+                    Icon(Icons.AutoMirrored.Rounded.InsertDriveFile, contentDescription = null)
+                },
+                content = {
+                    Text(stringResource(R.string.install_boot_image))
+                },
+                supportingContent = {
+                    Text(state.bootName ?: stringResource(R.string.install_pick_boot_desc))
+                },
+                trailingContent = {
+                    Icon(
+                        Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                    )
+                },
+            )
         }
     }
 }

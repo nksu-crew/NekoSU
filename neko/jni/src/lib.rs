@@ -890,11 +890,34 @@ pub extern "system" fn Java_me_nekosu_aqnya_core_Ncore_findVendorBoot(
     allow_slotless: jboolean,
 ) -> jstring {
     let slot = get_utf(&mut env, &slot).unwrap_or_default();
+    find_partition(&mut env, "vendor_boot", &slot, allow_slotless != 0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_me_nekosu_aqnya_core_Ncore_findBoot(
+    mut env: EnvUnowned,
+    _this: JObject,
+    slot: JString,
+    allow_slotless: jboolean,
+) -> jstring {
+    let slot = get_utf(&mut env, &slot).unwrap_or_default();
+    find_partition(&mut env, "boot", &slot, allow_slotless != 0)
+}
+
+/// Find a block-device path through `/dev/block/by-name` (or bootdevice) as
+/// root. The lookup runs in a forked child so the caller does not need to hold
+/// root itself.
+fn find_partition(
+    env: &mut EnvUnowned,
+    partition: &str,
+    slot: &str,
+    allow_slotless: bool,
+) -> jstring {
     let mut candidates = Vec::new();
     for base in ["/dev/block/by-name", "/dev/block/bootdevice/by-name"] {
-        candidates.push(format!("{base}/vendor_boot{slot}"));
+        candidates.push(format!("{base}/{partition}{slot}"));
         if allow_slotless {
-            candidates.push(format!("{base}/vendor_boot"));
+            candidates.push(format!("{base}/{partition}"));
         }
     }
     let candidates: Vec<CString> = candidates
@@ -962,11 +985,11 @@ pub extern "system" fn Java_me_nekosu_aqnya_core_Ncore_findVendorBoot(
         && unsafe { *libc::__errno() } == libc::EINTR
     {}
     if data.is_empty() || !libc::WIFEXITED(status) || libc::WEXITSTATUS(status) != 0 {
-        log::warn!("findVendorBoot(slot={slot}) not found");
+        log::warn!("{partition}(slot={slot}) not found");
         return ptr::null_mut();
     }
     let end = data.iter().position(|b| *b == 0).unwrap_or(data.len());
-    put_string(&mut env, &String::from_utf8_lossy(&data[..end]))
+    put_string(env, &String::from_utf8_lossy(&data[..end]))
 }
 
 fn parse_gki(release: &str) -> Option<(bool, String)> {

@@ -109,4 +109,10 @@ object Ncore {
         slotSuffix: String,
         allowSlotless: Boolean,
     ): String?
+
+    /** 查找 boot 分区路径（root 子进程）；找不到返回 null。 */
+    external fun findBoot(
+        slotSuffix: String,
+        allowSlotless: Boolean,
+    ): String?
 }

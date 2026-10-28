@@ -420,7 +420,7 @@ int __nocfi nksu_path_init(void)
 	}
 
 	nksu_shmem_kernel_file_setup =
-		(typeof(nksu_shmem_kernel_file_setup))nksu_ksym_lookup("shmem_kernel_file_setup");
+		(typeof(nksu_shmem_kernel_file_setup))NKSU_KSYM_LOOKUP("shmem_kernel_file_setup");
 	if (unlikely(!nksu_shmem_kernel_file_setup)) {
 		pr_err("[hook]: unresolved shmem_kernel_file_setup\n");
 		return -ENOENT;

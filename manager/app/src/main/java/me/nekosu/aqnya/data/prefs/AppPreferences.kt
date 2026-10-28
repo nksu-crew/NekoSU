@@ -28,6 +28,13 @@ object AppPreferences {
 
     fun navBarStyleFlow(context: Context): Flow<Int> = context.prefsFlow { getInt("nav_bar_style", 0) }
 
+    /** Verify nksu.ko's required kernel symbols against the target boot image. */
+    fun verifyKernelSymbols(context: Context): Boolean =
+        getPrefs(context).getBoolean("verify_kernel_symbols", true)
+
+    fun verifyKernelSymbolsFlow(context: Context): Flow<Boolean> =
+        context.prefsFlow { getBoolean("verify_kernel_symbols", true) }
+
     fun setShowRules(
         context: Context,
         value: Boolean,
@@ -68,6 +75,13 @@ object AppPreferences {
         value: Int,
     ) {
         getPrefs(context).edit().putInt("nav_bar_style", value).apply()
+    }
+
+    fun setVerifyKernelSymbols(
+        context: Context,
+        value: Boolean,
+    ) {
+        getPrefs(context).edit().putBoolean("verify_kernel_symbols", value).apply()
     }
 
     private fun <T> Context.prefsFlow(getValue: SharedPreferences.() -> T): Flow<T> =

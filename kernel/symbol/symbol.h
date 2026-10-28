@@ -23,6 +23,48 @@
  */
 
 /*
+ * Record a symbol name in the module's .nksu_ksymtab section.
+ *
+ * Every symbol the module resolves through kallsyms at load time is listed in
+ * that table. bootpatcher reads it from nksu.ko and verifies, against the
+ * kernel in the target boot image, that every required entry exists before it
+ * patches the ramdisk. A missing symbol would otherwise only surface as a
+ * failed insmod after a reboot, when recovery is much harder.
+ *
+ * Entries are (flags byte, NUL-terminated name). Bit 0 marks a symbol the
+ * module cannot run without; entries without it are best-effort lookups whose
+ * absence the code already tolerates, so bootpatcher only warns about them.
+ *
+ * The macro emits the entry at the point of use, so NKSU_RESOLVE() and the
+ * compile-time nksu_ksym_lookup("name") call sites record themselves without a
+ * second, manually maintained list. _name must be a string literal.
+ */
+#define NKSU_SYMBOL_EXPORT_FLAGS(_flags, _name)                            \
+	__asm__(".pushsection .nksu_ksymtab, \"a\"\n\t.byte " #_flags      \
+		"\n\t.asciz \"" _name "\"\n\t.popsection\n")
+
+#define NKSU_SYMBOL_EXPORT(_name) NKSU_SYMBOL_EXPORT_FLAGS(1, _name)
+#define NKSU_SYMBOL_EXPORT_OPTIONAL(_name) NKSU_SYMBOL_EXPORT_FLAGS(0, _name)
+
+/*
+ * nksu_ksym_lookup() for a symbol name known at compile time, also recording
+ * it in the export table. Use NKSU_KSYM_TRY_LOOKUP() when the caller tolerates
+ * a missing symbol, and nksu_ksym_lookup() directly when the name is only
+ * known at runtime: those names cannot be checked before flashing.
+ */
+#define NKSU_KSYM_LOOKUP(_name)                                            \
+	({                                                               \
+		NKSU_SYMBOL_EXPORT(_name);                              \
+		nksu_ksym_lookup(_name);                                 \
+	})
+
+#define NKSU_KSYM_TRY_LOOKUP(_name)                                        \
+	({                                                               \
+		NKSU_SYMBOL_EXPORT_OPTIONAL(_name);                     \
+		nksu_ksym_lookup(_name);                                 \
+	})
+
+/*
  * Resolve a kernel symbol and return its address, or 0 on failure.
  * Results are cached; repeated lookups do not re-resolve.
  */

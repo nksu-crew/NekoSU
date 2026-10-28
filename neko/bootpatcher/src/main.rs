@@ -4,11 +4,21 @@
  *
  * This replaces the boot-patching half of ncore.  The manager calls it as
  *
- *     bootpatcher -p <vendor_boot.img> <nksu.ko>
+ *     bootpatcher -p <vendor_boot.img> <nksu.ko> -b <boot.img>
  *
  * and it writes the patched image to `<vendor_boot.img>.new`, keeping the
  * ramdisk's original compression and updating the v4 vendor ramdisk table.
+ *
+ * Before touching the vendor_boot image it reads the symbol table that nksu.ko
+ * carries in .nksu_ksymtab and verifies that every required kallsyms-resolved
+ * symbol exists in the kernel extracted from <boot.img>. A module that would
+ * fail to load on the target kernel is therefore rejected before anything is
+ * flashed; --no-symbol-check skips that step and is surfaced in the manager's
+ * settings for recovery scenarios.
  */
+
+mod kallsyms;
+mod symbols;
 
 use std::env;
 use std::fs;
@@ -22,6 +32,21 @@ use android_bootimg::patcher::BootImagePatchOption;
 use anyhow::{Context, Result, bail};
 
 const MODULE_PATH: &str = "lib/modules/nksu.ko";
+const USAGE: &str = "\
+usage: bootpatcher -p <vendor_boot.img> <nksu.ko> -b <boot.img>
+       bootpatcher -p <vendor_boot.img> <nksu.ko> --no-symbol-check
+
+  -p, --patch              vendor_boot image and nksu.ko to install
+  -b, --boot               boot image containing the target kernel
+      --no-symbol-check    skip the kernel symbol verification
+  -h, --help               show this help";
+
+struct Args {
+    image: String,
+    module: String,
+    boot: Option<String>,
+    verify_symbols: bool,
+}
 
 fn main() -> ExitCode {
     match run() {
@@ -34,22 +59,27 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<()> {
-    let mut args = env::args().skip(1);
-    let (image, module) = match (args.next().as_deref(), args.next(), args.next()) {
-        (Some("-p" | "--patch"), Some(image), Some(module)) => (image, module),
-        _ => bail!("usage: bootpatcher -p <vendor_boot.img> <nksu.ko>"),
+    let Some(args) = parse_args()? else {
+        eprintln!("{USAGE}");
+        return Ok(());
     };
 
-    let image_path = Path::new(&image);
-    eprintln!("bootpatcher: reading module {module}");
-    let module_data = fs::read(&module).with_context(|| format!("read {module}"))?;
-    eprintln!("bootpatcher: reading image {image}");
-    let image_data = fs::read(image_path).with_context(|| format!("read {image}"))?;
+    eprintln!("bootpatcher: reading module {}", args.module);
+    let module_data = fs::read(&args.module).with_context(|| format!("read {}", args.module))?;
+
+    if args.verify_symbols {
+        verify_kernel_symbols(&module_data, args.boot.as_deref())?;
+    } else {
+        eprintln!("bootpatcher: symbol check disabled, skipping kernel verification");
+    }
+
+    eprintln!("bootpatcher: reading image {}", args.image);
+    let image_data = fs::read(&args.image).with_context(|| format!("read {}", args.image))?;
     eprintln!(
         "bootpatcher: parsing boot image ({} bytes)",
         image_data.len()
     );
-    let boot = BootImage::parse(&image_data).with_context(|| format!("parse {image}"))?;
+    let boot = BootImage::parse(&image_data).with_context(|| format!("parse {}", args.image))?;
 
     match boot.get_header().get_version() {
         BootImageVersion::Vendor(3 | 4) => {}
@@ -140,10 +170,131 @@ fn run() -> Result<()> {
     let mut output = Cursor::new(Vec::with_capacity(boot.get_size()));
     patcher.patch(&mut output)?;
 
-    let output_path = format!("{}.new", image_path.display());
+    let output_path = format!("{}.new", Path::new(&args.image).display());
     eprintln!("bootpatcher: writing {output_path}");
     fs::write(&output_path, output.into_inner()).with_context(|| format!("write {output_path}"))?;
     eprintln!("bootpatcher: done");
+    Ok(())
+}
+
+fn parse_args() -> Result<Option<Args>> {
+    let mut args = env::args().skip(1);
+    let mut image = None;
+    let mut module = None;
+    let mut boot = None;
+    let mut verify_symbols = true;
+
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "-p" | "--patch" => {
+                if image.is_some() || module.is_some() {
+                    bail!("-p/--patch was given more than once");
+                }
+                image = Some(
+                    args.next()
+                        .context("-p/--patch needs a vendor_boot image")?,
+                );
+                module = Some(args.next().context("-p/--patch needs an nksu.ko")?);
+            }
+            "-b" | "--boot" => {
+                if boot.is_some() {
+                    bail!("-b/--boot was given more than once");
+                }
+                boot = Some(args.next().context("-b/--boot needs a boot image")?);
+            }
+            "--no-symbol-check" => verify_symbols = false,
+            "-h" | "--help" => return Ok(None),
+            other => bail!("unexpected argument '{other}'\n{USAGE}"),
+        }
+    }
+
+    Ok(Some(Args {
+        image: image.context("missing -p <vendor_boot.img> <nksu.ko>")?,
+        module: module.context("missing -p <vendor_boot.img> <nksu.ko>")?,
+        boot,
+        verify_symbols,
+    }))
+}
+
+fn verify_kernel_symbols(module: &[u8], boot_path: Option<&str>) -> Result<()> {
+    let exports = symbols::read(module)?;
+    if exports.is_empty() {
+        bail!(
+            "module exports no kernel symbols in {} (built without the symbol export macro?)",
+            symbols::KSYMTAB_SECTION
+        );
+    }
+
+    let boot_path = boot_path.context(
+        "missing -b <boot.img>: kernel symbol verification needs the target boot image \
+         (or pass --no-symbol-check)",
+    )?;
+
+    eprintln!(
+        "bootpatcher: module needs {} required and {} optional kernel symbol(s)",
+        exports.required.len(),
+        exports.optional.len()
+    );
+    eprintln!("bootpatcher: reading boot image {boot_path}");
+    let boot_data = fs::read(boot_path).with_context(|| format!("read {boot_path}"))?;
+
+    let mut kernel_data = Vec::new();
+    {
+        let boot = BootImage::parse(&boot_data).with_context(|| format!("parse {boot_path}"))?;
+        let kernel = boot
+            .get_blocks()
+            .get_kernel()
+            .with_context(|| format!("{boot_path} has no kernel"))?;
+        eprintln!(
+            "bootpatcher: extracting kernel (compression={:?})",
+            kernel.get_compress_format()
+        );
+        kernel
+            .dump(&mut kernel_data, false)
+            .with_context(|| format!("extract kernel from {boot_path}"))?;
+    }
+    drop(boot_data);
+
+    eprintln!("bootpatcher: decoding kallsyms");
+    let available =
+        kallsyms::parse_names(&kernel_data).context("read kallsyms from the target kernel")?;
+    drop(kernel_data);
+    eprintln!(
+        "bootpatcher: kernel provides {} kallsyms symbol(s)",
+        available.len()
+    );
+
+    let missing_required: Vec<&str> = exports
+        .required
+        .iter()
+        .map(String::as_str)
+        .filter(|name| !available.contains(*name))
+        .collect();
+    let missing_optional: Vec<&str> = exports
+        .optional
+        .iter()
+        .map(String::as_str)
+        .filter(|name| !available.contains(*name))
+        .collect();
+
+    for name in &missing_optional {
+        eprintln!("bootpatcher: warning: optional symbol '{name}' is not present");
+    }
+
+    if !missing_required.is_empty() {
+        for name in &missing_required {
+            eprintln!("bootpatcher: missing required symbol: {name}");
+        }
+        bail!(
+            "target kernel lacks {} required symbol(s); refusing to patch",
+            missing_required.len()
+        );
+    }
+
+    eprintln!(
+        "bootpatcher: all {} required kernel symbol(s) present",
+        exports.required.len()
+    );
     Ok(())
 }
 

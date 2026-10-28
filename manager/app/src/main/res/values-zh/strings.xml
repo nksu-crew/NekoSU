@@ -68,6 +68,8 @@
     <string name="settings_amoled_black_summary">深色模式下使用纯黑色背景</string>
     <string name="settings_blur">模糊</string>
     <string name="settings_blur_summary">为滚动内容后的顶栏启用背景模糊</string>
+    <string name="settings_verify_kernel_symbols">校验内核符号</string>
+    <string name="settings_verify_kernel_symbols_summary">打补丁前核对 nksu.ko 所需的内核符号是否存在于 boot 镜像；仅在无法满足校验时关闭</string>
     <string name="settings_nav_bar_style">底栏样式</string>
     <string name="nav_bar_style_standard">标准</string>
     <string name="nav_bar_style_glass">液态玻璃</string>
@@ -260,6 +262,10 @@
     <string name="install_method_file">选择 vendor_boot 镜像</string>
     <string name="install_recommended">推荐</string>
     <string name="install_pick_vendor_boot_desc">选择从本机提取的 vendor_boot 镜像</string>
+    <string name="install_boot_image">boot 镜像</string>
+    <string name="install_pick_boot_desc">选择用于校验内核符号的 boot 镜像</string>
+    <string name="install_err_boot_missing">未选择 boot 镜像。校验内核符号需要它；请选择镜像，或在设置中关闭校验。</string>
+    <string name="install_boot_partition_missing">未找到 boot 分区。请在设置中关闭内核符号校验后再安装。</string>
     <string name="install_select_ko">内核模块 (LKM)</string>
     <string name="install_select_kmi">选择 KMI</string>
     <string name="install_use_local_lkm">使用本地 LKM 文件</string>
@@ -287,6 +293,8 @@
 
     <!-- 安装日志 / 错误信息 -->
     <string name="install_log_partition">[nksu] vendor_boot: %1$s</string>
+    <string name="install_log_boot_partition">[nksu] boot: %1$s</string>
+    <string name="install_log_err_boot_dump">[nksu] ERROR: 读取 boot 分区失败，无法校验内核符号</string>
     <string name="install_log_exported">[nksu] 已导出到: %1$s</string>
     <string name="install_log_export_failed">[nksu] 导出到 Download 失败: %1$s</string>
     <string name="install_log_rollback">[nksu] 写入失败，正在回滚原镜像</string>

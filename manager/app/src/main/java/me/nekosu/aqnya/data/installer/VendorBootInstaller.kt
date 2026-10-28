@@ -31,6 +31,7 @@ object VendorBootInstaller {
 
     /** 本次安装从分区 dump 的临时原镜像；仅用于 patch 与回滚，安装后删除。 */
     private const val SOURCE_IMAGE_NAME = "vendor_boot.source.img"
+    private const val BOOT_SOURCE_IMAGE_NAME = "boot.source.img"
     private const val RANDOM_TOKEN_LENGTH = 8
     private const val RANDOM_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
@@ -112,11 +113,26 @@ object VendorBootInstaller {
         return out
     }
 
+    /** Copy the user-selected boot image used for kernel symbol verification. */
+    fun stageBoot(
+        context: Context,
+        uri: Uri,
+    ): File {
+        val dir = installDir(context)
+        val out = File(dir, "boot.img")
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            out.outputStream().use { input.copyTo(it) }
+        } ?: throw IllegalStateException(context.getString(R.string.install_err_read_file))
+        return out
+    }
+
     suspend fun install(
         context: Context,
         vendorBoot: File,
+        bootImage: File?,
         koName: String?,
         koUri: Uri? = null,
+        verifySymbols: Boolean = true,
         onOutput: (String) -> Unit,
     ): Int =
         withContext(Dispatchers.IO) {
@@ -127,6 +143,9 @@ object VendorBootInstaller {
                     context.getString(R.string.install_err_ncore, bootpatcher.absolutePath),
                 )
             }
+            if (verifySymbols && (bootImage == null || !bootImage.isFile)) {
+                throw IllegalStateException(context.getString(R.string.install_err_boot_missing))
+            }
 
             val koFile =
                 resolveKo(context, koName, koUri)
@@ -134,7 +153,7 @@ object VendorBootInstaller {
 
             try {
                 onOutput(context.getString(R.string.install_log_patching))
-                val patched = patchImage(bootpatcher, vendorBoot, koFile, onOutput)
+                val patched = patchImage(bootpatcher, vendorBoot, bootImage, koFile, verifySymbols, onOutput)
                 if (patched == null) {
                     onOutput(context.getString(R.string.install_log_err_patch))
                     return@withContext -1
@@ -156,29 +175,44 @@ object VendorBootInstaller {
                     }.onFailure { onOutput(context.getString(R.string.install_log_export_failed, it.message.orEmpty())) }
                 0
             } finally {
-                // The staged input image is only needed for this run.
+                // The staged input images are only needed for this run.
                 vendorBoot.delete()
+                bootImage?.delete()
             }
         }
 
     /**
-     * 用 ncore 直接把 [koFile] 打进 [sourceImage]（v3/v4 vendor_boot）：
-     * bootpatcher 负责解包、把模块安装到 `lib/modules/nksu.ko`、登记 `modules.load` /
+     * 用 bootpatcher 直接把 [koFile] 打进 [sourceImage]（v3/v4 vendor_boot）：
+     * 解包、把模块安装到 `lib/modules/nksu.ko`、登记 `modules.load` /
      * `modules.dep`，保持各 ramdisk 的压缩与 v4 ramdisk 表，最后写出
-     * `<image>.new`。成功返回该文件，失败返回 null。
+     * `<image>.new`。启用 [verifySymbols] 时还会用 [bootImage] 校验模块所需的
+     * 内核符号。成功返回该文件，失败返回 null。
      *
-     * 只操作本地文件，以当前进程身份运行 ncore，无需 root。
+     * 只操作本地文件，以当前进程身份运行 bootpatcher，无需 root。
      */
     private fun patchImage(
         bootpatcher: File,
         sourceImage: File,
+        bootImage: File?,
         koFile: File,
+        verifySymbols: Boolean,
         onOutput: (String) -> Unit,
     ): File? {
         val dir = sourceImage.parentFile ?: return null
         val output = File(dir, "${sourceImage.name}.new")
         output.delete()
-        val args = listOf("-p", sourceImage.absolutePath, koFile.absolutePath)
+        val args =
+            buildList {
+                add("-p")
+                add(sourceImage.absolutePath)
+                add(koFile.absolutePath)
+                if (verifySymbols) {
+                    add("-b")
+                    add(requireNotNull(bootImage).absolutePath)
+                } else {
+                    add("--no-symbol-check")
+                }
+            }
         if (!runTool(bootpatcher, args, dir, onOutput) || !output.isFile) {
             output.delete()
             return null
@@ -213,6 +247,14 @@ object VendorBootInstaller {
         return findVendorBoot(inactive, allowSlotless = false)
     }
 
+    /** boot 分区（kernel + ramdisk），用于在 patch 前校验内核符号。 */
+    fun detectBootPartition(): String? = findBoot(currentSlotSuffix(), allowSlotless = true)
+
+    fun detectInactiveBootPartition(): String? {
+        val inactive = inactiveSlotSuffix() ?: return null
+        return findBoot(inactive, allowSlotless = false)
+    }
+
     fun currentSlotSuffix(): String? = Ncore.getSlotSuffix()
 
     /** 非活动 slot 后缀；非 A/B 设备返回 null。 */
@@ -243,6 +285,16 @@ object VendorBootInstaller {
             ?: if (RootShell.available()) RootShell.findVendorBoot(slot, allowSlotless) else null
     }
 
+    /** 查找 boot 分区路径，回退顺序与 [findVendorBoot] 一致。 */
+    private fun findBoot(
+        slotSuffix: String?,
+        allowSlotless: Boolean,
+    ): String? {
+        val slot = slotSuffix.orEmpty()
+        return Ncore.findBoot(slot, allowSlotless)
+            ?: if (RootShell.available()) RootShell.findBoot(slot, allowSlotless) else null
+    }
+
     private fun quote(s: String) = "'" + s.replace("'", "'\\''") + "'"
 
     /** Best-effort partition capacity, used to avoid writing past the block device. */
@@ -267,9 +319,10 @@ object VendorBootInstaller {
     /**
      * 直接安装：以 root 读取指定 vendor_boot 分区，打入 nksu.ko 后写回。
      *
-     * 流程：dump 原镜像 -> `bootpatcher -p <镜像> <ko>` 打补丁 -> 写回分区；写入失败
-     * 时把原镜像写回回滚。KernelSU 的「直接安装 / 刷入非活动分区」都走这里，
-     * 区别只是 @partition 指向当前或非活动 slot。
+     * 流程：dump 原镜像（开启符号校验时再 dump 同 slot 的 boot 分区） ->
+     * `bootpatcher -p <镜像> <ko> -b <boot>` 打补丁 -> 写回分区；写入失败时把原镜像
+     * 写回回滚。KernelSU 的「直接安装 / 刷入非活动分区」都走这里，区别只是
+     * @partition 指向当前或非活动 slot。
      *
      * patch 全程只操作本地临时文件，不需要 root；只有 dump / 写回分区用到 root，
      * 且优先 nksu 内核模块、必要时回退到 `/system/bin/su`。原镜像只现 dump 一份、
@@ -283,6 +336,8 @@ object VendorBootInstaller {
         koName: String?,
         koUri: Uri? = null,
         partition: String,
+        bootPartition: String?,
+        verifySymbols: Boolean = true,
         onOutput: (String) -> Unit,
     ): Int =
         withContext(Dispatchers.IO) {
@@ -300,6 +355,10 @@ object VendorBootInstaller {
             }
             if (partition.isBlank()) {
                 onOutput(context.getString(R.string.install_log_err_no_part))
+                return@withContext -1
+            }
+            if (verifySymbols && bootPartition.isNullOrBlank()) {
+                onOutput(context.getString(R.string.install_boot_partition_missing))
                 return@withContext -1
             }
             // root 可以来自 nksu 内核模块（已装），也可以来自 /system/bin/su
@@ -322,12 +381,35 @@ object VendorBootInstaller {
                 return@withContext -1
             }
 
+            // 符号检查需要同一 slot 的内核，dump boot 分区供 bootpatcher 解析 kallsyms。
+            val bootSource = File(dir, BOOT_SOURCE_IMAGE_NAME)
+            if (verifySymbols) {
+                bootSource.delete()
+                bootSource.createNewFile()
+                onOutput(context.getString(R.string.install_log_boot_partition, bootPartition.orEmpty()))
+                if (!copyBlock(bootPartition.orEmpty(), bootSource.absolutePath) || !bootSource.exists()) {
+                    onOutput(context.getString(R.string.install_log_err_boot_dump))
+                    source.delete()
+                    bootSource.delete()
+                    return@withContext -1
+                }
+            }
+
             // 2) 交给 bootpatcher 直接把模块打进镜像（无需 root），得到补丁镜像。
             onOutput(context.getString(R.string.install_log_patching))
-            val patched = patchImage(bootpatcher, source, koFile, onOutput)
+            val patched =
+                patchImage(
+                    bootpatcher,
+                    source,
+                    bootSource.takeIf { verifySymbols },
+                    koFile,
+                    verifySymbols,
+                    onOutput,
+                )
             if (patched == null) {
                 onOutput(context.getString(R.string.install_log_err_patch))
                 source.delete()
+                bootSource.delete()
                 return@withContext -1
             }
 
@@ -336,6 +418,7 @@ object VendorBootInstaller {
             if (capacity != null && patched.length() > capacity) {
                 onOutput(context.getString(R.string.install_log_err_too_large, patched.length(), capacity))
                 source.delete()
+                bootSource.delete()
                 patched.delete()
                 return@withContext -1
             }
@@ -344,12 +427,14 @@ object VendorBootInstaller {
                 onOutput(context.getString(R.string.install_log_rollback))
                 copyBlock(source.absolutePath, part)
                 source.delete()
+                bootSource.delete()
                 patched.delete()
                 onOutput(context.getString(R.string.install_log_err_flash))
                 return@withContext -1
             }
 
             source.delete()
+            bootSource.delete()
             patched.delete()
             onOutput(context.getString(R.string.install_log_direct_done))
             0

@@ -63,12 +63,24 @@ object RootShell {
     fun findVendorBoot(
         slotSuffix: String,
         allowSlotless: Boolean,
+    ): String? = findPartition("vendor_boot", slotSuffix, allowSlotless)
+
+    /** 以 root 查找 boot 分区路径；候选顺序与 [findVendorBoot] 一致。 */
+    fun findBoot(
+        slotSuffix: String,
+        allowSlotless: Boolean,
+    ): String? = findPartition("boot", slotSuffix, allowSlotless)
+
+    private fun findPartition(
+        partition: String,
+        slotSuffix: String,
+        allowSlotless: Boolean,
     ): String? {
         val candidates =
             buildList {
                 for (base in listOf("/dev/block/by-name", "/dev/block/bootdevice/by-name")) {
-                    add("$base/vendor_boot$slotSuffix")
-                    if (allowSlotless) add("$base/vendor_boot")
+                    add("$base/$partition$slotSuffix")
+                    if (allowSlotless) add("$base/$partition")
                 }
             }
         val script =

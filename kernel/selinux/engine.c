@@ -43,12 +43,12 @@ static void (*context_struct_compute_av_fn)(struct policydb *policydb, struct co
 int nksu_engine_init(void)
 {
 	security_dump_masked_av_fn =
-		(typeof(security_dump_masked_av_fn))nksu_ksym_lookup("security_dump_masked_av");
+		(typeof(security_dump_masked_av_fn))NKSU_KSYM_TRY_LOOKUP("security_dump_masked_av");
 	if (!security_dump_masked_av_fn)
 		pr_warn("[selinux_hide] security_dump_masked_av not found\n");
 
 	context_struct_compute_av_fn =
-		(typeof(context_struct_compute_av_fn))nksu_ksym_lookup("context_struct_compute_av");
+		(typeof(context_struct_compute_av_fn))NKSU_KSYM_TRY_LOOKUP("context_struct_compute_av");
 	if (!context_struct_compute_av_fn)
 		pr_warn("[selinux_hide] context_struct_compute_av not found\n");
 

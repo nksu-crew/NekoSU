@@ -11,6 +11,7 @@
 #include "klog.h"
 #include <linux/errno.h>
 #include <fmac.h>
+#include "symbol/symbol.h"
 #include "symbol/symbol_compat.h"
 
 /* definitions */
@@ -118,6 +119,7 @@ typeof(probe_kernel_write) *nksu_probe_kernel_write;
 
 #define NKSU_RESOLVE(ptr, sym)                                   \
 	do {                                                     \
+		NKSU_SYMBOL_EXPORT(sym);                         \
 		(ptr) = (typeof(ptr))nksu_ksym_lookup(sym);      \
 		if (!(ptr)) {                                    \
 			pr_err("[ksym] unresolved %s\n", (sym)); \

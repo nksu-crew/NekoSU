@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.nekosu.aqnya.data.installer.VendorBootInstaller
 import me.nekosu.aqnya.data.kernel.KernelInfo
+import me.nekosu.aqnya.data.prefs.AppPreferences
 import me.nekosu.aqnya.data.shell.RootShell
 import me.nekosu.aqnya.util.LocaleHelper
 
@@ -68,17 +69,30 @@ data class InstallUiState(
     val method: InstallMethod = InstallMethod.FILE,
     val vendorBootUri: Uri? = null,
     val vendorBootName: String? = null,
+    val bootUri: Uri? = null,
+    val bootName: String? = null,
+    val verifyKernelSymbols: Boolean = true,
     val rootAvailable: Boolean = false,
     val directTarget: String? = null,
+    val directBootTarget: String? = null,
     val inactiveTarget: String? = null,
+    val inactiveBootTarget: String? = null,
     val running: Boolean = false,
     val done: Boolean = false,
     val success: Boolean? = null,
     val message: String = "",
 ) {
-    val directReady: Boolean get() = rootAvailable && directTarget != null
+    val directReady: Boolean
+        get() =
+            rootAvailable &&
+                directTarget != null &&
+                (!verifyKernelSymbols || directBootTarget != null)
 
-    val inactiveReady: Boolean get() = rootAvailable && inactiveTarget != null
+    val inactiveReady: Boolean
+        get() =
+            rootAvailable &&
+                inactiveTarget != null &&
+                (!verifyKernelSymbols || inactiveBootTarget != null)
 
     /** 有可用的内核模块（自动匹配或本地文件）。 */
     val hasKernelModule: Boolean
@@ -89,7 +103,7 @@ data class InstallUiState(
             !running &&
                 hasKernelModule &&
                 when (method) {
-                    InstallMethod.FILE -> vendorBootUri != null
+                    InstallMethod.FILE -> vendorBootUri != null && (!verifyKernelSymbols || bootUri != null)
                     InstallMethod.DIRECT -> directReady
                     InstallMethod.INACTIVE -> inactiveReady
                 }
@@ -106,15 +120,32 @@ data class InstallUiState(
 class InstallViewModel(
     app: Application,
 ) : AndroidViewModel(app) {
-    private val _uiState = MutableStateFlow(InstallUiState())
-    val uiState: StateFlow<InstallUiState> = _uiState.asStateFlow()
-
     private val appContext = app.applicationContext
+
+    private val _uiState =
+        MutableStateFlow(
+            InstallUiState(verifyKernelSymbols = AppPreferences.verifyKernelSymbols(appContext)),
+        )
+    val uiState: StateFlow<InstallUiState> = _uiState.asStateFlow()
 
     init {
         viewModelScope.launch {
             RootShell.availability.filterNotNull().collect { hasRoot ->
                 applyRootAvailability(hasRoot)
+            }
+        }
+        viewModelScope.launch {
+            AppPreferences.verifyKernelSymbolsFlow(appContext).collect { enabled ->
+                _uiState.update { state ->
+                    val next = state.copy(verifyKernelSymbols = enabled)
+                    val method =
+                        when (state.method) {
+                            InstallMethod.DIRECT -> if (next.directReady) state.method else InstallMethod.FILE
+                            InstallMethod.INACTIVE -> if (next.inactiveReady) state.method else InstallMethod.FILE
+                            InstallMethod.FILE -> state.method
+                        }
+                    next.copy(method = method)
+                }
             }
         }
     }
@@ -160,30 +191,37 @@ class InstallViewModel(
         }
     }
 
-    /** root 状态由启动阶段检测；这里只静默查找可直接安装的 vendor_boot 分区。 */
+    /** root 状态由启动阶段检测；这里只静默查找可直接安装的 vendor_boot / boot 分区。 */
     private suspend fun applyRootAvailability(hasRoot: Boolean) {
-        val (current, inactive) =
+        val targets =
             withContext(Dispatchers.IO) {
                 if (hasRoot) {
-                    VendorBootInstaller.detectVendorBootPartition() to
-                        VendorBootInstaller.detectInactiveVendorBootPartition()
+                    PartitionTargets(
+                        vendorBoot = VendorBootInstaller.detectVendorBootPartition(),
+                        boot = VendorBootInstaller.detectBootPartition(),
+                        inactiveVendorBoot = VendorBootInstaller.detectInactiveVendorBootPartition(),
+                        inactiveBoot = VendorBootInstaller.detectInactiveBootPartition(),
+                    )
                 } else {
-                    null to null
+                    PartitionTargets()
                 }
             }
         _uiState.update { state ->
+            val next =
+                state.copy(
+                    rootAvailable = hasRoot,
+                    directTarget = targets.vendorBoot,
+                    directBootTarget = targets.boot,
+                    inactiveTarget = targets.inactiveVendorBoot,
+                    inactiveBootTarget = targets.inactiveBoot,
+                )
             val method =
                 when (state.method) {
-                    InstallMethod.DIRECT -> if (hasRoot && current != null) state.method else InstallMethod.FILE
-                    InstallMethod.INACTIVE -> if (hasRoot && inactive != null) state.method else InstallMethod.FILE
+                    InstallMethod.DIRECT -> if (next.directReady) state.method else InstallMethod.FILE
+                    InstallMethod.INACTIVE -> if (next.inactiveReady) state.method else InstallMethod.FILE
                     InstallMethod.FILE -> state.method
                 }
-            state.copy(
-                rootAvailable = hasRoot,
-                directTarget = current,
-                inactiveTarget = inactive,
-                method = method,
-            )
+            next.copy(method = method)
         }
     }
 
@@ -255,6 +293,25 @@ class InstallViewModel(
         }
     }
 
+    fun selectBoot(uri: Uri) {
+        if (_uiState.value.running) return
+        val name =
+            uri.lastPathSegment
+                ?.substringAfterLast('/')
+                ?.takeIf { it.isNotBlank() }
+                ?: uri.toString()
+        _uiState.update {
+            it.copy(
+                method = InstallMethod.FILE,
+                bootUri = uri,
+                bootName = name,
+                done = false,
+                success = null,
+                message = "",
+            )
+        }
+    }
+
     fun install() {
         val current = _uiState.value
         if (current.running || current.done) return
@@ -271,8 +328,24 @@ class InstallViewModel(
             val exit =
                 when (current.method) {
                     InstallMethod.FILE -> runFileInstall(current, koName, koUri, log)
-                    InstallMethod.DIRECT -> runDirectInstall(current.directTarget.orEmpty(), koName, koUri, log)
-                    InstallMethod.INACTIVE -> runDirectInstall(current.inactiveTarget.orEmpty(), koName, koUri, log)
+                    InstallMethod.DIRECT ->
+                        runDirectInstall(
+                            current.directTarget.orEmpty(),
+                            current.directBootTarget,
+                            current.verifyKernelSymbols,
+                            koName,
+                            koUri,
+                            log,
+                        )
+                    InstallMethod.INACTIVE ->
+                        runDirectInstall(
+                            current.inactiveTarget.orEmpty(),
+                            current.inactiveBootTarget,
+                            current.verifyKernelSymbols,
+                            koName,
+                            koUri,
+                            log,
+                        )
                 }
 
             val ok = exit == 0
@@ -297,7 +370,18 @@ class InstallViewModel(
         return runCatching {
             val ctx = i18nContext()
             val staged = withContext(Dispatchers.IO) { VendorBootInstaller.stageVendorBoot(ctx, uri) }
-            VendorBootInstaller.install(ctx, staged, koName, koUri) { line -> appendLog(log, line) }
+            val boot =
+                current.bootUri
+                    ?.takeIf { current.verifyKernelSymbols }
+                    ?.let { bootUri -> withContext(Dispatchers.IO) { VendorBootInstaller.stageBoot(ctx, bootUri) } }
+            VendorBootInstaller.install(
+                ctx,
+                staged,
+                boot,
+                koName,
+                koUri,
+                current.verifyKernelSymbols,
+            ) { line -> appendLog(log, line) }
         }.getOrElse { e ->
             appendError(log, e)
             -1
@@ -306,12 +390,21 @@ class InstallViewModel(
 
     private suspend fun runDirectInstall(
         partition: String,
+        bootPartition: String?,
+        verifySymbols: Boolean,
         koName: String?,
         koUri: Uri?,
         log: StringBuilder,
     ): Int =
         runCatching {
-            VendorBootInstaller.directInstall(i18nContext(), koName, koUri, partition) { line -> appendLog(log, line) }
+            VendorBootInstaller.directInstall(
+                i18nContext(),
+                koName,
+                koUri,
+                partition,
+                bootPartition,
+                verifySymbols,
+            ) { line -> appendLog(log, line) }
         }.getOrElse { e ->
             appendError(log, e)
             -1
@@ -352,6 +445,13 @@ class InstallViewModel(
         val currentKmi: String?,
         val candidates: List<String>,
         val recommendedKo: String?,
+    )
+
+    private data class PartitionTargets(
+        val vendorBoot: String? = null,
+        val boot: String? = null,
+        val inactiveVendorBoot: String? = null,
+        val inactiveBoot: String? = null,
     )
 }
 
