@@ -6,7 +6,10 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -49,6 +52,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
@@ -97,6 +103,8 @@ fun GlassBottomNavigationBar(
     val containerColor = scheme.surfaceContainer.copy(alpha = 0.40f)
     val selectionSurface =
         if (isDark) Color.White.copy(alpha = 0.16f) else Color.Black.copy(alpha = 0.18f)
+    val tabsBackdrop = rememberLayerBackdrop()
+    val selectionBackdrop = rememberCombinedBackdrop(backdrop, tabsBackdrop)
 
     var dragging by remember { mutableStateOf(false) }
     val pressProgress by animateFloatAsState(
@@ -139,50 +147,19 @@ fun GlassBottomNavigationBar(
         val travel = abs(animatedIndex - selectedIndex).coerceIn(0f, 1f)
         val stretch = 1f + travel * 0.06f
 
-        // The selected pill stays behind the content: its lensed backdrop is
-        // the page, while the icons remain crisp on top.
-        Box(
-            modifier =
-                Modifier
-                    .align(Alignment.CenterStart)
-                    .offset(x = 4.dp + tabWidth * animatedIndex + dragOffsetDp)
-                    .width(tabWidth)
-                    .height(maxHeight - 8.dp)
-                    .graphicsLayer {
-                        scaleX = stretch
-                        scaleY = 1f - (stretch - 1f) * 0.45f
-                        transformOrigin = TransformOrigin.Center
-                    }
-                    .drawBackdrop(
-                        backdrop = backdrop,
-                        shape = { selectionShape },
-                        effects = {
-                            lens(
-                                refractionHeight = 10.dp.toPx() * pressProgress,
-                                refractionAmount = 14.dp.toPx() * pressProgress,
-                                chromaticAberration = true,
-                            )
-                        },
-                        highlight = { Highlight.Default.copy(alpha = pressProgress) },
-                        shadow = { Shadow(alpha = pressProgress) },
-                        innerShadow = {
-                            InnerShadow(
-                                radius = 8.dp * pressProgress,
-                                alpha = pressProgress,
-                            )
-                        },
-                        onDrawSurface = {
-                            drawRect(selectionSurface, alpha = 1f - pressProgress)
-                            drawRect(Color.Black.copy(alpha = 0.03f * pressProgress))
-                        },
-                    ),
-        )
-
         Row(
             modifier =
                 Modifier
                     .fillMaxSize()
-                    .padding(4.dp)
+                    .layerBackdrop(tabsBackdrop)
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            dragging = true
+                            waitForUpOrCancellation()
+                            dragging = false
+                        }
+                    }
                     .pointerInput(tabWidthPx, selectedIndex) {
                         detectHorizontalDragGestures(
                             onDragStart = {
@@ -229,6 +206,45 @@ fun GlassBottomNavigationBar(
                 )
             }
         }
+
+        // The pill samples the page plus the tab-content layer, so its lens
+        // can refract the icons themselves, as in AndroidLiquidGlass.
+        Box(
+            modifier =
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .offset(x = 4.dp + tabWidth * animatedIndex + dragOffsetDp)
+                    .width(tabWidth)
+                    .height(maxHeight - 8.dp)
+                    .graphicsLayer {
+                        scaleX = stretch
+                        scaleY = 1f - (stretch - 1f) * 0.45f
+                        transformOrigin = TransformOrigin.Center
+                    }
+                    .drawBackdrop(
+                        backdrop = selectionBackdrop,
+                        shape = { selectionShape },
+                        effects = {
+                            lens(
+                                refractionHeight = 10.dp.toPx() * pressProgress,
+                                refractionAmount = 14.dp.toPx() * pressProgress,
+                                chromaticAberration = true,
+                            )
+                        },
+                        highlight = { Highlight.Default.copy(alpha = pressProgress) },
+                        shadow = { Shadow(alpha = pressProgress) },
+                        innerShadow = {
+                            InnerShadow(
+                                radius = 8.dp * pressProgress,
+                                alpha = pressProgress,
+                            )
+                        },
+                        onDrawSurface = {
+                            drawRect(selectionSurface, alpha = 1f - pressProgress)
+                            drawRect(Color.Black.copy(alpha = 0.03f * pressProgress))
+                        },
+                    ),
+        )
     }
 }
 
