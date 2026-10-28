@@ -99,6 +99,9 @@ val LocalBottomBarClearance = compositionLocalOf { GlassBottomBarContentPadding 
 
 private val GlassTabMinWidth = 76.dp
 private val GlassPillHeight = 56.dp
+
+/** Pressed pill height; it stops flush with the 64 dp bar instead of bulging out. */
+private val GlassPillPressedHeight = 64.dp
 private val GlassBarInnerPadding = 4.dp
 
 /** Item scale driven by the bar press progress, read from a graphics layer. */
@@ -175,7 +178,7 @@ fun GlassBottomNavigationBar(
                 valueRange = 0f..lastIndex.toFloat(),
                 visibilityThreshold = 0.001f,
                 initialScale = 1f,
-                pressedScale = 78f / 56f,
+                pressedScale = GlassPillPressedHeight / GlassPillHeight,
                 canDrag = { offset -> offset.x in 0f..totalWidthPx },
                 onDragStarted = { position ->
                     updateValue(indexAt(position.x).toFloat())
@@ -278,7 +281,7 @@ fun GlassBottomNavigationBar(
                         layerBlock = {
                             val width = size.width.coerceAtLeast(1f)
                             val scale =
-                                lerp(1f, 1f + 16.dp.toPx() / width, dragAnimation.pressProgress)
+                                lerp(1f, 1f + 12.dp.toPx() / width, dragAnimation.pressProgress)
                             scaleX = scale
                             scaleY = scale
                         },
@@ -286,7 +289,7 @@ fun GlassBottomNavigationBar(
                     ),
         ) {
             CompositionLocalProvider(
-                LocalGlassBarTabScale provides { lerp(1f, 1.2f, dragAnimation.pressProgress) },
+                LocalGlassBarTabScale provides { lerp(1f, 1.1f, dragAnimation.pressProgress) },
             ) {
                 Row(
                     modifier =
