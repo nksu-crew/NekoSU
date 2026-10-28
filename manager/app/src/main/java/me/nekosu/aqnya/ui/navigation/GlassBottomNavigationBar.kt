@@ -101,8 +101,10 @@ fun GlassBottomNavigationBar(
     val barShape = remember { RoundedCornerShape(GlassBottomBarHeight / 2) }
     val selectionShape = remember { RoundedCornerShape(28.dp) }
     val containerColor = scheme.surfaceContainer.copy(alpha = 0.40f)
+    // Kept opaque enough that the selected pill still reads as selected on top
+    // of bright, busy backdrops once vibrancy and blur have been applied.
     val selectionSurface =
-        if (isDark) Color.White.copy(alpha = 0.16f) else Color.Black.copy(alpha = 0.18f)
+        if (isDark) Color.White.copy(alpha = 0.26f) else Color.Black.copy(alpha = 0.28f)
     val tabsBackdrop = rememberLayerBackdrop()
     val selectionBackdrop = rememberCombinedBackdrop(backdrop, tabsBackdrop)
 
