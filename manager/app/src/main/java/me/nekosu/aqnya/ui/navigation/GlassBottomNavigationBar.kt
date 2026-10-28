@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -39,12 +38,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.graphics.shadow.Shadow as ComposeShadow
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -75,6 +72,8 @@ import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.InnerShadow
+import com.kyant.backdrop.shadow.Shadow
+import com.kyant.capsule.ContinuousCapsule
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -127,7 +126,7 @@ fun GlassBottomNavigationBar(
 
     val scheme = MaterialTheme.colorScheme
     val isDark = scheme.surfaceContainer.luminance() < 0.5f
-    val barShape = CircleShape
+    val barShape = ContinuousCapsule
     val containerColor = scheme.surfaceContainer.copy(alpha = 0.40f)
     // KernelSU's clear-glass pill: the accent tone comes from the selected
     // icon and label, the surface itself stays at a 10% neutral fill.
@@ -259,25 +258,21 @@ fun GlassBottomNavigationBar(
             modifier =
                 Modifier.fillMaxSize()
                     .layerBackdrop(tabsBackdrop)
-                    .dropShadow(
-                        shape = barShape,
-                        shadow =
-                            ComposeShadow(
-                                radius = 10.dp,
-                                color = Color.Black,
-                                alpha = if (isDark) 0.2f else 0.1f,
-                            ),
-                    )
                     .drawBackdrop(
                         backdrop = backdrop,
                         shape = { barShape },
                         effects = {
                             padding = maxOf(padding, 40.dp.toPx())
                             vibrancy()
-                            blur(4.dp.toPx())
+                            blur(8.dp.toPx())
                             lens(24.dp.toPx(), 24.dp.toPx())
                         },
-                        highlight = { Highlight.Default.copy(alpha = 0.75f) },
+                        highlight = { Highlight.Default.copy(alpha = 1f) },
+                        shadow = {
+                            Shadow.Default.copy(
+                                color = Color.Black.copy(alpha = if (isDark) 0.2f else 0.1f),
+                            )
+                        },
                         layerBlock = {
                             val width = size.width.coerceAtLeast(1f)
                             val scale =
@@ -344,12 +339,12 @@ fun GlassBottomNavigationBar(
                                     refractionHeight = 10.dp.toPx() * progress,
                                     refractionAmount = 14.dp.toPx() * progress,
                                     depthEffect = true,
-                                    chromaticAberration = true,
                                 )
                             },
                             highlight = {
                                 Highlight.Default.copy(alpha = dragAnimation.pressProgress)
                             },
+                            shadow = { Shadow(alpha = dragAnimation.pressProgress) },
                             innerShadow = {
                                 val progress = dragAnimation.pressProgress
                                 InnerShadow(

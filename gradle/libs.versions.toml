@@ -21,6 +21,7 @@ ktlint = "14.2.0"
 haze = "2.0.1"
 graphicsShapes = "1.1.0"
 backdrop = "2.0.1"
+capsule = "2.1.3"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -48,6 +49,7 @@ androidx-profileinstaller = { module = "androidx.profileinstaller:profileinstall
 haze = { module = "dev.chrisbanes.haze:haze", version.ref = "haze" }
 haze-blur = { module = "dev.chrisbanes.haze:haze-blur", version.ref = "haze" }
 kyant-backdrop = { module = "io.github.kyant0:backdrop", version.ref = "backdrop" }
+kyant-capsule = { module = "io.github.kyant0:capsule", version.ref = "capsule" }
 androidx-graphics-shapes = { group = "androidx.graphics", name = "graphics-shapes", version.ref = "graphicsShapes" }
 
 [plugins]
