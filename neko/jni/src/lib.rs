@@ -890,7 +890,12 @@ pub extern "system" fn Java_me_nekosu_aqnya_core_Ncore_findVendorBoot(
     allow_slotless: jboolean,
 ) -> jstring {
     let slot = get_utf(&mut env, &slot).unwrap_or_default();
-    find_partition(&mut env, "vendor_boot", &slot, allow_slotless != 0)
+    find_partition(
+        &mut env,
+        "vendor_boot",
+        &slot,
+        jboolean_is_true(allow_slotless),
+    )
 }
 
 #[unsafe(no_mangle)]
@@ -901,7 +906,13 @@ pub extern "system" fn Java_me_nekosu_aqnya_core_Ncore_findBoot(
     allow_slotless: jboolean,
 ) -> jstring {
     let slot = get_utf(&mut env, &slot).unwrap_or_default();
-    find_partition(&mut env, "boot", &slot, allow_slotless != 0)
+    find_partition(&mut env, "boot", &slot, jboolean_is_true(allow_slotless))
+}
+
+/// jni 0.22 aliases `jboolean` to `bool` on Android and to `u8` elsewhere, so
+/// compare against the type's default instead of the integer literal 0.
+fn jboolean_is_true(value: jboolean) -> bool {
+    value != jboolean::default()
 }
 
 /// Find a block-device path through `/dev/block/by-name` (or bootdevice) as
