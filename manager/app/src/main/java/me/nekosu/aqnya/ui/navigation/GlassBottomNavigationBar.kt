@@ -7,7 +7,6 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.EaseOut
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -30,7 +30,6 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -42,20 +41,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.onClick
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
@@ -158,16 +148,10 @@ fun GlassBottomNavigationBar(
             }
         }
 
-    var currentIndex by remember { mutableIntStateOf(selectedIndex) }
     val onTabClickUpdated by rememberUpdatedState(onTabClick)
+    val latestSelectedIndex by rememberUpdatedState(selectedIndex)
     val lastIndex = items.lastIndex
     val innerPaddingPx = with(density) { GlassBarInnerPadding.toPx() }
-
-    fun indexAt(positionX: Float): Int {
-        if (tabWidthPx <= 0f) return currentIndex
-        val logicalX = if (isLtr) positionX else totalWidthPx - positionX
-        return ((logicalX - innerPaddingPx) / tabWidthPx).toInt().coerceIn(0, lastIndex)
-    }
 
     val dragAnimation =
         remember(animationScope, items, density, isLtr) {
@@ -178,23 +162,14 @@ fun GlassBottomNavigationBar(
                 visibilityThreshold = 0.001f,
                 initialScale = 1f,
                 pressedScale = GlassPillPressedHeight / GlassPillHeight,
-                canDrag = { offset -> offset.x in 0f..totalWidthPx },
-                onDragStarted = { position ->
-                    updateValue(indexAt(position.x).toFloat())
-                },
+                canDrag = { true },
+                onDragStarted = {},
                 onDragStopped = {
                     val targetIndex = targetValue.roundToInt().coerceIn(0, lastIndex)
-                    if (currentIndex != targetIndex) {
-                        currentIndex = targetIndex
+                    animateToValue(targetIndex.toFloat())
+                    if (targetIndex != latestSelectedIndex) {
                         onTabClickUpdated(targetIndex)
                     }
-                    updateValue(targetIndex.toFloat())
-                    animationScope.launch {
-                        offsetAnimation.animateTo(0f, spring(1f, 300f, 0.5f))
-                    }
-                },
-                onDragCancelled = {
-                    updateValue(currentIndex.toFloat())
                     animationScope.launch {
                         offsetAnimation.animateTo(0f, spring(1f, 300f, 0.5f))
                     }
@@ -214,19 +189,9 @@ fun GlassBottomNavigationBar(
         }
 
     LaunchedEffect(selectedIndex, dragAnimation) {
-        if (currentIndex != selectedIndex) {
-            currentIndex = selectedIndex
+        if (dragAnimation.value != selectedIndex.toFloat()) {
             dragAnimation.animateToValue(selectedIndex.toFloat())
         }
-    }
-
-    fun activateTab(index: Int) {
-        if (index !in items.indices) return
-        if (currentIndex != index) {
-            currentIndex = index
-            onTabClickUpdated(index)
-        }
-        dragAnimation.animateToValue(index.toFloat())
     }
 
     val interactiveHighlight =
@@ -296,8 +261,6 @@ fun GlassBottomNavigationBar(
                             }
                             .selectableGroup()
                             .then(interactiveHighlight.modifier)
-                            .then(interactiveHighlight.gestureModifier)
-                            .then(dragAnimation.modifier)
                             .padding(GlassBarInnerPadding),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -307,7 +270,7 @@ fun GlassBottomNavigationBar(
                             selected = index == selectedIndex,
                             selectedColor = accentColor,
                             unselectedColor = tabContentColor,
-                            onSelect = { activateTab(index) },
+                            onSelect = { onTabClickUpdated(index) },
                         )
                     }
                 }
@@ -330,6 +293,8 @@ fun GlassBottomNavigationBar(
                             scaleX /= 1f - (velocity * 0.75f).coerceIn(-0.2f, 0.2f)
                             scaleY *= 1f - (velocity * 0.25f).coerceIn(-0.2f, 0.2f)
                         }
+                        .then(interactiveHighlight.gestureModifier)
+                        .then(dragAnimation.modifier)
                         .drawBackdrop(
                             backdrop = combinedBackdrop,
                             shape = { barShape },
@@ -382,32 +347,16 @@ private fun RowScope.GlassBottomBarItem(
             animationSpec = tween(180),
             label = "glassTabContentColor",
         )
-    val select = onSelect
-
     Column(
         modifier =
             modifier
-                .semantics(mergeDescendants = true) {
-                    this.selected = selected
-                    role = Role.Tab
-                    onClick {
-                        select()
-                        true
-                    }
-                }
-                .onKeyEvent { event ->
-                    val activationKey =
-                        event.key == Key.Enter ||
-                            event.key == Key.NumPadEnter ||
-                            event.key == Key.Spacebar
-                    if (activationKey) {
-                        if (event.type == KeyEventType.KeyUp) select()
-                        true
-                    } else {
-                        false
-                    }
-                }
-                .focusable()
+                .selectable(
+                    selected = selected,
+                    interactionSource = null,
+                    indication = null,
+                    role = Role.Tab,
+                    onClick = onSelect,
+                )
                 .fillMaxHeight()
                 .weight(1f)
                 .graphicsLayer {
