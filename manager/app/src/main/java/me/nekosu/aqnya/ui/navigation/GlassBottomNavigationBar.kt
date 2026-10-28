@@ -96,7 +96,7 @@ fun GlassBottomNavigationBar(
     val selectionShape = remember { RoundedCornerShape(28.dp) }
     val containerColor = scheme.surfaceContainer.copy(alpha = 0.40f)
     val selectionSurface =
-        if (isDark) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.10f)
+        if (isDark) Color.White.copy(alpha = 0.16f) else Color.Black.copy(alpha = 0.18f)
 
     var dragging by remember { mutableStateOf(false) }
     val pressProgress by animateFloatAsState(
