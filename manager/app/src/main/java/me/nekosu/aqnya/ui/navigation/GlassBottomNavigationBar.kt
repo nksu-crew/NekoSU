@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -32,12 +31,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -50,12 +48,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.chrisbanes.haze.ExperimentalHazeApi
-import dev.chrisbanes.haze.HazeInput
-import dev.chrisbanes.haze.HazePerformanceMode
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.glass.GlassStyle
-import dev.chrisbanes.haze.glass.hazeGlass
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.highlight.Highlight
+import com.kyant.backdrop.shadow.InnerShadow
+import com.kyant.backdrop.shadow.Shadow
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -77,15 +77,14 @@ val StandardBottomBarContentPadding = 96.dp
 val LocalBottomBarClearance = compositionLocalOf { GlassBottomBarContentPadding }
 
 /**
- * Floating liquid-glass bottom bar built on Haze's Glass material.
+ * Liquid-glass bar built on Kyant0/AndroidLiquidGlass's backdrop renderer.
  *
- * The caller must mark the content shown behind the bar with
- * `Modifier.hazeSource(hazeState)`.
+ * The caller must record the content behind the bar with
+ * `Modifier.layerBackdrop(backdrop)`.
  */
-@OptIn(ExperimentalHazeApi::class)
 @Composable
 fun GlassBottomNavigationBar(
-    hazeState: HazeState,
+    backdrop: Backdrop,
     items: List<BottomNavItem>,
     selectedIndex: Int,
     onTabClick: (Int) -> Unit,
@@ -95,61 +94,36 @@ fun GlassBottomNavigationBar(
     val isDark = scheme.surfaceContainer.luminance() < 0.5f
     val barShape = remember { RoundedCornerShape(GlassBottomBarHeight / 2) }
     val selectionShape = remember { RoundedCornerShape(28.dp) }
+    val containerColor = scheme.surfaceContainer.copy(alpha = 0.40f)
+    val selectionSurface =
+        if (isDark) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.10f)
 
-    /*
-     * Two Haze Glass surfaces, as in KernelSU: the bar and a neutral selected
-     * pill.  The pill is not a colour block; the accent stays on the icon and
-     * label, and the glass provides the rim and refraction.
-     */
-    val barStyle =
-        remember(isDark, scheme.surfaceContainer) {
-            GlassStyle.regular.then {
-                shape(barShape)
-                backgroundColor(scheme.surfaceContainer.copy(alpha = 0.40f))
-                tint(Color.Transparent)
-                edgeShadow(Color.Black.copy(alpha = if (isDark) 0.22f else 0.10f))
-                specularIntensity(0.85f)
-                lightPosition(Alignment.TopCenter)
-                chromaticAberrationStrength(0.08f)
-            }
-        }
-
-    val selectionStyle =
-        remember(isDark) {
-            GlassStyle.clear.then {
-                shape(selectionShape)
-                backgroundColor(
-                    if (isDark) {
-                        Color.White.copy(alpha = 0.10f)
-                    } else {
-                        Color.Black.copy(alpha = 0.10f)
-                    },
-                )
-                tint(Color.Transparent)
-                edgeShadow(Color.Black.copy(alpha = if (isDark) 0.22f else 0.10f))
-                specularIntensity(0.90f)
-                lightPosition(Alignment.TopCenter)
-                chromaticAberrationStrength(0f)
-            }
-        }
+    var dragging by remember { mutableStateOf(false) }
+    val pressProgress by animateFloatAsState(
+        targetValue = if (dragging) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = 500f),
+        label = "glassBarPress",
+    )
 
     BoxWithConstraints(
         modifier =
             modifier
                 .height(GlassBottomBarHeight)
                 .fillMaxWidth()
-                .shadow(
-                    elevation = 16.dp,
-                    shape = barShape,
-                    clip = false,
-                    ambientColor = Color.Black.copy(alpha = if (isDark) 0.22f else 0.10f),
-                    spotColor = Color.Black.copy(alpha = if (isDark) 0.28f else 0.16f),
-                )
-                .clip(barShape)
-                .hazeGlass(
-                    input = HazeInput.Sources(hazeState),
-                    style = barStyle,
-                    performanceMode = HazePerformanceMode.Default,
+                .drawBackdrop(
+                    backdrop = backdrop,
+                    shape = { barShape },
+                    effects = {
+                        vibrancy()
+                        blur(8.dp.toPx())
+                        lens(24.dp.toPx(), 24.dp.toPx())
+                    },
+                    layerBlock = {
+                        val scale = 1f + 16.dp.toPx() / size.width.coerceAtLeast(1f) * pressProgress
+                        scaleX = scale
+                        scaleY = scale
+                    },
+                    onDrawSurface = { drawRect(containerColor) },
                 ),
     ) {
         val tabWidth = (maxWidth - 8.dp) / items.size
@@ -162,11 +136,11 @@ fun GlassBottomNavigationBar(
             animationSpec = spring(dampingRatio = 0.66f, stiffness = 500f),
             label = "glassTabIndicator",
         )
-        // KernelSU keeps the pill at tab width and lets the glass stretch
-        // with the spring instead of growing a coloured selection block.
         val travel = abs(animatedIndex - selectedIndex).coerceIn(0f, 1f)
         val stretch = 1f + travel * 0.06f
 
+        // The selected pill stays behind the content: its lensed backdrop is
+        // the page, while the icons remain crisp on top.
         Box(
             modifier =
                 Modifier
@@ -179,18 +153,28 @@ fun GlassBottomNavigationBar(
                         scaleY = 1f - (stretch - 1f) * 0.45f
                         transformOrigin = TransformOrigin.Center
                     }
-                    .shadow(
-                        elevation = 10.dp,
-                        shape = selectionShape,
-                        clip = false,
-                        ambientColor = Color.Black.copy(alpha = if (isDark) 0.20f else 0.08f),
-                        spotColor = Color.Black.copy(alpha = if (isDark) 0.28f else 0.12f),
-                    )
-                    .clip(selectionShape)
-                    .hazeGlass(
-                        input = HazeInput.Sources(hazeState),
-                        style = selectionStyle,
-                        performanceMode = HazePerformanceMode.Default,
+                    .drawBackdrop(
+                        backdrop = backdrop,
+                        shape = { selectionShape },
+                        effects = {
+                            lens(
+                                refractionHeight = 10.dp.toPx() * pressProgress,
+                                refractionAmount = 14.dp.toPx() * pressProgress,
+                                chromaticAberration = true,
+                            )
+                        },
+                        highlight = { Highlight.Default.copy(alpha = pressProgress) },
+                        shadow = { Shadow(alpha = pressProgress) },
+                        innerShadow = {
+                            InnerShadow(
+                                radius = 8.dp * pressProgress,
+                                alpha = pressProgress,
+                            )
+                        },
+                        onDrawSurface = {
+                            drawRect(selectionSurface, alpha = 1f - pressProgress)
+                            drawRect(Color.Black.copy(alpha = 0.03f * pressProgress))
+                        },
                     ),
         )
 
@@ -198,11 +182,17 @@ fun GlassBottomNavigationBar(
             modifier =
                 Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 4.dp)
+                    .padding(4.dp)
                     .pointerInput(tabWidthPx, selectedIndex) {
                         detectHorizontalDragGestures(
-                            onDragStart = { dragOffset = 0f },
-                            onDragCancel = { dragOffset = 0f },
+                            onDragStart = {
+                                dragging = true
+                                dragOffset = 0f
+                            },
+                            onDragCancel = {
+                                dragging = false
+                                dragOffset = 0f
+                            },
                             onDragEnd = {
                                 val steps =
                                     if (tabWidthPx > 0f) {
@@ -211,8 +201,8 @@ fun GlassBottomNavigationBar(
                                         0
                                     }
                                 val target =
-                                    (selectedIndex + steps)
-                                        .coerceIn(0, items.lastIndex)
+                                    (selectedIndex + steps).coerceIn(0, items.lastIndex)
+                                dragging = false
                                 dragOffset = 0f
                                 if (target != selectedIndex) onTabClick(target)
                             },
@@ -258,8 +248,6 @@ private fun GlassBottomBarItem(
         animationSpec = tween(180),
         label = "glassTabContentColor",
     )
-    val labelWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
-
     val pressScale by animateFloatAsState(
         targetValue = if (pressed) 1.15f else 1f,
         animationSpec = spring(dampingRatio = 0.5f, stiffness = 500f),
@@ -268,15 +256,20 @@ private fun GlassBottomBarItem(
 
     Column(
         modifier =
-            modifier.selectable(
-                selected = selected,
-                interactionSource = interactionSource,
-                indication = null,
-                role = Role.Tab,
-                onClick = onClick,
-            ),
+            modifier
+                .graphicsLayer {
+                    scaleX = pressScale
+                    scaleY = pressScale
+                }
+                .selectable(
+                    selected = selected,
+                    interactionSource = interactionSource,
+                    indication = null,
+                    role = Role.Tab,
+                    onClick = onClick,
+                ),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+        verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
     ) {
         Crossfade(
             targetState = selected,
@@ -287,25 +280,16 @@ private fun GlassBottomBarItem(
                 imageVector = if (isSelected) item.selectedIcon else item.unselectedIcon,
                 contentDescription = stringResource(item.titleRes),
                 tint = contentColor,
-                modifier =
-                    Modifier
-                        .size(24.dp)
-                        .graphicsLayer {
-                            scaleX = pressScale
-                            scaleY = pressScale
-                            translationY = if (selected) -1.dp.toPx() else 0f
-                        },
+                modifier = Modifier.size(24.dp),
             )
         }
-
-        Spacer(Modifier.height(4.dp))
 
         Text(
             text = stringResource(item.titleRes),
             color = contentColor,
             style = MaterialTheme.typography.labelSmall,
             fontSize = 11.sp,
-            fontWeight = labelWeight,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
