@@ -8,84 +8,90 @@
  *
  *     kallsyms_num_syms      u32 symbol count
  *     kallsyms_names         compressed names, every 256th offset in markers
- *     kallsyms_markers       u32 offsets into kallsyms_names
+ *     kallsyms_markers       u32 offsets into kallsyms_names (u64 before Linux 4.20)
  *     kallsyms_token_table   256 NUL-terminated substrings
  *     kallsyms_token_index   256 u16 offsets into the token table
  *
- * The image contains no ELF symbols for these arrays, so they are located by
- * structure: the token table always stores the ten digits as one-byte tokens
- * at indices '0'..'9' in ascending, contiguous order; the token index is a
- * strictly increasing u16 array; markers precede the token table; and the
- * symbol count is the u32 right before the 8-byte-aligned names array.
+ * Some stable kernels also carry kallsyms_seqs_of_names (3 bytes per symbol)
+ * between the markers and the token table; newer mainline kernels put it after
+ * the address tables. Only names are needed here, so both layouts are handled
+ * by walking backwards from the token table and accepting either a marker
+ * array that ends at the token table or one followed by the 3-byte seqs array.
  *
- * Only names are needed. Addresses (kallsyms_offsets, kallsyms_relative_base)
- * are deliberately ignored, which keeps this independent of KASLR, pointer
- * size and CONFIG_KALLSYMS_BASE_RELATIVE.
+ * The image contains no ELF symbols for these arrays, so they are located by
+ * structure, following the same approach as KernelPatch's tools/kallsym.c:
+ *
+ *   - the token table always stores the ten digits as one-byte tokens at
+ *     indices '0'..'9' in ascending, contiguous order;
+ *   - the first markers entry is zero and the entries are strictly increasing
+ *     offsets into the names stream;
+ *   - the names stream is validated against several 256-symbol marker
+ *     boundaries before it is decoded.
+ *
+ * Addresses (kallsyms_offsets, kallsyms_relative_base) are deliberately
+ * ignored, which keeps this independent of KASLR, pointer size and
+ * CONFIG_KALLSYMS_BASE_RELATIVE.
  */
 
 use std::collections::HashSet;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
 
-/// Maximum distance between the start of kallsyms_names and kallsyms_markers.
-/// Real kernels use a few megabytes; the cap bounds the scan on malformed input.
-const MAX_NAMES_BYTES: usize = 32 * 1024 * 1024;
+/// Maximum distance from the token table back to kallsyms_markers. Real
+/// kernels use a few megabytes; the cap bounds the scan on malformed input.
+const MAX_LAYOUT_BYTES: usize = 64 * 1024 * 1024;
 
-const MIN_SYMBOLS: usize = 256;
-const MAX_SYMBOLS: usize = 4_000_000;
+/// Marker arrays have one entry per 256 symbols. Android kernels have far more
+/// than this, but keeping a low bound also lets small test images work.
+const MIN_MARKERS: usize = 4;
+/// 4M symbols is already far beyond any real kernel.
+const MAX_MARKERS: usize = 16_384;
+
+/// Number of marker boundaries checked while looking for kallsyms_names.
+const VERIFY_MARKERS: usize = 5;
+
+/// The kernel encodes a symbol with at most KSYM_NAME_LEN token bytes.
+const MAX_ENCODED_NAME: usize = 512;
+const MAX_SYMBOL_NAME: usize = 512;
+const MAX_TOKEN_LEN: usize = 512;
+
+struct TokenTable<'a> {
+    tokens: Vec<&'a [u8]>,
+    table_start: usize,
+}
+
+struct Markers {
+    offset: usize,
+    values: Vec<usize>,
+}
+
+#[derive(Clone, Copy)]
+enum MarkerLayout {
+    NoSeqs,
+    WithSeqs,
+}
 
 /// Decode every symbol name from a decompressed kernel image.
 pub fn parse_names(kernel: &[u8]) -> Result<HashSet<String>> {
-    let mut last_error = None;
-
-    for digit_start in digit_token_candidates(kernel) {
-        let Some(table_start) = token_table_start(kernel, digit_start) else {
-            continue;
-        };
-        let Some((tokens, table_end)) = parse_token_table(kernel, table_start) else {
-            continue;
-        };
-        let Some(_index_start) = find_token_index(kernel, table_end, &tokens) else {
-            continue;
-        };
-
-        match find_names(kernel, table_start, &tokens) {
-            Ok(names) => return Ok(names),
-            Err(error) => last_error = Some(error),
-        }
-    }
-
-    match last_error {
-        Some(error) => Err(error.context("no valid kallsyms table found in the kernel image")),
-        None => bail!(
-            "no kallsyms token table found in the kernel image \
-             (CONFIG_KALLSYMS disabled, or unsupported kernel layout)"
-        ),
-    }
+    let table = find_token_table(kernel)?;
+    let markers = find_markers(kernel, table.table_start)
+        .ok_or_else(|| anyhow!("kallsyms_markers not found before the token table"))?;
+    let names_start = find_names_start(kernel, &markers)
+        .ok_or_else(|| anyhow!("kallsyms_names not found before the markers"))?;
+    decode_names(kernel, names_start, &markers, &table.tokens)
 }
 
 fn digit_token_candidates(kernel: &[u8]) -> Vec<usize> {
     let needle: Vec<u8> = (b'0'..=b'9').flat_map(|digit| [digit, 0]).collect();
 
-    let mut all = Vec::new();
-    let mut preferred = Vec::new();
+    let mut candidates = Vec::new();
     let mut from = 0;
     while let Some(relative) = find(&kernel[from..], &needle) {
         let position = from + relative;
-        all.push(position);
-        // A real token table continues with another token. Digits inside a
-        // string or another table usually end the sequence in punctuation.
-        let after = position + needle.len();
-        if kernel
-            .get(after)
-            .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
-        {
-            preferred.push(position);
-        }
+        candidates.push(position);
         from = position + 1;
     }
-
-    if preferred.is_empty() { all } else { preferred }
+    candidates
 }
 
 /// Walk back over the 0x30 tokens that precede the digit tokens. Every token
@@ -95,10 +101,10 @@ fn token_table_start(kernel: &[u8], digit_start: usize) -> Option<usize> {
 
     for _ in 0..0x30 {
         let mut stopped = false;
-        for _ in 0..128 {
+        for _ in 0..MAX_TOKEN_LEN {
             position = position.checked_sub(1)?;
             let byte = *kernel.get(position)?;
-            if byte == 0 || byte > b'z' {
+            if byte == 0 {
                 stopped = true;
                 break;
             }
@@ -118,13 +124,19 @@ fn parse_token_table(kernel: &[u8], start: usize) -> Option<(Vec<&[u8]>, usize)>
     for _ in 0..256 {
         let body_start = position;
         let mut body_end = body_start;
-        while body_end < kernel.len() && body_end - body_start <= 128 && kernel[body_end] != 0 {
+        while body_end < kernel.len()
+            && body_end - body_start <= MAX_TOKEN_LEN
+            && kernel[body_end] != 0
+        {
             if !(0x20..=0x7e).contains(&kernel[body_end]) {
                 return None;
             }
             body_end += 1;
         }
-        if body_end >= kernel.len() || kernel[body_end] != 0 || body_end - body_start > 128 {
+        if body_end >= kernel.len()
+            || kernel[body_end] != 0
+            || body_end - body_start > MAX_TOKEN_LEN
+        {
             return None;
         }
         tokens.push(&kernel[body_start..body_end]);
@@ -138,6 +150,54 @@ fn parse_token_table(kernel: &[u8], start: usize) -> Option<(Vec<&[u8]>, usize)>
     }
 
     Some((tokens, position))
+}
+
+/// Real token tables contain the lowercase letters as one-byte tokens at their
+/// ASCII indices. This rejects most digit sequences found in unrelated data.
+fn has_letter_tokens(tokens: &[&[u8]]) -> bool {
+    (0..10).all(|offset| {
+        tokens
+            .get(0x61 + offset)
+            .is_some_and(|token| token.len() == 1 && token[0] == b'a' + offset as u8)
+    })
+}
+
+fn try_token_table(
+    kernel: &[u8],
+    digit_start: usize,
+    require_letters: bool,
+) -> Option<TokenTable<'_>> {
+    let start = token_table_start(kernel, digit_start)?;
+    let (tokens, table_end) = parse_token_table(kernel, start)?;
+    if require_letters && !has_letter_tokens(&tokens) {
+        return None;
+    }
+    find_token_index(kernel, table_end, &tokens)?;
+
+    Some(TokenTable {
+        tokens,
+        table_start: start,
+    })
+}
+
+fn find_token_table(kernel: &[u8]) -> Result<TokenTable<'_>> {
+    let mut fallback = None;
+
+    for digit_start in digit_token_candidates(kernel) {
+        if let Some(table) = try_token_table(kernel, digit_start, true) {
+            return Ok(table);
+        }
+        if fallback.is_none() {
+            fallback = try_token_table(kernel, digit_start, false);
+        }
+    }
+
+    fallback.ok_or_else(|| {
+        anyhow!(
+            "no kallsyms token table found in the kernel image \
+             (CONFIG_KALLSYMS disabled, or unsupported kernel layout)"
+        )
+    })
 }
 
 fn find_token_index(kernel: &[u8], table_end: usize, tokens: &[&[u8]]) -> Option<usize> {
@@ -158,137 +218,316 @@ fn find_token_index(kernel: &[u8], table_end: usize, tokens: &[&[u8]]) -> Option
     Some(table_end + relative)
 }
 
-fn find_names(
-    kernel: &[u8],
-    token_table_start: usize,
-    tokens: &[&[u8]],
-) -> Result<HashSet<String>> {
-    let upper = token_table_start;
-    let lower = upper.saturating_sub(MAX_NAMES_BYTES);
-    let mut start = (lower + 7) & !7;
+/// Locate the marker array by scanning backwards from the token table. The
+/// marker array is 8-byte aligned and starts with a zero entry; its distance to
+/// the token table determines the number of entries for both known layouts.
+fn find_markers(kernel: &[u8], token_table_start: usize) -> Option<Markers> {
+    let lower = token_table_start.saturating_sub(MAX_LAYOUT_BYTES);
+    let mut marker_start = token_table_start.checked_sub(8)? & !7;
 
-    while start + 8 <= upper {
-        if let Some(names) = try_names_at(kernel, start, upper, tokens) {
-            return Ok(names);
+    loop {
+        if marker_start < lower {
+            break;
         }
-        start += 8;
+        if read_u32(kernel, marker_start) == Some(0) {
+            for elem_size in [4usize, 8] {
+                if let Some(markers) =
+                    try_markers_at(kernel, marker_start, token_table_start, elem_size)
+                {
+                    return Some(markers);
+                }
+            }
+        }
+        if marker_start < 8 {
+            break;
+        }
+        marker_start -= 8;
     }
 
-    Err(anyhow!(
-        "kallsyms_names/kallsyms_markers not found before the token table"
-    ))
+    None
 }
 
-fn try_names_at(
+fn try_markers_at(
     kernel: &[u8],
-    start: usize,
+    marker_start: usize,
     token_table_start: usize,
-    tokens: &[&[u8]],
-) -> Option<HashSet<String>> {
-    let count = read_u32(kernel, start.checked_sub(8)?)? as usize;
-    if !(MIN_SYMBOLS..=MAX_SYMBOLS).contains(&count) {
+    elem_size: usize,
+) -> Option<Markers> {
+    let distance = token_table_start.checked_sub(marker_start)?;
+    let max_count = (distance / elem_size).min(MAX_MARKERS);
+    if max_count < MIN_MARKERS {
         return None;
     }
 
-    let blocks = count.div_ceil(256);
-    let markers_bytes = blocks.checked_mul(4)?;
+    let mut values = Vec::new();
+    let mut position = marker_start;
+    while values.len() < max_count {
+        let Some(value) = read_marker(kernel, position, elem_size) else {
+            break;
+        };
+        if let Some(previous) = values.last() {
+            if value <= *previous {
+                break;
+            }
+        }
+        if value >= marker_start {
+            break;
+        }
+        values.push(value);
+        position = position.checked_add(elem_size)?;
+    }
 
-    // Depending on the kernel version, kallsyms_seqs_of_names (3 bytes per
-    // symbol) either sits between the markers and the token table (stable
-    // backports) or after the address tables (6.4+). Try both layouts.
-    let without_seqs = token_table_start.checked_sub(align8(markers_bytes)?);
-    let seqs_bytes = count.checked_mul(3)?;
-    let with_seqs =
-        token_table_start.checked_sub(align8(align8(markers_bytes)?.checked_add(seqs_bytes)?)?);
+    if values.len() < MIN_MARKERS || values[0] != 0 {
+        return None;
+    }
 
-    for markers_start in [without_seqs, with_seqs].into_iter().flatten() {
-        if let Some(names) = try_layout(kernel, start, markers_start, count, blocks, tokens) {
-            return Some(names);
+    // The next entry after a real marker array is padding, seqs data or the
+    // token table, so the forward scan normally stops at the exact count. If
+    // the first byte after it happens to look like another increasing marker,
+    // try the few possible truncations.
+    let first = values.len().saturating_sub(4).max(MIN_MARKERS);
+    for count in (first..=values.len()).rev() {
+        let values = &values[..count];
+        let Some(layout) = marker_layout(count, distance, elem_size) else {
+            continue;
+        };
+        let markers_bytes = count.checked_mul(elem_size)?;
+        let markers_end = marker_start.checked_add(markers_bytes)?;
+        if markers_end > token_table_start {
+            continue;
+        }
+
+        match layout {
+            MarkerLayout::NoSeqs => {
+                if !padding_zeros(kernel, markers_end, token_table_start) {
+                    continue;
+                }
+            }
+            MarkerLayout::WithSeqs => {
+                let aligned_end = marker_start.checked_add(align8(markers_bytes)?)?;
+                if aligned_end > token_table_start
+                    || !padding_zeros(kernel, markers_end, aligned_end)
+                {
+                    continue;
+                }
+            }
+        }
+
+        return Some(Markers {
+            offset: marker_start,
+            values: values.to_vec(),
+        });
+    }
+
+    None
+}
+
+fn marker_layout(count: usize, distance: usize, elem_size: usize) -> Option<MarkerLayout> {
+    let markers_bytes = count.checked_mul(elem_size)?;
+    let aligned = align8(markers_bytes)?;
+
+    if distance == aligned {
+        return Some(MarkerLayout::NoSeqs);
+    }
+
+    let remainder = distance.checked_sub(aligned)?;
+    let min_symbols = count.checked_sub(1)?.checked_mul(256)?;
+    let max_symbols = count.checked_mul(256)?;
+
+    for padding in 0..8 {
+        let Some(seqs_bytes) = remainder.checked_sub(padding) else {
+            continue;
+        };
+        if seqs_bytes % 3 != 0 {
+            continue;
+        }
+        let symbols = seqs_bytes / 3;
+        if symbols > min_symbols
+            && symbols <= max_symbols
+            && align8(aligned.checked_add(seqs_bytes)?)? == distance
+        {
+            return Some(MarkerLayout::WithSeqs);
         }
     }
 
     None
 }
 
-fn try_layout(
+fn find_names_start(kernel: &[u8], markers: &Markers) -> Option<usize> {
+    let last_marker = *markers.values.last()?;
+    let guess = markers.offset.checked_sub(last_marker)?;
+
+    // The last block is at most 256 records of MAX_ENCODED_NAME bytes, so the
+    // real start lies at most 128 KiB before the guess derived from the last
+    // marker. Check that small window first, then fall back to a full scan.
+    let window_start = guess.saturating_sub(0x20000);
+    let window_end = markers.offset.min(guess.saturating_add(0x1000));
+    let mut candidate = align_up8(window_start);
+    while candidate < window_end {
+        if verify_names_candidate(kernel, candidate, markers) {
+            return Some(candidate);
+        }
+        candidate = candidate.checked_add(8)?;
+    }
+
+    let mut candidate = 0usize;
+    while candidate + 8 <= markers.offset {
+        if verify_names_candidate(kernel, candidate, markers) {
+            return Some(candidate);
+        }
+        candidate += 8;
+    }
+
+    None
+}
+
+/// Validate a possible kallsyms_names start against the first few marker
+/// boundaries. This only reads encoded record lengths, so it is cheap.
+fn verify_names_candidate(kernel: &[u8], start: usize, markers: &Markers) -> bool {
+    if start >= markers.offset {
+        return false;
+    }
+    let target = VERIFY_MARKERS.min(markers.values.len().saturating_sub(1));
+    if target == 0 {
+        return false;
+    }
+
+    let mut position = start;
+    let mut records = 0usize;
+    while position < markers.offset {
+        let Some((length, header)) = read_uleb128(kernel, position) else {
+            return false;
+        };
+        if length == 0 || length >= MAX_ENCODED_NAME {
+            return false;
+        }
+        let Some(end) = position
+            .checked_add(header)
+            .and_then(|position| position.checked_add(length))
+        else {
+            return false;
+        };
+        if end > markers.offset {
+            return false;
+        }
+        position = end;
+        records += 1;
+
+        if records % 256 == 0 {
+            let marker_index = records / 256;
+            let Some(&expected) = markers.values.get(marker_index) else {
+                return false;
+            };
+            if position - start != expected {
+                return false;
+            }
+            if marker_index >= target {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+fn decode_names(
     kernel: &[u8],
-    start: usize,
-    markers_start: usize,
-    count: usize,
-    blocks: usize,
+    names_start: usize,
+    markers: &Markers,
     tokens: &[&[u8]],
-) -> Option<HashSet<String>> {
-    if markers_start <= start {
-        return None;
-    }
-    let names_size = markers_start - start;
-    if names_size > MAX_NAMES_BYTES {
-        return None;
-    }
-    // Every record needs at least a length byte and one token byte.
-    if names_size < count.checked_mul(2)? {
-        return None;
-    }
+) -> Result<HashSet<String>> {
+    let mut names = HashSet::new();
+    let mut position = names_start;
+    let mut records = 0usize;
+    let mut next_marker = 1usize;
 
-    let mut markers = Vec::with_capacity(blocks);
-    let mut previous = 0usize;
-    for block in 0..blocks {
-        let offset = read_u32(kernel, markers_start.checked_add(block * 4)?)? as usize;
-        if block == 0 {
-            if offset != 0 {
-                return None;
-            }
-        } else {
-            let delta = offset.checked_sub(previous)?;
-            // 256 records: at least 2 bytes each, at most ~0x4000 bytes each.
-            if !(0x200..=0x40000).contains(&delta) {
-                return None;
-            }
+    while position < markers.offset {
+        // A zero length is not a symbol; it is the alignment padding after the
+        // last record.
+        if kernel[position] == 0 {
+            break;
         }
-        markers.push(offset);
-        previous = offset;
-    }
 
-    let mut position = 0usize;
-    let mut names = HashSet::with_capacity(count);
-
-    for (block, &marker) in markers.iter().enumerate() {
-        if position != marker {
-            return None;
+        let (length, header) = read_uleb128(kernel, position)
+            .with_context(|| format!("truncated symbol length at {position:#x}"))?;
+        if length == 0 || length >= MAX_ENCODED_NAME {
+            bail!("invalid symbol length {length} at {position:#x}");
         }
-        let records = 256.min(count - block * 256);
-        for _ in 0..records {
-            let (length, header) = read_uleb128(kernel, start + position)?;
-            if length == 0 || length > 0x3fff {
-                return None;
-            }
-            let body_start = start + position + header;
-            let body_end = body_start.checked_add(length)?;
-            if body_end > markers_start {
-                return None;
-            }
-
-            let mut name = Vec::with_capacity(length * 2);
-            for &token in &kernel[body_start..body_end] {
-                name.extend_from_slice(tokens.get(token as usize)?);
-            }
-            if name.len() < 2 || !is_symbol_type(name[0]) {
-                return None;
-            }
-            let name = std::str::from_utf8(&name[1..]).ok()?;
-            names.insert(name.to_owned());
-
-            position = body_end - start;
+        let body_start = position + header;
+        let body_end = body_start
+            .checked_add(length)
+            .with_context(|| format!("symbol at {position:#x} overflows"))?;
+        if body_end > markers.offset {
+            bail!("symbol at {position:#x} crosses kallsyms_markers");
         }
+
+        if records > 0 && records % 256 == 0 {
+            let Some(&expected) = markers.values.get(next_marker) else {
+                bail!("kallsyms_names has more blocks than kallsyms_markers");
+            };
+            if position - names_start != expected {
+                bail!(
+                    "kallsyms_names block {} starts at {:#x}, expected {:#x}",
+                    next_marker,
+                    position - names_start,
+                    expected
+                );
+            }
+            next_marker += 1;
+        }
+
+        let mut name = Vec::with_capacity(length * 2);
+        for &token in &kernel[body_start..body_end] {
+            name.extend_from_slice(
+                tokens
+                    .get(token as usize)
+                    .with_context(|| format!("invalid token {token} at {position:#x}"))?,
+            );
+        }
+
+        if name.len() < 2 || !is_symbol_type(name[0]) {
+            bail!("invalid symbol name at {position:#x}");
+        }
+        if name.len() > MAX_SYMBOL_NAME {
+            bail!("symbol name at {position:#x} is too long");
+        }
+        let name = std::str::from_utf8(&name[1..])
+            .with_context(|| format!("non-UTF-8 symbol name at {position:#x}"))?;
+        names.insert(name.to_owned());
+
+        position = body_end;
+        records += 1;
     }
 
-    // The names array is 8-byte aligned, so only padding may follow the last
-    // record before kallsyms_markers.
-    if position > names_size || names_size - position >= 8 {
-        return None;
+    if next_marker != markers.values.len() {
+        bail!(
+            "kallsyms_markers has {} blocks but the names table ended after {next_marker}",
+            markers.values.len()
+        );
+    }
+    let padding = markers.offset - position;
+    if padding >= 8 {
+        bail!("kallsyms_names ends {padding} bytes before kallsyms_markers");
+    }
+    if !kernel[position..markers.offset]
+        .iter()
+        .all(|byte| *byte == 0)
+    {
+        bail!("nonzero padding between kallsyms_names and kallsyms_markers");
     }
 
-    Some(names)
+    Ok(names)
+}
+
+fn read_marker(data: &[u8], position: usize, elem_size: usize) -> Option<usize> {
+    match elem_size {
+        4 => read_u32(data, position).map(|value| value as usize),
+        8 => {
+            let bytes = data.get(position..position.checked_add(8)?)?;
+            Some(u64::from_le_bytes(bytes.try_into().ok()?) as usize)
+        }
+        _ => None,
+    }
 }
 
 fn read_uleb128(data: &[u8], position: usize) -> Option<(usize, usize)> {
@@ -304,9 +543,21 @@ fn align8(value: usize) -> Option<usize> {
     value.checked_add(7).map(|value| value & !7)
 }
 
+fn align_up8(value: usize) -> usize {
+    (value + 7) & !7
+}
+
+fn padding_zeros(data: &[u8], start: usize, end: usize) -> bool {
+    if start > end {
+        return false;
+    }
+    data.get(start..end)
+        .is_some_and(|padding| padding.iter().all(|byte| *byte == 0))
+}
+
 fn read_u32(data: &[u8], offset: usize) -> Option<u32> {
     Some(u32::from_le_bytes(
-        data.get(offset..offset + 4)?.try_into().ok()?,
+        data.get(offset..offset.checked_add(4)?)?.try_into().ok()?,
     ))
 }
 
@@ -347,14 +598,15 @@ mod tests {
         }
     }
 
-    fn synthetic_kernel(names: &[&str], with_seqs: bool) -> Vec<u8> {
+    fn synthetic_kernel(names: &[&str], with_seqs: bool, marker_elem_size: usize) -> Vec<u8> {
         let mut image = Image {
             data: vec![0; 0x100],
         };
 
         // Build a token table whose indices are the printable-ASCII codes; the
-        // encoder below uses each character as its own token. Indices that the
-        // names never use get a filler token, like scripts/kallsyms.c does.
+        // encoder below uses each character as its own token. Include the
+        // lowercase letters so the token-table validation sees the same
+        // digit/letter pattern as a real kernel.
         let mut used = [false; 256];
         for name in names {
             for byte in name.bytes() {
@@ -363,6 +615,9 @@ mod tests {
         }
         for digit in b'0'..=b'9' {
             used[digit as usize] = true;
+        }
+        for letter in b'a'..=b'z' {
+            used[letter as usize] = true;
         }
 
         let mut token_table = Vec::new();
@@ -397,7 +652,11 @@ mod tests {
         image.align(8);
         let markers_start = image.data.len();
         for marker in &markers {
-            image.put(image.data.len(), &marker.to_le_bytes());
+            match marker_elem_size {
+                4 => image.put(image.data.len(), &(*marker as u32).to_le_bytes()),
+                8 => image.put(image.data.len(), &(*marker as u64).to_le_bytes()),
+                _ => unreachable!(),
+            }
         }
         image.align(8);
         if with_seqs {
@@ -416,13 +675,13 @@ mod tests {
         }
         image.put(image.data.len(), b"tail");
 
-        // The parser derives markers_start from the symbol count and the token
-        // table position; make sure the fixture matches that invariant.
+        // The parser derives the layout from the distance between the markers
+        // and the token table; make sure the fixture matches that invariant.
+        let markers_bytes = markers.len() * marker_elem_size;
         let expected = if with_seqs {
-            token_table_start
-                - align8(align8(markers.len() * 4).unwrap() + names.len() * 3).unwrap()
+            token_table_start - align8(align8(markers_bytes).unwrap() + names.len() * 3).unwrap()
         } else {
-            token_table_start - align8(markers.len() * 4).unwrap()
+            token_table_start - align8(markers_bytes).unwrap()
         };
         assert_eq!(markers_start, expected);
         assert_eq!(
@@ -444,7 +703,7 @@ mod tests {
     fn parses_table_without_seqs() {
         let names = sample_names();
         let refs: Vec<&str> = names.iter().map(String::as_str).collect();
-        let kernel = synthetic_kernel(&refs, false);
+        let kernel = synthetic_kernel(&refs, false, 4);
 
         let parsed = parse_names(&kernel).unwrap();
         assert_eq!(parsed.len(), names.len());
@@ -457,11 +716,22 @@ mod tests {
     fn parses_table_with_seqs() {
         let names = sample_names();
         let refs: Vec<&str> = names.iter().map(String::as_str).collect();
-        let kernel = synthetic_kernel(&refs, true);
+        let kernel = synthetic_kernel(&refs, true, 4);
 
         let parsed = parse_names(&kernel).unwrap();
         assert_eq!(parsed.len(), names.len());
         assert!(parsed.contains("ksym_999"));
+        assert!(parsed.contains("kallsyms_lookup_name"));
+    }
+
+    #[test]
+    fn parses_table_with_64bit_markers() {
+        let names = sample_names();
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        let kernel = synthetic_kernel(&refs, false, 8);
+
+        let parsed = parse_names(&kernel).unwrap();
+        assert_eq!(parsed.len(), names.len());
         assert!(parsed.contains("kallsyms_lookup_name"));
     }
 
