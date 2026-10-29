@@ -37,6 +37,8 @@ static struct tracepoint *tp_sched_exec;
 static struct tracepoint *tp_sched_fork;
 static bool nksu_daemon_hooked;
 
+static const char ncore_path[] = "/data/adb/ncore";
+
 /* task_work runs just before returning to ncore userspace, after exec. */
 struct nksu_daemon_work {
 	struct callback_head cb;
@@ -56,15 +58,10 @@ static void nksu_daemon_attach(struct callback_head *cb)
 
 static bool nksu_daemon_path(const char *filename)
 {
-	const char *base;
-
 	if (!filename)
 		return false;
 
-	base = strrchr(filename, '/');
-	base = base ? base + 1 : filename;
-
-	return !strcmp(base, "ncore") || !strcmp(base, "libncore.so");
+	return !strcmp(filename, ncore_path);
 }
 
 static void nksu_daemon_exec(void *data, struct task_struct *p, pid_t old_pid,
