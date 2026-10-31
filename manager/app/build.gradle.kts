@@ -6,9 +6,13 @@ plugins {
     alias(libs.plugins.ktlint)
 }
 
+// The Gradle root is manager/, so repository-level inputs (git metadata, uapi
+// headers, signing material) resolve one level up.
+val repoRoot = rootDir.parentFile
+
 fun gitCommitCount(): Int =
     ProcessBuilder("git", "rev-list", "--count", "HEAD")
-        .directory(rootDir)
+        .directory(repoRoot)
         .start()
         .inputStream
         .bufferedReader()
@@ -19,7 +23,7 @@ fun gitCommitCount(): Int =
 // The APK's build commit, used as versionName for display/diagnostics.
 fun gitCommitHash(): String =
     ProcessBuilder("git", "rev-parse", "--short=12", "HEAD")
-        .directory(rootDir)
+        .directory(repoRoot)
         .start()
         .inputStream
         .bufferedReader()
@@ -30,7 +34,7 @@ fun gitCommitHash(): String =
 // uapi/version.h.  Exposed as BuildConfig.NKSU_VERSION so the manager can
 // compare it with the running module's version.
 fun nksuVersion(): String =
-    rootDir
+    repoRoot
         .resolve("uapi/version.h")
         .takeIf { it.isFile }
         ?.readText()
@@ -88,7 +92,7 @@ val buildVersionName: String =
 // and shared uid (android:sharedUserId="me.nekosu.shared"), never by this name,
 // so switching it dodges package-name based detection without touching the
 // certificate or the shared uid.  Rotate at build time with, e.g.:
-//   ./gradlew -PmanagerId=me.nekosu.manager assembleRelease
+//   cd manager && ./gradlew -PmanagerId=me.nekosu.manager assembleRelease
 // The Kotlin namespace stays fixed (source/R/BuildConfig do not move).
 val managerPackage: String =
     (project.findProperty("managerId") as? String)
@@ -96,7 +100,10 @@ val managerPackage: String =
         ?.takeIf { it.isNotEmpty() }
         ?: "me.aqnya.nekosu"
 
-val releaseKeystore = rootDir.resolve("release.keystore")
+// Signing material lives under signing/ so the repository root stays free of
+// loose files.  release.keystore is gitignored and only present in CI or on a
+// developer machine that supplies it.
+val releaseKeystore = repoRoot.resolve("signing/release.keystore")
 val hasReleaseSigning: Boolean =
     releaseKeystore.isFile &&
         releaseKeystore.length() > 0 &&
@@ -107,7 +114,7 @@ val requireReleaseSigning: Boolean =
     (project.findProperty("requireReleaseSigning") as? String)?.toBoolean() ?: false
 
 if (requireReleaseSigning && !hasReleaseSigning) {
-    error("release signing is required but release.keystore or signing environment variables are missing")
+    error("release signing is required but signing/release.keystore or signing environment variables are missing")
 }
 
 android {
@@ -141,7 +148,7 @@ android {
 
     signingConfigs {
         create("debugKey") {
-            storeFile = file("$rootDir/debug.keystore")
+            storeFile = repoRoot.resolve("signing/debug.keystore")
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"

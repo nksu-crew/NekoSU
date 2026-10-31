@@ -25,32 +25,20 @@ on:
     paths:
       - ".github/workflows/build.yml"
       - ".github/workflows/ko.yml"
-      - "build.gradle.kts"
-      - "settings.gradle.kts"
-      - "gradle.properties"
-      - "gradle/**"
-      - "gradlew"
-      - "gradlew.bat"
-      - "debug.keystore"
+      - "manager/**"
+      - "signing/**"
       - "kernel/**"
       - "uapi/**"
-      - "manager/**"
       - "neko/**"
   pull_request:
     branches: [ "main" ]
     paths:
       - ".github/workflows/build.yml"
       - ".github/workflows/ko.yml"
-      - "build.gradle.kts"
-      - "settings.gradle.kts"
-      - "gradle.properties"
-      - "gradle/**"
-      - "gradlew"
-      - "gradlew.bat"
-      - "debug.keystore"
+      - "manager/**"
+      - "signing/**"
       - "kernel/**"
       - "uapi/**"
-      - "manager/**"
       - "neko/**"
 
 concurrency:
@@ -113,11 +101,11 @@ jobs:
         distribution: 'temurin'
         cache: gradle
         cache-dependency-path: |
-          build.gradle.kts
-          settings.gradle.kts
-          gradle.properties
-          gradle/wrapper/gradle-wrapper.properties
-          gradle/libs.versions.toml
+          manager/build.gradle.kts
+          manager/settings.gradle.kts
+          manager/gradle.properties
+          manager/gradle/wrapper/gradle-wrapper.properties
+          manager/gradle/libs.versions.toml
           manager/app/build.gradle.kts
           neko/build.gradle.kts
 
@@ -168,10 +156,11 @@ jobs:
         set -euo pipefail
         if [ -z "${KEYSTORE_BASE64:-}" ]; then
           echo "release keystore unavailable; this build will be unsigned"
-          rm -f release.keystore
+          rm -f signing/release.keystore
           exit 0
         fi
-        printf '%s' "$KEYSTORE_BASE64" | base64 -d > release.keystore
+        mkdir -p signing
+        printf '%s' "$KEYSTORE_BASE64" | base64 -d > signing/release.keystore
 
     - name: Determine version channel
       id: version
@@ -220,6 +209,8 @@ jobs:
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         VERSION_CHANNEL: ${{ steps.version.outputs.channel }}
         VERSION_NAME: ${{ steps.version.outputs.version_name }}
+      # manager/ is the Gradle root, so the wrapper runs from there.
+      working-directory: manager
       run: |
         set -euo pipefail
         args=(-PversionChannel="$VERSION_CHANNEL")

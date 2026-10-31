@@ -26,6 +26,7 @@ dependencyResolutionManagement {
 rootProject.name = "nekosu"
 include(":app")
 include(":neko")
-// The Gradle root lives at the repository root, but the Android module stays
-// under manager/.
-project(":app").projectDir = file("manager/app")
+// The Gradle root is manager/ itself: the Android module is app/ under it, and
+// the Rust workspace it drives lives next to manager/ in the repository root.
+project(":app").projectDir = file("app")
+project(":neko").projectDir = file("../neko")

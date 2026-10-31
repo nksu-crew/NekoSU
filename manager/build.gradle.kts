@@ -6,9 +6,13 @@ plugins {
     alias(libs.plugins.kotlin.compose) apply false
 }
 
+// The Gradle root is manager/, so the repository root is one level up.  Tasks
+// that touch the kernel, uapi or Rust sources resolve from here.
+val repoRoot = rootDir.parentFile
+
 /*
  * Whole-repository formatting:
- *   ./gradlew formatAll
+ *   cd manager && ./gradlew formatAll
  *
  * Kotlin is handled by the app's ktlint plugin, Rust by rustfmt and the
  * kernel/uapi C sources by clang-format.  Android XML is deliberately left
@@ -19,7 +23,7 @@ tasks.register("formatRust") {
     description = "Format every Rust crate with rustfmt"
     doLast {
         providers.exec {
-            workingDir = rootDir.resolve("neko")
+            workingDir = repoRoot.resolve("neko")
             commandLine(
                 "cargo",
                 "fmt",
@@ -39,7 +43,8 @@ tasks.register("formatKernel") {
     description = "Format tracked C/C++ sources and headers with clang-format"
     doLast {
         providers.exec {
-            workingDir = rootDir
+            // git ls-files must run from the repository root, not manager/.
+            workingDir = repoRoot
             commandLine(
                 "bash",
                 "-lc",
