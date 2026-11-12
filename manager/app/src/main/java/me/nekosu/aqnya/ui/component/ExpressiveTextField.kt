@@ -13,6 +13,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import me.nekosu.aqnya.ui.theme.ContinuousCornerShape
@@ -32,6 +33,7 @@ fun ExpressiveTextField(
     leadingIcon: @Composable (() -> Unit)? = null,
     trailingIcon: @Composable (() -> Unit)? = null,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    shape: Shape = ContinuousCornerShape(16.dp),
 ) {
     OutlinedTextField(
         value = value,
@@ -84,7 +86,7 @@ fun ExpressiveTextField(
             },
         singleLine = singleLine,
         keyboardOptions = keyboardOptions,
-        shape = ContinuousCornerShape(16.dp),
+        shape = shape,
         colors =
             OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
