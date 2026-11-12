@@ -489,10 +489,6 @@ private fun NamespaceDialog(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Screen
-// ─────────────────────────────────────────────────────────────────────────────
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppDetailScreen(
@@ -538,7 +534,6 @@ fun AppDetailScreen(
     val motionScheme = MaterialTheme.motionScheme
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(rememberTopAppBarState())
 
-    // 实时保存：任何一处改动都会立即下发，不再需要保存按钮。
     fun save(
         allowedValue: Boolean = allowed,
         rootUidValue: String = rootUidText,

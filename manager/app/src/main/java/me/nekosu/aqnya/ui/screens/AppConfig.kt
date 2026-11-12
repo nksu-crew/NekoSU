@@ -62,6 +62,7 @@ val DEFAULT_CAPS: Set<LinuxCap> =
         LinuxCap.CAP_SETUID,
         LinuxCap.CAP_SETGID,
         LinuxCap.CAP_SYS_ADMIN,
+        LinuxCap.CAP_SYS_PTRACE,
     )
 
 enum class NksuNamespace(
