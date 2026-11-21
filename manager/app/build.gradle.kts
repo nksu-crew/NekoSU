@@ -159,6 +159,12 @@ android {
                 minorApiLevel = 1
             }
     }
+    
+    externalNativeBuild {
+          cmake {
+              path "src/main/cpp/init/CMakeLists.txt"
+          }
+    }
 
     defaultConfig {
         applicationId = managerPackage
