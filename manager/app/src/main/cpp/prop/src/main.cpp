@@ -40,9 +40,12 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 	if (argc == 2) {
-		char *value;
-		__system_property_get(argv[1], value);
-		std::cout << "[" << argv[1] << "]: [" << value << "]" << std::endl;
+		char *value = {};
+		if ((__system_property_get(argv[1], value)) < 0) {
+			std::cout << argv[0] << ": " << "Property not found." << std::endl;
+		} else {
+			std::cout << "[" << argv[1] << "]: [" << value << "]" << std::endl;
+		}
 		return 0;
 	}
 	return 0;
