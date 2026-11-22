@@ -48,5 +48,13 @@ int main(int argc, char *argv[])
 		}
 		return 0;
 	}
-	return 0;
+	if (argc > 2) {
+		std::string key = argv[1];
+		if (key.starts_with("ro.")) {
+			std::cout << "Can't set read only property" << std::endl;
+			return 0;
+		}
+		__system_property_set(key.c_str(), argv[2]);
+		return 0;
+	}
 }
