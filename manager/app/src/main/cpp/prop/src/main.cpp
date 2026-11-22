@@ -39,5 +39,11 @@ int main(int argc, char *argv[])
 		ShowAllProperties();
 		return 0;
 	}
+	if (argc == 2) {
+		char *value;
+		__system_property_get(argv[1], value);
+		std::cout << "[" << argv[1] << "]: [" << value << "]" << std::endl;
+		return 0;
+	}
 	return 0;
 }
