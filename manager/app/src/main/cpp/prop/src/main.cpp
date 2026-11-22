@@ -49,12 +49,21 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 	if (argc > 2) {
-		std::string key = argv[1];
-		if (key.starts_with("ro.")) {
-			std::cout << "Can't set read only property" << std::endl;
-			return 0;
+		std::string name = argv[1];
+		std::string value = argv[2];
+		size_t valuelen = value.size();
+
+		prop_info *pi = (prop_info *)__system_property_find(name.c_str());
+		if (pi != nullptr) {
+			__system_property_update(pi, value.c_str(), valuelen);
+		} else {
+			int rc = __system_property_add(name.c_str(), name.size(), value.c_str(),
+						       valuelen);
+			if (rc < 0) {
+				std::cout << "__system_property_add failed" << std::endl;
+				return -1;
+			}
 		}
-		__system_property_set(key.c_str(), argv[2]);
 		return 0;
 	}
 }
