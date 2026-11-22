@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <dlfcn.h>
 #include <iostream>
 #include <string>
 #include <sys/system_properties.h>
@@ -6,6 +7,46 @@
 
 namespace
 {
+
+using system_property_add_t = int (*)(const char *name, unsigned int namelen, const char *value,
+				      unsigned int valuelen);
+using system_property_update_t = int (*)(prop_info *pi, const char *value, unsigned int len);
+
+system_property_add_t get_property_add()
+{
+	static system_property_add_t fn = []() -> system_property_add_t {
+		auto p = reinterpret_cast<system_property_add_t>(
+			dlsym(RTLD_DEFAULT, "__system_property_add"));
+		if (p == nullptr) {
+			void *libc = dlopen("libc.so", RTLD_LAZY | RTLD_NOLOAD);
+			if (libc != nullptr) {
+				p = reinterpret_cast<system_property_add_t>(
+					dlsym(libc, "__system_property_add"));
+				dlclose(libc);
+			}
+		}
+		return p;
+	}();
+	return fn;
+}
+
+system_property_update_t get_property_update()
+{
+	static system_property_update_t fn = []() -> system_property_update_t {
+		auto p = reinterpret_cast<system_property_update_t>(
+			dlsym(RTLD_DEFAULT, "__system_property_update"));
+		if (p == nullptr) {
+			void *libc = dlopen("libc.so", RTLD_LAZY | RTLD_NOLOAD);
+			if (libc != nullptr) {
+				p = reinterpret_cast<system_property_update_t>(
+					dlsym(libc, "__system_property_update"));
+				dlclose(libc);
+			}
+		}
+		return p;
+	}();
+	return fn;
+}
 
 void ShowAllProperties(void)
 {
@@ -55,10 +96,23 @@ int main(int argc, char *argv[])
 
 		prop_info *pi = (prop_info *)__system_property_find(name.c_str());
 		if (pi != nullptr) {
-			__system_property_update(pi, value.c_str(), valuelen);
+			auto update_fn = get_property_update();
+			if (update_fn == nullptr) {
+				std::cout << "__system_property_update not available" << std::endl;
+				return -1;
+			}
+			int rc = update_fn(pi, value.c_str(), valuelen);
+			if (rc < 0) {
+				std::cout << "__system_property_update failed" << std::endl;
+				return -1;
+			}
 		} else {
-			int rc = __system_property_add(name.c_str(), name.size(), value.c_str(),
-						       valuelen);
+			auto add_fn = get_property_add();
+			if (add_fn == nullptr) {
+				std::cout << "__system_property_add not available" << std::endl;
+				return -1;
+			}
+			int rc = add_fn(name.c_str(), name.size(), value.c_str(), valuelen);
 			if (rc < 0) {
 				std::cout << "__system_property_add failed" << std::endl;
 				return -1;
@@ -66,4 +120,5 @@ int main(int argc, char *argv[])
 		}
 		return 0;
 	}
+	return 0;
 }
