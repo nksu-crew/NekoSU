@@ -40,7 +40,7 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 	if (argc == 2) {
-		char *value = {};
+		char value[PROP_VALUE_MAX];
 		if ((__system_property_get(argv[1], value)) < 0) {
 			std::cout << argv[0] << ": " << "Property not found." << std::endl;
 		} else {
