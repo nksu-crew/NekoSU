@@ -18,12 +18,6 @@
 #include <unistd.h>
 #include <vector>
 
-// Directory holding the property areas. Kept overridable so the tool can be
-// exercised against a fake property area in host-side tests.
-#ifndef NEKOSU_PROP_AREA_DIR
-#define NEKOSU_PROP_AREA_DIR "/dev/__properties__"
-#endif
-
 namespace
 {
 
@@ -55,7 +49,7 @@ namespace
 // properties while the property service is busy adding hundreds of them.
 // ---------------------------------------------------------------------------
 
-constexpr char kPropertyAreaDir[] = NEKOSU_PROP_AREA_DIR "/";
+constexpr char kPropertyAreaDir[] = PROP_DIRNAME "/";
 constexpr char kSerialAreaFileName[] = "properties_serial";
 
 constexpr size_t kPropertyAreaBytesUsedOffset = 0;
@@ -770,7 +764,7 @@ bool SetProperty(const std::string &name, const std::string &value, std::string 
 	// setprop(1): init enforces the SELinux and type checks, persists persist.*
 	// values and runs the property triggers.  Only ro.* properties are written
 	// directly below, because the service refuses to update them a second time.
-	if (name.compare(0, 3, "ro.") != 0) {
+	if (!name.starts_with("ro.")) {
 		if (value.size() >= static_cast<size_t>(PROP_VALUE_MAX)) {
 			*error = "values longer than " + std::to_string(PROP_VALUE_MAX - 1) +
 				 " bytes are only supported for ro. properties";
