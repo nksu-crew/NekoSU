@@ -22,5 +22,6 @@ set_target_properties(prop PROPERTIES
 )
 
 target_link_options(prop PRIVATE
+    -fno-exceptions
     -s
 )
