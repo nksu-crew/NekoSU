@@ -160,11 +160,13 @@ android {
             }
     }
     
+    ndkVersion = "30.0.16248370"
+    
     externalNativeBuild {
-    cmake {
-        path("src/main/cpp/CMakeLists.txt")
-    }
-}
+ 	   cmake {
+	        path("src/main/cpp/CMakeLists.txt")
+	    }
+	}
 
     defaultConfig {
         applicationId = managerPackage
