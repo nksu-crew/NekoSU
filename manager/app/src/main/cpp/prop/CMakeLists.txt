@@ -21,7 +21,8 @@ set_target_properties(prop PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
+target_compile_options(prop PRIVATE -fno-exceptions)
+
 target_link_options(prop PRIVATE
-    -fno-exceptions
     -s
 )
