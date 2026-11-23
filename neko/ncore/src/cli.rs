@@ -156,7 +156,7 @@ pub fn run() -> Result<()> {
             init_event::on_boot_completed();
             Ok(())
         }
-        Commands::Install => utils::install(None, None),
+        Commands::Install => utils::install(),
         Commands::Manager { command } => match command {
             ManagerCmd::Scan {
                 cert_hash,
