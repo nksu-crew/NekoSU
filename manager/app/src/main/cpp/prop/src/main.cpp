@@ -773,11 +773,10 @@ bool SetProperty(const std::string &name, const std::string &value, std::string 
 		errno = 0;
 		int result = __system_property_set(name.c_str(), value.c_str());
 		if (result != 0) {
-			int saved = errno;
 			*error = "property service rejected \"" + name + "\"";
-			if (saved != 0) {
+			if (errno != 0) {
 				*error += ": ";
-				*error += std::strerror(saved);
+				*error += std::strerror(errno);
 			}
 			return false;
 		}
