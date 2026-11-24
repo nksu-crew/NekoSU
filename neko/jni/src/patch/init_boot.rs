@@ -7,6 +7,10 @@ use bootparse::parse::BootImage;
 use bootparse::patcher::BootPatcher;
 
 const MODULE_PATH: &str = "nksu.ko";
+const INIT_PATH: &str = "init";
+/// The bundled init wrapper loads the LKM and then execs this path, so the
+/// original first-stage init must be preserved before `/init` is replaced.
+const ORIGINAL_INIT_PATH: &str = "init.real";
 
 pub fn patch_init_boot(
     image_path: &str,
@@ -34,9 +38,21 @@ pub fn patch_init_boot(
     let mut cpio = Cpio::load_from_data(&draw).context("failed to parse ramdisk")?;
     log::info!("patch: locating ramdisk");
 
-    log::info!("patch: injecting {MODULE_PATH}");
+    let original_init = cpio
+        .get(INIT_PATH)
+        .cloned()
+        .context("init_boot ramdisk has no /init")?;
+    if cpio.exists(ORIGINAL_INIT_PATH) {
+        bail!(
+            "init_boot ramdisk already contains /{ORIGINAL_INIT_PATH}; refusing to patch an already patched image"
+        );
+    }
 
-    cpio.add("init", CpioEntry::regular(0o755, init_data))?;
+    log::info!("patch: preserving /{INIT_PATH} as /{ORIGINAL_INIT_PATH}");
+    cpio.add(ORIGINAL_INIT_PATH, original_init)?;
+
+    log::info!("patch: injecting {MODULE_PATH}");
+    cpio.add(INIT_PATH, CpioEntry::regular(0o755, init_data))?;
 
     cpio.add(MODULE_PATH, CpioEntry::regular(0o644, module_data))?;
 

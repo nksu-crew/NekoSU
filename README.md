@@ -40,8 +40,9 @@ The project is split into three cooperating pieces:
   installation and diagnostics.
 - **Runtime** — `ncore`, the Rust userspace daemon/tool, reached through the
   JNI bridge and backed by a unified profile store.
-- **Kernel** — `nksu.ko`, loaded through a patched `vendor_boot`, exposing the
-  privileged operations the runtime needs.
+- **Kernel** — `nksu.ko`, loaded at first stage through a patched `vendor_boot`
+  (GKI) or `boot`/`init_boot` image, exposing the privileged operations the
+  runtime needs.
 
 > [!NOTE]
 > NekoSU is under active development. Builds from `main` are canary builds;
@@ -90,7 +91,8 @@ prebuilt DDK images; see [.github/workflows/ko.yml](.github/workflows/ko.yml).
    [Releases](https://github.com/nksu-crew/NekoSU/releases).
 2. Unlock the bootloader and back up the current `boot` and `vendor_boot`
    partitions.
-3. Open the manager and use the in-app installer to patch the boot image.
+3. Open the manager and use the in-app installer to patch the `vendor_boot`
+   image on GKI devices, or the `boot`/`init_boot` image on non-GKI devices.
 4. Reboot and verify that `nksu.ko` loaded before configuring modules or app
    policies.
 

@@ -264,13 +264,15 @@
     <string name="about_card_title">Learn nekosu</string>
     <string name="finger_print">Fingerprint</string>
 
-    <!-- Install (vendor_boot / LKM) -->
+    <!-- Install (boot / vendor_boot / LKM) -->
     <string name="install_title">Install nksu</string>
     <string name="install_device_info">Device &amp; kernel</string>
     <string name="install_mode">Install mode</string>
     <string name="install_current_kmi">Current KMI</string>
     <string name="install_method">Installation method</string>
     <string name="install_method_file">Select vendor_boot image</string>
+    <string name="install_method_boot">Select boot image</string>
+    <string name="install_pick_target_boot_desc">Choose boot.img or init_boot.img (non-GKI); an init wrapper loads the LKM (no symbol check)</string>
     <string name="install_recommended">Recommended</string>
     <string name="install_pick_vendor_boot_desc">Choose the vendor_boot image dumped from your device</string>
     <string name="install_boot_image">Boot image</string>
@@ -286,6 +288,7 @@
     <string name="install_start">Start install</string>
     <string name="install_log_title">Install log</string>
     <string name="install_success">Patched image written to Download/nekosu_…_vendor_boot.img</string>
+    <string name="install_boot_success">Patched image written to Download/nekosu_…_boot.img</string>
     <string name="install_failed">Install failed</string>
     <string name="install_ko_missing">No kernel module (nksu.ko) packaged in assets/ko</string>
     <string name="install_done">Done</string>
@@ -317,6 +320,8 @@
     <string name="install_log_err_patch">[nksu] ERROR: patching failed</string>
     <string name="install_log_err_too_large">[nksu] ERROR: patched image (%1$d bytes) exceeds vendor_boot partition capacity (%2$d bytes)</string>
     <string name="install_log_patching">[nksu] patching vendor_boot...</string>
+    <string name="install_log_boot_patching">[nksu] patching boot image...</string>
+    <string name="install_log_err_init_missing">[nksu] ERROR: bundled init wrapper not found: %1$s</string>
     <string name="install_log_flashing">[nksu] writing patched vendor_boot...</string>
     <string name="install_log_err_flash">[nksu] ERROR: failed to flash vendor_boot</string>
     <string name="install_err_copy_asset">Failed to copy assets/%1$s: %2$s</string>

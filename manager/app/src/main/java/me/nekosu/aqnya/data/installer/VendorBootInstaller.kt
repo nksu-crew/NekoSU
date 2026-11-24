@@ -33,19 +33,36 @@ object VendorBootInstaller {
     private const val RANDOM_TOKEN_LENGTH = 8
     private const val RANDOM_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
-    private fun outputImageName(): String = "$OUTPUT_PREFIX${randomToken()}$OUTPUT_SUFFIX"
+    private fun outputImageName(): String = newOutputImageName(OUTPUT_SUFFIX)
+
+    /** Random, install-specific export name; [suffix] includes the leading dot. */
+    internal fun newOutputImageName(suffix: String): String = "$OUTPUT_PREFIX${randomToken()}$suffix"
 
     fun installDir(context: Context): File = File(context.filesDir, "nksu-install").apply { mkdirs() }
 
     /** ncore, the module runtime / su daemon bundled by the manager. */
     fun ncorePath(context: Context): File = File(context.applicationInfo.nativeLibraryDir, NCORE_LIB_NAME)
 
+    /** Copy a user-selected image into the install directory. */
+    internal fun stageImage(
+        context: Context,
+        uri: Uri,
+        name: String,
+    ): File {
+        val dir = installDir(context)
+        val out = File(dir, name)
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            out.outputStream().use { input.copyTo(it) }
+        } ?: throw IllegalStateException(context.getString(R.string.install_err_read_file))
+        return out
+    }
+
     /**
      * 把内核模块放到安装目录并返回其文件：
      *  - 传了 [koUri] 时复制用户选择的本地 .ko；
      *  - 否则从 assets/ko 复制打包的 [koName]。
      */
-    private fun resolveKo(
+    internal fun resolveKo(
         context: Context,
         koName: String?,
         koUri: Uri?,
@@ -99,27 +116,13 @@ object VendorBootInstaller {
     fun stageVendorBoot(
         context: Context,
         uri: Uri,
-    ): File {
-        val dir = installDir(context)
-        val out = File(dir, "vendor_boot.img")
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            out.outputStream().use { input.copyTo(it) }
-        } ?: throw IllegalStateException(context.getString(R.string.install_err_read_file))
-        return out
-    }
+    ): File = stageImage(context, uri, "vendor_boot.img")
 
     /** Copy the user-selected boot image used for kernel symbol verification. */
     fun stageBoot(
         context: Context,
         uri: Uri,
-    ): File {
-        val dir = installDir(context)
-        val out = File(dir, "boot.img")
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            out.outputStream().use { input.copyTo(it) }
-        } ?: throw IllegalStateException(context.getString(R.string.install_err_read_file))
-        return out
-    }
+    ): File = stageImage(context, uri, "boot.img")
 
     suspend fun install(
         context: Context,

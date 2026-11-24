@@ -105,6 +105,13 @@ fun InstallScreen(navController: NavController) {
             if (uri != null) installViewModel.selectBoot(uri)
         }
 
+    val pickTargetBoot =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenDocument(),
+        ) { uri ->
+            if (uri != null) installViewModel.selectTargetBoot(uri)
+        }
+
     LaunchedEffect(Unit) { installViewModel.load() }
 
     LaunchedEffect(state.done) {
@@ -114,6 +121,7 @@ fun InstallScreen(navController: NavController) {
                 context.getString(
                     when (state.method) {
                         InstallMethod.FILE -> R.string.install_success
+                        InstallMethod.BOOT -> R.string.install_boot_success
                         InstallMethod.DIRECT -> R.string.install_direct_success
                         InstallMethod.INACTIVE -> R.string.install_inactive_success
                     },
@@ -202,7 +210,9 @@ fun InstallScreen(navController: NavController) {
         },
         floatingActionButton = {
             when {
-                state.done && state.success == true && state.method != InstallMethod.FILE -> {
+                state.done &&
+                    state.success == true &&
+                    (state.method == InstallMethod.DIRECT || state.method == InstallMethod.INACTIVE) -> {
                     LogDoneFab(
                         label = stringResource(R.string.reboot),
                         onClick = { scope.launch(Dispatchers.IO) { RootShell.reboot() } },
@@ -239,7 +249,8 @@ fun InstallScreen(navController: NavController) {
             ) {
                 InstallMethodSection(
                     state = state,
-                    onPick = { pickVendorBoot.launch(arrayOf("*/*")) },
+                    onPickVendorBoot = { pickVendorBoot.launch(arrayOf("*/*")) },
+                    onPickTargetBoot = { pickTargetBoot.launch(arrayOf("*/*")) },
                     onPickBoot = { pickBoot.launch(arrayOf("*/*")) },
                     onSelectMethod = installViewModel::selectMethod,
                 )
@@ -275,7 +286,7 @@ fun InstallScreen(navController: NavController) {
                     state = state,
                     onInstall = {
                         when (state.method) {
-                            InstallMethod.FILE -> installViewModel.install()
+                            InstallMethod.FILE, InstallMethod.BOOT -> installViewModel.install()
                             InstallMethod.DIRECT, InstallMethod.INACTIVE -> confirmMethod = state.method
                         }
                     },
@@ -289,13 +300,15 @@ fun InstallScreen(navController: NavController) {
 @Composable
 private fun InstallMethodSection(
     state: InstallUiState,
-    onPick: () -> Unit,
+    onPickVendorBoot: () -> Unit,
+    onPickTargetBoot: () -> Unit,
     onPickBoot: () -> Unit,
     onSelectMethod: (InstallMethod) -> Unit,
 ) {
     val options =
         buildList {
             add(InstallMethod.FILE)
+            add(InstallMethod.BOOT)
             if (state.rootAvailable) {
                 if (state.directTarget != null) add(InstallMethod.DIRECT)
                 if (state.inactiveTarget != null) add(InstallMethod.INACTIVE)
@@ -308,7 +321,8 @@ private fun InstallMethodSection(
                 InstallMethodRow(
                     state = state,
                     option = option,
-                    onPick = onPick,
+                    onPickVendorBoot = onPickVendorBoot,
+                    onPickTargetBoot = onPickTargetBoot,
                     onSelectMethod = onSelectMethod,
                 )
             }
@@ -350,7 +364,8 @@ private fun InstallMethodSection(
 private fun InstallMethodRow(
     state: InstallUiState,
     option: InstallMethod,
-    onPick: () -> Unit,
+    onPickVendorBoot: () -> Unit,
+    onPickTargetBoot: () -> Unit,
     onSelectMethod: (InstallMethod) -> Unit,
 ) {
     val selected = state.method == option
@@ -363,7 +378,17 @@ private fun InstallMethodRow(
                 .clickable(enabled = !state.running) {
                     when (option) {
                         InstallMethod.FILE ->
-                            if (state.method == InstallMethod.FILE) onPick() else onSelectMethod(InstallMethod.FILE)
+                            if (state.method == InstallMethod.FILE) {
+                                onPickVendorBoot()
+                            } else {
+                                onSelectMethod(InstallMethod.FILE)
+                            }
+                        InstallMethod.BOOT ->
+                            if (state.method == InstallMethod.BOOT) {
+                                onPickTargetBoot()
+                            } else {
+                                onSelectMethod(InstallMethod.BOOT)
+                            }
                         else -> onSelectMethod(option)
                     }
                 },
@@ -377,6 +402,7 @@ private fun InstallMethodRow(
                 stringResource(
                     when (option) {
                         InstallMethod.FILE -> R.string.install_method_file
+                        InstallMethod.BOOT -> R.string.install_method_boot
                         InstallMethod.DIRECT -> R.string.install_method_direct
                         InstallMethod.INACTIVE -> R.string.install_method_inactive
                     },
@@ -387,6 +413,8 @@ private fun InstallMethodRow(
             Text(
                 when (option) {
                     InstallMethod.FILE -> state.vendorBootName ?: stringResource(R.string.install_pick_vendor_boot_desc)
+                    InstallMethod.BOOT ->
+                        state.targetBootName ?: stringResource(R.string.install_pick_target_boot_desc)
                     InstallMethod.DIRECT -> state.directTarget ?: stringResource(R.string.install_method_direct_desc)
                     InstallMethod.INACTIVE -> state.inactiveTarget ?: stringResource(R.string.install_method_inactive_desc)
                 },
@@ -396,7 +424,7 @@ private fun InstallMethodRow(
             Icon(
                 imageVector =
                     when (option) {
-                        InstallMethod.FILE -> Icons.AutoMirrored.Rounded.InsertDriveFile
+                        InstallMethod.FILE, InstallMethod.BOOT -> Icons.AutoMirrored.Rounded.InsertDriveFile
                         else -> Icons.Rounded.Smartphone
                     },
                 contentDescription = null,

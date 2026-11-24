@@ -130,6 +130,14 @@ object Ncore {
         outputPath: String,
     ): String?
 
+    @JvmName("patchBoot")
+    private external fun nativePatchBoot(
+        imagePath: String,
+        modulePath: String,
+        initPath: String,
+        outputPath: String,
+    ): String?
+
     @JvmName("isGki")
     private external fun nativeIsGki(): Boolean
 
@@ -242,6 +250,17 @@ object Ncore {
     ): String? =
         runJni {
             nativePatchVendorBoot(imagePath, modulePath, bootPath, verifySymbols, outputPath)
+        }
+
+    @JvmName("patchBootApi")
+    fun patchBoot(
+        imagePath: String,
+        modulePath: String,
+        initPath: String,
+        outputPath: String,
+    ): String? =
+        runJni {
+            nativePatchBoot(imagePath, modulePath, initPath, outputPath)
         }
 
     @JvmName("isGkiApi")

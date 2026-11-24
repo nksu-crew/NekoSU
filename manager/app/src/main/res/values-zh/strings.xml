@@ -258,13 +258,15 @@
     <string name="about_card_title">了解 nekosu</string>
     <string name="finger_print">指纹</string>
 
-    <!-- 安装 (vendor_boot / LKM) -->
+    <!-- 安装 (boot / vendor_boot / LKM) -->
     <string name="install_title">安装 nksu</string>
     <string name="install_device_info">设备与内核</string>
     <string name="install_mode">安装模式</string>
     <string name="install_current_kmi">当前 KMI</string>
     <string name="install_method">安装方式</string>
     <string name="install_method_file">选择 vendor_boot 镜像</string>
+    <string name="install_method_boot">选择 boot 镜像</string>
+    <string name="install_pick_target_boot_desc">选择 boot.img 或 init_boot.img（非 GKI）；由 init 包装器加载 LKM（不校验内核符号）</string>
     <string name="install_recommended">推荐</string>
     <string name="install_pick_vendor_boot_desc">选择从本机提取的 vendor_boot 镜像</string>
     <string name="install_boot_image">boot 镜像</string>
@@ -280,6 +282,7 @@
     <string name="install_start">开始安装</string>
     <string name="install_log_title">安装日志</string>
     <string name="install_success">已生成补丁镜像 Download/nekosu_…_vendor_boot.img</string>
+    <string name="install_boot_success">已生成补丁镜像 Download/nekosu_…_boot.img</string>
     <string name="install_failed">安装失败</string>
     <string name="install_ko_missing">assets/ko 中未打包内核模块 (nksu.ko)</string>
     <string name="install_done">完成</string>
@@ -311,6 +314,8 @@
     <string name="install_log_err_patch">[nksu] ERROR: 补丁失败</string>
     <string name="install_log_err_too_large">[nksu] ERROR: 补丁镜像 (%1$d 字节) 超过 vendor_boot 分区容量 (%2$d 字节)</string>
     <string name="install_log_patching">[nksu] 正在修补 vendor_boot...</string>
+    <string name="install_log_boot_patching">[nksu] 正在修补 boot 镜像...</string>
+    <string name="install_log_err_init_missing">[nksu] ERROR: 内置 init 包装器未找到: %1$s</string>
     <string name="install_log_flashing">[nksu] 正在写入 vendor_boot...</string>
     <string name="install_log_err_flash">[nksu] ERROR: 刷入 vendor_boot 失败</string>
     <string name="install_err_copy_asset">复制 assets/%1$s 失败: %2$s</string>

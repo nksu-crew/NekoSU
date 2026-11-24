@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.nekosu.aqnya.data.installer.BootInstaller
 import me.nekosu.aqnya.data.installer.VendorBootInstaller
 import me.nekosu.aqnya.data.kernel.KernelInfo
 import me.nekosu.aqnya.data.prefs.AppPreferences
@@ -27,11 +28,12 @@ private const val LOG_EMIT_INTERVAL_MS = 50L
 
 /**
  * 安装方式，与 KernelSU 的安装页对应：
- *  - [FILE]     选择镜像（不需要 root，仅生成补丁镜像）
+ *  - [FILE]     选择 vendor_boot 镜像（GKI；不需要 root，仅生成补丁镜像）
+ *  - [BOOT]     选择 boot/init_boot 镜像（通过 init 包装器加载 LKM；不需要 root）
  *  - [DIRECT]   直接安装到当前 slot（需要 root + GKI）
  *  - [INACTIVE] 安装到非活动 slot（需要 root + GKI + A/B）
  */
-enum class InstallMethod { FILE, DIRECT, INACTIVE }
+enum class InstallMethod { FILE, BOOT, DIRECT, INACTIVE }
 
 /**
  * 内核模块（LKM）的选择，对齐 KernelSU 的 `LkmSelection`：
@@ -69,6 +71,9 @@ data class InstallUiState(
     val method: InstallMethod = InstallMethod.FILE,
     val vendorBootUri: Uri? = null,
     val vendorBootName: String? = null,
+    /** boot/init_boot image patched through the first-stage init wrapper. */
+    val targetBootUri: Uri? = null,
+    val targetBootName: String? = null,
     val bootUri: Uri? = null,
     val bootName: String? = null,
     val verifyKernelSymbols: Boolean = true,
@@ -104,18 +109,20 @@ data class InstallUiState(
                 hasKernelModule &&
                 when (method) {
                     InstallMethod.FILE -> vendorBootUri != null && (!verifyKernelSymbols || bootUri != null)
+                    InstallMethod.BOOT -> targetBootUri != null
                     InstallMethod.DIRECT -> directReady
                     InstallMethod.INACTIVE -> inactiveReady
                 }
 }
 
 /**
- * vendor_boot 安装流程的状态持有者。
+ * boot / vendor_boot 安装流程的状态持有者。
  *
  * 通过 [KernelInfo] 展示 JNI 查询到的内核版本 / KMI，并据此自动选择匹配的
  * nksu.ko；模块不再全部列出，只保留一个「使用本地 LKM」入口（对齐 KernelSU）。
- * 安装方式与 KernelSU 对齐：选择镜像、直接安装、安装到非活动 slot；后两者
- * 只有在启动阶段检测到 root 且存在对应 vendor_boot 分区时才显示。
+ * 安装方式与 KernelSU 对齐：选择 vendor_boot 或 boot 镜像、直接安装、安装到
+ * 非活动 slot；后两者只有在启动阶段检测到 root 且存在对应 vendor_boot 分区时
+ * 才显示。
  */
 class InstallViewModel(
     app: Application,
@@ -142,7 +149,7 @@ class InstallViewModel(
                         when (state.method) {
                             InstallMethod.DIRECT -> if (next.directReady) state.method else InstallMethod.FILE
                             InstallMethod.INACTIVE -> if (next.inactiveReady) state.method else InstallMethod.FILE
-                            InstallMethod.FILE -> state.method
+                            InstallMethod.FILE, InstallMethod.BOOT -> state.method
                         }
                     next.copy(method = method)
                 }
@@ -219,7 +226,7 @@ class InstallViewModel(
                 when (state.method) {
                     InstallMethod.DIRECT -> if (next.directReady) state.method else InstallMethod.FILE
                     InstallMethod.INACTIVE -> if (next.inactiveReady) state.method else InstallMethod.FILE
-                    InstallMethod.FILE -> state.method
+                    InstallMethod.FILE, InstallMethod.BOOT -> state.method
                 }
             next.copy(method = method)
         }
@@ -312,6 +319,26 @@ class InstallViewModel(
         }
     }
 
+    /** Select the boot/init_boot image that will receive the init wrapper. */
+    fun selectTargetBoot(uri: Uri) {
+        if (_uiState.value.running) return
+        val name =
+            uri.lastPathSegment
+                ?.substringAfterLast('/')
+                ?.takeIf { it.isNotBlank() }
+                ?: uri.toString()
+        _uiState.update {
+            it.copy(
+                method = InstallMethod.BOOT,
+                targetBootUri = uri,
+                targetBootName = name,
+                done = false,
+                success = null,
+                message = "",
+            )
+        }
+    }
+
     fun install() {
         val current = _uiState.value
         if (current.running || current.done) return
@@ -328,6 +355,7 @@ class InstallViewModel(
             val exit =
                 when (current.method) {
                     InstallMethod.FILE -> runFileInstall(current, koName, koUri, log)
+                    InstallMethod.BOOT -> runBootInstall(current, koName, koUri, log)
                     InstallMethod.DIRECT ->
                         runDirectInstall(
                             current.directTarget.orEmpty(),
@@ -382,6 +410,23 @@ class InstallViewModel(
                 koUri,
                 current.verifyKernelSymbols,
             ) { line -> appendLog(log, line) }
+        }.getOrElse { e ->
+            appendError(log, e)
+            -1
+        }
+    }
+
+    private suspend fun runBootInstall(
+        current: InstallUiState,
+        koName: String?,
+        koUri: Uri?,
+        log: StringBuilder,
+    ): Int {
+        val uri = current.targetBootUri ?: return -1
+        return runCatching {
+            val ctx = i18nContext()
+            val staged = withContext(Dispatchers.IO) { BootInstaller.stageImage(ctx, uri) }
+            BootInstaller.install(ctx, staged, koName, koUri) { line -> appendLog(log, line) }
         }.getOrElse { e ->
             appendError(log, e)
             -1
