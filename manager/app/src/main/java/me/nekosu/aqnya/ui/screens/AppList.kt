@@ -655,7 +655,6 @@ fun AppInfoItem(
                 Text(
                     text = app.name,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

@@ -49,7 +49,6 @@ import me.nekosu.aqnya.feature.home.presentation.HomeViewModel
 import me.nekosu.aqnya.feature.home.presentation.HomeViewModelFactory
 import me.nekosu.aqnya.feature.home.ui.HomeScreen
 import me.nekosu.aqnya.ui.animation.PageTransitions
-import me.nekosu.aqnya.ui.component.NonProductionRibbon
 import me.nekosu.aqnya.ui.navigation.BottomNavItem
 import me.nekosu.aqnya.ui.navigation.GlassBottomBarContentPadding
 import me.nekosu.aqnya.ui.navigation.GlassBottomBarHorizontalPadding
@@ -327,8 +326,6 @@ fun MainScreen() {
                             }
                         }
                     }
-
-                    NonProductionRibbon(modifier = Modifier.align(Alignment.TopEnd))
                 }
             }
 
