@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-use crate::defs::KSU_TEMP_BACKUP_DIR_NAME;
 use crate::{assets, defs, selinux::restorecon};
 use anyhow::{Context, Error, Result, bail};
 use rustix::process::setpgid;

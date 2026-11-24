@@ -12,7 +12,6 @@ anyhow.workspace = true
 clap.workspace = true
 const_format = "0.2"
 log.workspace = true
-env_logger = { version = "0.11", default-features = false }
 rust-embed = { version = "8", features = [
     "debug-embed",
     "compression", # must clean build after updating binaries
