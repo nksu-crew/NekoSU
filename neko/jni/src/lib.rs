@@ -381,6 +381,34 @@ pub extern "system" fn Java_me_nekosu_aqnya_core_Ncore_patchVendorBoot(
     }
 }
 
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_me_nekosu_aqnya_core_Ncore_patchBoot(
+    mut env: EnvUnowned,
+    _this: JObject,
+    image: JString,
+    module: JString,
+    init: JString,
+    output: JString,
+) -> jstring {
+    let (Some(image), Some(module), Some(init), Some(output)) = (
+        get_utf(&mut env, &image),
+        get_utf(&mut env, &module),
+        get_utf(&mut env, &init),
+        get_utf(&mut env, &output),
+    ) else {
+        return put_string(&mut env, "patchBoot: invalid path argument");
+    };
+
+    match patch::patch_init_boot(&image, &module, &init, &output) {
+        Ok(()) => ptr::null_mut(),
+        Err(e) => {
+            let message = format!("{e:#}");
+            log::error!("patchBoot failed: {message}");
+            put_string(&mut env, &message)
+        }
+    }
+}
+
 fn write_all(fd: RawFd, mut buf: &[u8]) -> bool {
     while !buf.is_empty() {
         let n = unsafe { libc::write(fd, buf.as_ptr().cast(), buf.len()) };

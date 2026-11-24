@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use crate::boot::antibrick;
 use crate::module::{ScriptWait, handle_updated_modules, metamodule, prune_modules};
-use crate::{
-    assets, defs,
-    selinux::restorecon,
-    system::utils,
-};
+use crate::{assets, defs, selinux::restorecon, system::utils};
 use anyhow::{Context, Result};
 use log::{info, warn};
 use std::{path::Path, time::Instant};

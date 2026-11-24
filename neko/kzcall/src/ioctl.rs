@@ -18,10 +18,7 @@ fn make_buffer(flag: u32, data: &[u8]) -> Result<Vec<u8>> {
 fn invoke(fd: RawFd, flag: u32, buffer: &mut [u8]) -> Result<i32> {
     let ret = unsafe { libc::ioctl(fd, IOC_CMD, buffer.as_mut_ptr()) };
     if ret < 0 {
-        bail!(
-            "NekoSU ioctl {flag} failed: {}",
-            io::Error::last_os_error()
-        );
+        bail!("NekoSU ioctl {flag} failed: {}", io::Error::last_os_error());
     }
     Ok(ret)
 }

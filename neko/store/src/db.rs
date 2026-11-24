@@ -323,8 +323,12 @@ fn decode(bytes: &[u8]) -> io::Result<Store> {
 }
 
 fn payload<'a>(bytes: &'a [u8], index: RecordIndex, data_start: usize) -> io::Result<&'a [u8]> {
-    let offset = usize::try_from(index.offset)
-        .map_err(|_| invalid(format!("profile store offset is too large: {}", index.offset)))?;
+    let offset = usize::try_from(index.offset).map_err(|_| {
+        invalid(format!(
+            "profile store offset is too large: {}",
+            index.offset
+        ))
+    })?;
     let len = index.len as usize;
     if offset < data_start {
         return Err(invalid(format!(
@@ -333,9 +337,12 @@ fn payload<'a>(bytes: &'a [u8], index: RecordIndex, data_start: usize) -> io::Re
         )));
     }
 
-    let end = offset
-        .checked_add(len)
-        .ok_or_else(|| invalid(format!("profile store entry key={} range overflow", index.key)))?;
+    let end = offset.checked_add(len).ok_or_else(|| {
+        invalid(format!(
+            "profile store entry key={} range overflow",
+            index.key
+        ))
+    })?;
     bytes.get(offset..end).ok_or_else(|| {
         invalid(format!(
             "profile store entry key={} is out of bounds: {offset}..{end}, file={}",
@@ -346,10 +353,10 @@ fn payload<'a>(bytes: &'a [u8], index: RecordIndex, data_start: usize) -> io::Re
 }
 
 fn encode(store: &Store) -> io::Result<Vec<u8>> {
-    let profile_count = u32::try_from(store.profiles.len())
-        .map_err(|_| invalid("too many profile entries"))?;
-    let feature_count = u32::try_from(store.features.len())
-        .map_err(|_| invalid("too many feature entries"))?;
+    let profile_count =
+        u32::try_from(store.profiles.len()).map_err(|_| invalid("too many profile entries"))?;
+    let feature_count =
+        u32::try_from(store.features.len()).map_err(|_| invalid("too many feature entries"))?;
 
     let profile_index_bytes = (profile_count as usize)
         .checked_mul(INDEX_SIZE)
@@ -375,10 +382,9 @@ fn encode(store: &Store) -> io::Result<Vec<u8>> {
 
     for (position, entry) in store.profiles.iter().enumerate() {
         let payload = entry.to_bytes();
-        let len = u32::try_from(payload.len())
-            .map_err(|_| invalid("profile entry is too large"))?;
-        let offset = u64::try_from(cursor)
-            .map_err(|_| invalid("profile store is too large"))?;
+        let len =
+            u32::try_from(payload.len()).map_err(|_| invalid("profile entry is too large"))?;
+        let offset = u64::try_from(cursor).map_err(|_| invalid("profile store is too large"))?;
         write_index(
             &mut bytes,
             HEADER_SIZE + position * INDEX_SIZE,
@@ -396,10 +402,9 @@ fn encode(store: &Store) -> io::Result<Vec<u8>> {
 
     for (position, entry) in store.features.iter().enumerate() {
         let payload = entry.to_bytes();
-        let len = u32::try_from(payload.len())
-            .map_err(|_| invalid("feature entry is too large"))?;
-        let offset = u64::try_from(cursor)
-            .map_err(|_| invalid("profile store is too large"))?;
+        let len =
+            u32::try_from(payload.len()).map_err(|_| invalid("feature entry is too large"))?;
+        let offset = u64::try_from(cursor).map_err(|_| invalid("profile store is too large"))?;
         write_index(
             &mut bytes,
             feature_index_start + position * INDEX_SIZE,
