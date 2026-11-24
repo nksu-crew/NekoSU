@@ -365,7 +365,7 @@ pub extern "system" fn Java_me_nekosu_aqnya_core_Ncore_patchVendorBoot(
     };
     let boot = get_utf(&mut env, &boot);
 
-    match patch::patch(
+    match patch::patch_vendor_boot(
         &image,
         &module,
         boot.as_deref(),
