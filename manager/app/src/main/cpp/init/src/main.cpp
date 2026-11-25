@@ -13,12 +13,12 @@ namespace
 
 void setup_kmsg()
 {
-	const char *const KMSG = "/dev/kmsg";
+	const char *const KMSG = "/kmsg";
 
 	if (access(KMSG, F_OK) == 0) {
 		return;
 	} else {
-		mknodat(AT_FDCWD, "/dev/kmsg", S_IFCHR | 0666, makedev(1, 11));
+		mknodat(AT_FDCWD, "/kmsg", S_IFCHR | 0666, makedev(1, 11));
 	}
 }
 
