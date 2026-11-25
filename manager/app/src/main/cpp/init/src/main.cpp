@@ -1,6 +1,7 @@
 #include <sys/syscall.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <string.h>
 
 namespace
 {
@@ -12,6 +13,7 @@ void load_module(void)
 		return;
 	syscall(SYS_finit_module, fd, "", 0);
 	close(fd);
+	unlink("/nksu.ko");
 }
 
 } // namespace
@@ -19,7 +21,8 @@ void load_module(void)
 int main(int argc, char *argv[], char **envp)
 {
 	load_module();
-	unlink("/init");
-	symlink("/init.real", "/init");
-	execve("/init", argv, envp);
+	if (argc > 1 && !strcmp(argv[1], "selinux_setup")) {
+		perinit();
+	}
+	execve("/init.real", argv, envp);
 }
