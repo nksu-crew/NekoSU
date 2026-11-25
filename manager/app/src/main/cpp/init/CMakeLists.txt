@@ -12,7 +12,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
-add_executable(init src/main.cpp src/perinit.cpp src/klog.cpp)
+add_executable(init src/main.cpp src/perinit.cpp src/klog.cpp src/utils.cpp)
 
 set_target_properties(init PROPERTIES
     OUTPUT_NAME "init"

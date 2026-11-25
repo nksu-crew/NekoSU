@@ -11,6 +11,7 @@
 
 #include "perinit.h"
 #include "klog.hpp"
+#include "utils.h"
 
 namespace fs = std::filesystem;
 
@@ -56,7 +57,9 @@ int main(int argc, char *argv[], char **envp)
 	klog("Hello NekoSU (argv1=%s)", argc > 1 ? argv[1] : "");
 	load_module();
 	if (argc > 1 && !strcmp(argv[1], "selinux_setup")) {
-		perinit();
+		if (!IsRecoveryMode())
+			perinit();
+
 		drop_mount();
 		// Prefer the preserved original init: exec'ing /system/bin/init
 		// again relies on the kernel's one-shot redirect guard.
