@@ -6,6 +6,7 @@
 #include <sys/sysmacros.h>
 #include <cstring>
 #include <filesystem>
+#include <sys/mount.h>
 
 #include "perinit.h"
 #include "klog.hpp"
@@ -14,6 +15,7 @@ namespace fs = std::filesystem;
 
 namespace
 {
+bool is_mounted = false;
 
 void setup_kmsg()
 {
