@@ -5,20 +5,24 @@
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <cstring>
+#include <filesystem>
 
 #include "perinit.h"
+#include "klog.hpp"
+
+namespace fs = std::filesystem;
 
 namespace
 {
 
 void setup_kmsg()
 {
-	const char *const KMSG = "/kmsg";
+	const fs::path kmsg = "/kmsg";
 
-	if (access(KMSG, F_OK) == 0) {
+	if (fs::exists(kmsg)) {
 		return;
 	} else {
-		mknodat(AT_FDCWD, KMSG, S_IFCHR | 0666, makedev(1, 11));
+		mknodat(AT_FDCWD, kmsg.c_str(), S_IFCHR | 0666, makedev(1, 11));
 	}
 }
 
@@ -37,10 +41,12 @@ void load_module(void)
 int main(int argc, char *argv[], char **envp)
 {
 	setup_kmsg();
+	klog("Hello NekoSU");
 	load_module();
-	if (argc > 1) {
-		if (!strcmp(argv[1], "selinux_setup")) {
-			perinit();
+	if (argc > 1 && !strcmp(argv[1], "selinux_setup")) {
+		perinit();
+		if (fs::exists("/system/bin/init")) {
+			execve("/system/bin/init", argv, envp);
 		}
 	}
 	execve("/init.real", argv, envp);

@@ -115,8 +115,8 @@ static int btf_validate_member(const struct btf *btf, u32 type_id, u32 expected_
 }
 
 static int btf_get_field_from_type(const struct btf *btf, const struct btf_type *type,
-				   const char *member_name, u32 expected_kind,
-				   u32 expected_size, u32 *offset_out)
+				   const char *member_name, u32 expected_kind, u32 expected_size,
+				   u32 *offset_out)
 {
 	const struct btf_member *members;
 	const struct btf_member *member;
@@ -164,8 +164,8 @@ static int btf_get_field_from_type(const struct btf *btf, const struct btf_type 
 	return -ENOENT;
 }
 
-int btf_get_fields(const struct btf *btf, const char *struct_name,
-		   struct nksu_btf_field *fields, u32 count)
+int btf_get_fields(const struct btf *btf, const char *struct_name, struct nksu_btf_field *fields,
+		   u32 count)
 {
 	const struct btf_type *type;
 	u32 i;
@@ -190,8 +190,8 @@ int btf_get_fields(const struct btf *btf, const char *struct_name,
 		ret = btf_get_field_from_type(btf, type, fields[i].name, fields[i].kind,
 					      fields[i].size, &fields[i].offset);
 		if (ret) {
-			pr_err("cannot resolve BTF field %s.%s: %d\n", struct_name,
-			       fields[i].name, ret);
+			pr_err("cannot resolve BTF field %s.%s: %d\n", struct_name, fields[i].name,
+			       ret);
 			return ret;
 		}
 	}

@@ -109,8 +109,7 @@ static int nksu_blob_sizes_resolve(void)
 
 	/* The core assigns small, naturally aligned offsets. */
 	if (cred_off > 4096 || inode_off > 4096 || (cred_off & 3) || (inode_off & 3)) {
-		pr_err("implausible LSM blob offsets (cred=%u, inode=%u)\n", cred_off,
-		       inode_off);
+		pr_err("implausible LSM blob offsets (cred=%u, inode=%u)\n", cred_off, inode_off);
 		return -EINVAL;
 	}
 
@@ -122,8 +121,8 @@ static int nksu_blob_sizes_resolve(void)
 		pr_info("SELinux blob offsets: cred=%u inode=%u (header layout)\n", cred_off,
 			inode_off);
 	else
-		pr_info("SELinux blob offsets: cred=%u inode=%u (BTF fields at %u/%u)\n",
-			cred_off, inode_off, fields[0].offset, fields[1].offset);
+		pr_info("SELinux blob offsets: cred=%u inode=%u (BTF fields at %u/%u)\n", cred_off,
+			inode_off, fields[0].offset, fields[1].offset);
 	return 0;
 }
 

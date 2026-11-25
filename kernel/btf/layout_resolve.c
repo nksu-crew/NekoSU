@@ -8,8 +8,7 @@
 
 static struct btf **nksu_btf_vmlinux_sym;
 
-int nksu_btf_resolve_fields(const char *type_name, struct nksu_btf_field *fields,
-			    u32 count)
+int nksu_btf_resolve_fields(const char *type_name, struct nksu_btf_field *fields, u32 count)
 {
 	struct btf **vmlinux;
 	struct btf *btf;

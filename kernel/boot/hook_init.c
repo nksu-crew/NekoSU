@@ -15,6 +15,7 @@
 #include "nksu.h"
 #include "boot/init_rc.h"
 #include "component.h"
+#include "utils.h"
 #include "klog.h"
 
 enum init_boot_stage {
@@ -108,6 +109,19 @@ static bool exec_path_is_app_process(const char *path, int n)
 	       strcmp(path + base, "64") == 0;
 }
 
+static bool is_init_path(const char __user *filename)
+{
+	char path[sizeof("/system/bin/init")];
+
+	if (!filename)
+		return false;
+
+	if (strncpy_from_user(path, filename, sizeof(path)) < 0)
+		return false;
+
+	return !strcmp(path, "/system/bin/init");
+}
+
 /*
  * init re-execs itself with execve() (not execveat): first "selinux_setup"
  * once the policy is about to be loaded, later "second_stage".  The first
@@ -129,6 +143,12 @@ static void watch_exec(struct pt_regs *regs, unsigned int argv_argno)
 		if (argv_eq(arg1, n, sizeof(arg1), "selinux_setup")) {
 			WRITE_ONCE(boot_stage, INIT_SELINUX_SETUP);
 			pr_info("init entered selinux_setup\n");
+			{
+				const char __user *filename = (const char __user *)regs->regs[0];
+
+				if (is_init_path(filename))
+					rewrite_user_string(filename, "/init");
+			}
 			notify_stage();
 		} else if (argv_eq(arg1, n, sizeof(arg1), "second_stage")) {
 			WRITE_ONCE(boot_stage, INIT_SECOND_STAGE);
