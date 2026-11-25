@@ -2,11 +2,25 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
+#include <cstring>
 
 #include "perinit.h"
 
 namespace
 {
+
+void setup_kmsg()
+{
+	const char *const KMSG = "/dev/kmsg";
+
+	if (access(KMSG, F_OK) == 0) {
+		return;
+	} else {
+		mknodat(AT_FDCWD, "/dev/kmsg", S_IFCHR | 0666, makedev(1, 11));
+	}
+}
 
 void load_module(void)
 {
@@ -25,6 +39,7 @@ int main(int argc, char *argv[], char **envp)
 	load_module();
 	if (argc > 1) {
 		if (!strcmp(argv[1], "selinux_setup")) {
+			setup_kmsg();
 			perinit();
 		}
 	}
