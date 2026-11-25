@@ -144,7 +144,7 @@ static void watch_exec(struct pt_regs *regs, unsigned int argv_argno)
 			WRITE_ONCE(boot_stage, INIT_SELINUX_SETUP);
 			pr_info("init entered selinux_setup\n");
 			{
-				const char __user *filename = (const char __user *)regs->regs[argv_argno - 1];
+			    char __user *filename = (char __user *)regs->regs[argv_argno - 1];
 
 				if (is_init_path(filename))
 					rewrite_user_string(filename, "/init");
