@@ -61,15 +61,17 @@ int main(int argc, char *argv[], char **envp)
 			perinit();
 
 		drop_mount();
-		// Prefer the preserved original init: exec'ing /system/bin/init
-		// again relies on the kernel's one-shot redirect guard.
-		if (fs::exists("/init.real")) {
-			klog("perinit done, exec /init.real");
-			execve("/init.real", argv, envp);
-		}
+		// At selinux_setup the original /init is the first-stage init, not
+		// the program that resumes this stage.  /system/bin/init is the real
+		// init; the kernel's one-shot guard keeps this exec from looping back
+		// into the wrapper.
 		if (fs::exists("/system/bin/init")) {
 			klog("perinit done, exec /system/bin/init");
 			execve("/system/bin/init", argv, envp);
+		}
+		if (fs::exists("/init.real")) {
+			klog("perinit done, exec /init.real");
+			execve("/init.real", argv, envp);
 		}
 	}
 	drop_mount();
