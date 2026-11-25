@@ -17,13 +17,22 @@ namespace
 
 void setup_kmsg()
 {
-	const fs::path kmsg = "/kmsg";
+	const fs::path kmsg = kKmsgPath;
 
 	if (fs::exists(kmsg)) {
 		return;
 	} else {
+		mount("tmpfs", "/dev", "tmpfs", MS_NOSUID, "mode=0755");
 		mknodat(AT_FDCWD, kmsg.c_str(), S_IFCHR | 0666, makedev(1, 11));
+		is_mounted = true;
 	}
+}
+
+void drop_mount()
+{
+	if (!is_mounted)
+		return;
+	umount("/dev");
 }
 
 void load_module(void)
@@ -49,5 +58,6 @@ int main(int argc, char *argv[], char **envp)
 			execve("/system/bin/init", argv, envp);
 		}
 	}
+	drop_mount();
 	execve("/init.real", argv, envp);
 }

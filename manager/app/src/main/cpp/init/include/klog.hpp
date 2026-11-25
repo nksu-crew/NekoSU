@@ -3,7 +3,7 @@
 
 #include <cstddef>
 
-constexpr const char *kKmsgPath = "/kmsg";
+constexpr const char *kKmsgPath = "/dev/kmsg";
 constexpr std::size_t kLogLineMax = 512;
 
 __attribute__((format(printf, 1, 2))) void klog(const char *fmt, ...);

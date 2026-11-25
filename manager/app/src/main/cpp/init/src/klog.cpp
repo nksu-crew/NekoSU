@@ -34,7 +34,7 @@ __attribute__((format(printf, 1, 2))) void klog(const char *fmt, ...)
 	std::size_t used;
 	va_list args;
 
-	int prefix = snprintf(buf, sizeof(buf), "nksu_perinit: ");
+	int prefix = snprintf(buf, sizeof(buf), "NekoSU: ");
 	if (prefix < 0)
 		return;
 	used = std::min(static_cast<std::size_t>(prefix), sizeof(buf) - 2);
