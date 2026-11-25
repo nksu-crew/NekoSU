@@ -34,6 +34,8 @@ mod android {
     // Module preinit dirs are synced to PREINIT_DIR_*/preinit/<id>/ and run by
     // the init wrapper at selinux_setup.
     pub const PREINIT_SUBDIR: &str = "preinit";
+    pub const MODULES_RC_FILE: &str = "modules.rc";
+    pub const MODULES_RC_TMP_FILE: &str = ".modules.rc.tmp";
     pub const PREINIT_MANIFEST_FILE: &str = ".manifest";
     pub const PREINIT_BOOTCOUNT_FILE: &str = ".preinit_bootcount";
     pub const PREINIT_STATUS_PATH: &str = concatcp!(WORKING_DIR, "preinit_status");
@@ -43,6 +45,7 @@ mod android {
     pub const DISABLE_FILE_NAME: &str = "disable";
     pub const UPDATE_FILE_NAME: &str = "update";
     pub const REMOVE_FILE_NAME: &str = "remove";
+    pub const MODULE_INIT_RC_DIR: &str = "initrc";
     pub const MODULE_PREINIT_DIR: &str = "preinit";
     pub const PREINIT_CONF: &str = "preinit.conf";
 

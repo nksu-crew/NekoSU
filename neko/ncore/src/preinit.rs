@@ -37,14 +37,18 @@ const STATE_UNSUPPORTED: &str = "unsupported";
 
 /// Whether the installed init wrapper contains the perinit runner.
 ///
-/// The boot/init_boot patcher replaces `/init` with the wrapper and keeps the
-/// original init at `/init.real`.  A vendor_boot/GKI install has no
-/// `/init.real`, so staging copies would never be executed there.
+/// The boot/init_boot patcher replaces `/init` with the wrapper, keeps the
+/// original init at `/init.real` and adds `/nksu.preinit`.  The marker is the
+/// reliable signal (system-as-root may hide `/init.real` after switching
+/// roots); `/init.real` stays as a fallback for images patched before the
+/// marker existed.  A vendor_boot/GKI install has neither.
 pub fn is_supported() -> bool {
-    Path::new("/init.real").exists()
-        && Path::new("/init")
-            .symlink_metadata()
-            .is_ok_and(|meta| !meta.file_type().is_symlink())
+    // /metadata survives system-as-root; the wrapper writes this marker when
+    // perinit actually starts.  The ramdisk paths are fallbacks for images
+    // patched before the marker existed.
+    Path::new("/metadata/nksu.perinit").exists()
+        || Path::new("/nksu.preinit").exists()
+        || Path::new("/init.real").exists()
 }
 
 /// A file or directory inside a module's preinit dir.
@@ -142,7 +146,7 @@ fn available(path: &Path) -> Result<u64> {
 }
 
 /// The runner refuses anything that is not owned by root or is writable by group/other.
-fn secure(path: &Path, mode: u32, con: &str) -> Result<()> {
+pub(crate) fn secure(path: &Path, mode: u32, con: &str) -> Result<()> {
     lchown(path, Some(0), Some(0))
         .with_context(|| format!("Failed to chown {}", path.display()))?;
     fs::set_permissions(path, Permissions::from_mode(mode & 0o755))

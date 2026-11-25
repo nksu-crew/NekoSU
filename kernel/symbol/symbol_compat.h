@@ -68,6 +68,7 @@
 #define sys_umount nksu_sys_umount_fn
 #endif
 #define filp_open nksu_filp_open_fn
+#define shmem_file_setup nksu_shmem_file_setup_fn
 #define kernel_read nksu_kernel_read
 #define kernel_write nksu_kernel_write
 #define find_task_by_vpid nksu_find_task_by_vpid_fn

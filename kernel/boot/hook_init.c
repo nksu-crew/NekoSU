@@ -7,6 +7,13 @@
 #include <linux/string.h>
 #include <linux/tracepoint.h>
 #include <linux/binfmts.h>
+#include <linux/fs.h>
+#include <linux/dcache.h>
+#include <linux/fcntl.h>
+#include <linux/file.h>
+#include <linux/fdtable.h>
+#include <linux/mm.h>
+#include <linux/sched.h>
 #include "hook/syscall.h"
 #include "hook/dispatch.h"
 #include "hook/hook.h"
@@ -15,8 +22,12 @@
 #include "nksu.h"
 #include "boot/init_rc.h"
 #include "component.h"
+#include "guards.h"
 #include "utils.h"
 #include "klog.h"
+
+/* Last: redirects filp_open/kernel_read/kernel_write and friends. */
+#include "symbol/symbol_compat.h"
 
 enum init_boot_stage {
 	INIT_FIRST_STAGE,
@@ -26,6 +37,17 @@ enum init_boot_stage {
 };
 
 int boot_stage = INIT_FIRST_STAGE;
+/* selinux_setup filename redirect is one shot; see watch_exec(). */
+static bool preinit_redirected;
+
+/*
+ * The wrapper is staged from the running executable while the ramdisk root is
+ * still visible, then executed through a shmem fd at selinux_setup.  A regular
+ * file cannot be used: writing it from the kernel leaves the write reference in
+ * task_work, so the immediate exec fails with ETXTBSY.
+ */
+static char *nksu_wrapper_data;
+static size_t nksu_wrapper_len;
 // vendor ko load on first_stage, see line 446 on https://android.googlesource.com/platform/system/core/+/refs/heads/main/init/first_stage_init.cpp
 
 /*
@@ -122,12 +144,164 @@ static bool is_init_path(const char __user *filename)
 	return !strcmp(path, "/system/bin/init");
 }
 
+/* Stage the running wrapper in memory while /init is still visible. */
+static void nksu_stage_wrapper(void)
+{
+	struct file *in __free(nksu_filp) = NULL;
+	void *buf;
+	loff_t pos = 0;
+	size_t size;
+	ssize_t n;
+
+	if (nksu_wrapper_data)
+		return;
+
+	if (current->mm && current->mm->exe_file) {
+		in = get_file(current->mm->exe_file);
+	} else {
+		in = filp_open("/init", O_RDONLY, 0);
+		if (!IS_ERR_OR_NULL(in) && d_is_symlink(in->f_path.dentry)) {
+			pr_info("perinit: /init is a symlink, wrapper not installed\n");
+			return;
+		}
+	}
+
+	if (IS_ERR_OR_NULL(in)) {
+		pr_warn("perinit: cannot open the wrapper: %ld\n", PTR_ERR(in));
+		return;
+	}
+	if (!S_ISREG(file_inode(in)->i_mode)) {
+		pr_warn("perinit: wrapper is not a regular file\n");
+		return;
+	}
+
+	size = (size_t)i_size_read(file_inode(in));
+	if (size < 4 || size > 8 * 1024 * 1024)
+		return;
+
+	buf = kvmalloc(size, GFP_KERNEL);
+	if (!buf) {
+		pr_err("perinit: cannot allocate %zu bytes for the wrapper\n", size);
+		return;
+	}
+
+	n = nksu_kread(in, buf, size, &pos);
+	if (n <= 0 || (size_t)n < 4 || memcmp(buf, "\x7f" "ELF", 4)) {
+		pr_err("perinit: wrapper is not a valid ELF (%zd bytes)\n", n);
+		kvfree(buf);
+		return;
+	}
+
+	nksu_wrapper_data = buf;
+	nksu_wrapper_len = (size_t)n;
+	pr_info("perinit: wrapper staged in memory (%zd bytes)\n", n);
+}
+
+/*
+ * Point init's selinux_setup exec at the staged wrapper.
+ *
+ * init passes a string literal to execv(), so the original pointer resolves to
+ * read-only memory and copy_to_user() into it fails.  Stage /proc/self/fd/N on
+ * the user stack instead, and fall back to /init if staging is unavailable.
+ */
+static bool redirect_init_path(struct pt_regs *regs, unsigned int argno)
+{
+	const char __user *filename = (const char __user *)get_syscall_arg(regs, argno);
+	char fd_path[32];
+	char __user *replacement;
+	struct file *file;
+	int fd, len;
+
+	if (!is_init_path(filename))
+		return false;
+
+	if (!nksu_wrapper_data) {
+		pr_warn("perinit: no staged wrapper, falling back to /init\n");
+		goto fallback;
+	}
+
+	file = shmem_file_setup("[nksu_init]", nksu_wrapper_len, 0);
+	if (IS_ERR_OR_NULL(file)) {
+		pr_err("perinit: shmem_file_setup failed: %ld\n", PTR_ERR(file));
+		goto fallback;
+	}
+
+	{
+		loff_t pos = 0;
+		ssize_t n = nksu_kwrite(file, nksu_wrapper_data, nksu_wrapper_len, &pos);
+
+		if (n != (ssize_t)nksu_wrapper_len) {
+			pr_err("perinit: write shmem wrapper failed: %zd/%zu\n", n,
+			       nksu_wrapper_len);
+			fput(file);
+			goto fallback;
+		}
+		/* The shmem file owns the image now. */
+		kvfree(nksu_wrapper_data);
+		nksu_wrapper_data = NULL;
+		nksu_wrapper_len = 0;
+	}
+
+	fd = get_unused_fd_flags(O_CLOEXEC);
+	if (fd < 0) {
+		pr_err("perinit: get_unused_fd_flags failed: %d\n", fd);
+		fput(file);
+		goto fallback;
+	}
+
+	len = snprintf(fd_path, sizeof(fd_path), "/proc/self/fd/%d", fd);
+	replacement = nksu_user_stack_buffer(fd_path, len + 1);
+	if (!replacement) {
+		put_unused_fd(fd);
+		fput(file);
+		pr_err("perinit: cannot stage fd path on the user stack\n");
+		goto fallback;
+	}
+
+	fd_install(fd, file);
+	set_syscall_arg(regs, argno, (unsigned long)replacement);
+	pr_info("perinit: exec wrapper via %s\n", fd_path);
+	return true;
+
+fallback:
+	replacement = nksu_user_stack_buffer("/init", sizeof("/init"));
+	if (!replacement) {
+		pr_err("preinit: cannot stage /init on the user stack\n");
+		return false;
+	}
+	set_syscall_arg(regs, argno, (unsigned long)replacement);
+	return true;
+}
+
+/*
+ * Run the redirected exec ourselves.  If the replacement cannot be exec'd,
+ * restore init's original filename and run it instead; letting PID 1 die turns
+ * any staging mistake into an immediate bootloop.
+ */
+static long exec_redirected(struct pt_regs *regs, unsigned int argv_argno, int nr,
+			    unsigned long original)
+{
+	unsigned int argno = argv_argno - 1;
+	long ret, retry;
+
+	ret = nksu_call_orig(nr, regs);
+	if (ret >= 0)
+		return ret;
+
+	pr_warn("perinit: redirected exec failed: %ld, restoring init\n", ret);
+	set_syscall_arg(regs, argno, original);
+	retry = nksu_call_orig(nr, regs);
+	if (retry < 0)
+		pr_err("perinit: original init exec also failed: %ld\n", retry);
+	return retry;
+}
+
 /*
  * init re-execs itself with execve() (not execveat): first "selinux_setup"
  * once the policy is about to be loaded, later "second_stage".  The first
  * zygote is exec'd even later, when /data is ready.
  */
-static void watch_exec(struct pt_regs *regs, unsigned int argv_argno)
+static long watch_exec(struct pt_regs *regs, unsigned int argv_argno, int nr)
 {
 	char arg1[MAX_ARG_LEN];
 	char path[NKSU_EXEC_PATH_MAX];
@@ -137,19 +311,23 @@ static void watch_exec(struct pt_regs *regs, unsigned int argv_argno)
 		n = read_argv1(regs, argv_argno, arg1, sizeof(arg1));
 		if (n < 0) {
 			pr_warn("get_argvx failed: %d\n", n);
-			return;
+			return 0;
 		}
 
 		if (argv_eq(arg1, n, sizeof(arg1), "selinux_setup")) {
 			WRITE_ONCE(boot_stage, INIT_SELINUX_SETUP);
 			pr_info("init entered selinux_setup\n");
-			{
-			    char __user *filename = (char __user *)regs->regs[argv_argno - 1];
+			if (!READ_ONCE(preinit_redirected)) {
+				unsigned long original =
+					get_syscall_arg(regs, argv_argno - 1);
 
-				if (is_init_path(filename)){
-					rewrite_user_string(filename, "/init");
-					pr_info("redirect /system/bin/init to /init");
-					}
+				if (redirect_init_path(regs, argv_argno - 1)) {
+					WRITE_ONCE(preinit_redirected, true);
+					pr_info("preinit: redirect selinux_setup exec\n");
+					notify_stage();
+					return exec_redirected(regs, argv_argno, nr,
+							       original);
+				}
 			}
 			notify_stage();
 		} else if (argv_eq(arg1, n, sizeof(arg1), "second_stage")) {
@@ -157,24 +335,18 @@ static void watch_exec(struct pt_regs *regs, unsigned int argv_argno)
 			pr_info("init entered second_stage\n");
 			notify_stage();
 		}
-		return;
+		return 0;
 	}
 
 	if (READ_ONCE(zygote_seen))
-		return;
+		return 0;
 
-	/*
-     * The zygote is the first app_process* exec'd by init while still root
-     * (its service has `user root`; it only drops uid once it forks apps).
-     * Reject everything else before touching user memory: most boot execs
-     * are non-root services, and the rest fail the path match.
-     */
 	if (unlikely(!uid_eq(current_euid(), GLOBAL_ROOT_UID)))
-		return;
+		return 0;
 
 	n = get_path_arg(regs, argv_argno - 1, path, sizeof(path));
 	if (n < 0 || !exec_path_is_app_process(path, n))
-		return;
+		return 0;
 
 	n = read_argv1(regs, argv_argno, arg1, sizeof(arg1));
 	if (n > 0 && argv_eq(arg1, n, sizeof(arg1), "-Xzygote")) {
@@ -182,18 +354,17 @@ static void watch_exec(struct pt_regs *regs, unsigned int argv_argno)
 		pr_info("zygote is starting\n");
 		notify_stage();
 	}
+	return 0;
 }
 
 static long handle__NR_execve(struct pt_regs *regs)
 {
-	watch_exec(regs, 1);
-	return 0;
+	return watch_exec(regs, 1, __NR_execve);
 }
 
 static long handle__NR_execveat(struct pt_regs *regs)
 {
-	watch_exec(regs, 2);
-	return 0;
+	return watch_exec(regs, 2, __NR_execveat);
 }
 
 /*
@@ -458,6 +629,8 @@ int hook_init(void)
 {
 	int ret;
 
+	nksu_stage_wrapper();
+
 	ret = load_temp_syscall();
 	if (ret)
 		goto err_dispatch;
@@ -492,4 +665,7 @@ void hook_exit(void)
 	stop_init_thread();
 	nksu_components_exit_from(NKSU_STAGE_EARLY);
 	unload_temp_syscall();
+	kvfree(nksu_wrapper_data);
+	nksu_wrapper_data = NULL;
+	nksu_wrapper_len = 0;
 }

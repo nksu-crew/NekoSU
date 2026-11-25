@@ -2,6 +2,8 @@
 #pragma once
 #include <linux/types.h>
 
+struct pt_regs;
+
 typedef long (*nksu_handler_t)(struct pt_regs *regs);
 
 /*
@@ -16,6 +18,9 @@ void nksu_unregister_handler(u32 nr);
 
 /* Restore one redirected syscall and drop its handler. */
 void nksu_unhook_syscall(int nr);
+
+/* Invoke the original syscall; returns its result. */
+long nksu_call_orig(int nr, struct pt_regs *regs);
 
 /*
  * Bypass the profile gate while the temporary boot-stage watcher is

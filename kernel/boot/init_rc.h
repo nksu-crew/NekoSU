@@ -9,7 +9,9 @@
  *
  * nksu hooks init's read() of /system/etc/init/hw/init.rc through the syscall
  * table (__NR_read / __NR_fstat) and appends a static rc that execs ncore,
- * nksu's userspace module runtime, at the well-defined boot stages:
+ * nksu's userspace module runtime, at the well-defined boot stages.  It then
+ * appends /metadata/.../nksu/modules.rc, the module initrc snippets ncore
+ * concatenates at post-fs-data:
  *
  *   on post-fs-data
  *       exec u:r:nksu:s0 root -- /data/adb/ncore post-fs-data

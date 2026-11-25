@@ -8,6 +8,8 @@ use bootparse::patcher::BootPatcher;
 
 const MODULE_PATH: &str = "nksu.ko";
 const INIT_PATH: &str = "init";
+/// Tells ncore that this ramdisk's init wrapper contains the perinit runner.
+const PREINIT_MARKER_PATH: &str = "nksu.preinit";
 /// The bundled init wrapper loads the LKM and then execs this path, so the
 /// original first-stage init must be preserved before `/init` is replaced.
 const ORIGINAL_INIT_PATH: &str = "init.real";
@@ -51,6 +53,9 @@ pub fn patch_init_boot(
     cpio.add(INIT_PATH, CpioEntry::regular(0o755, init_data))?;
 
     cpio.add(MODULE_PATH, CpioEntry::regular(0o644, module_data))?;
+
+    log::info!("patch: marking the perinit runner");
+    cpio.add(PREINIT_MARKER_PATH, CpioEntry::regular(0o644, b"1\n".to_vec()))?;
 
     log::info!("patch: repacking ramdisk");
     let new_cpio = cpio.dump();

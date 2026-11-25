@@ -4,6 +4,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
+#include <cerrno>
 #include <cstring>
 #include <filesystem>
 #include <sys/mount.h>
@@ -24,9 +25,9 @@ void setup_kmsg()
 	if (fs::exists(kmsg)) {
 		return;
 	} else {
-		mount("tmpfs", "/dev", "tmpfs", MS_NOSUID, "mode=0755");
+		if (mount("tmpfs", "/dev", "tmpfs", MS_NOSUID, "mode=0755") == 0)
+			is_mounted = true;
 		mknodat(AT_FDCWD, kmsg.c_str(), S_IFCHR | 0666, makedev(1, 11));
-		is_mounted = true;
 	}
 }
 
@@ -52,14 +53,29 @@ void load_module(void)
 int main(int argc, char *argv[], char **envp)
 {
 	setup_kmsg();
-	klog("Hello NekoSU");
+	klog("Hello NekoSU (argv1=%s)", argc > 1 ? argv[1] : "");
 	load_module();
 	if (argc > 1 && !strcmp(argv[1], "selinux_setup")) {
 		perinit();
+		drop_mount();
+		// Prefer the preserved original init: exec'ing /system/bin/init
+		// again relies on the kernel's one-shot redirect guard.
+		if (fs::exists("/init.real")) {
+			klog("perinit done, exec /init.real");
+			execve("/init.real", argv, envp);
+		}
 		if (fs::exists("/system/bin/init")) {
+			klog("perinit done, exec /system/bin/init");
 			execve("/system/bin/init", argv, envp);
 		}
 	}
 	drop_mount();
-	execve("/init.real", argv, envp);
+	if (fs::exists("/init.real")) {
+		execve("/init.real", argv, envp);
+	}
+	if (fs::exists("/system/bin/init")) {
+		execve("/system/bin/init", argv, envp);
+	}
+	klog("failed to exec the real init: %s", strerror(errno));
+	return 1;
 }

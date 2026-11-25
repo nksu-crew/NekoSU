@@ -31,7 +31,6 @@
 #include <cerrno>
 #include <cstdarg>
 #include <cstddef>
-#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -87,6 +86,57 @@ constexpr long kTotalTimeoutMs = 30 * 1000;
 constexpr long kExecTimeoutMs = 5 * 1000;
 constexpr long kBootcountLimit = 3;
 constexpr int kOwnerUid = 0;
+
+/* -------------------------------------------------------------- file log */
+
+/*
+ * /metadata survives a system-as-root switch, unlike the ramdisk.  ncore uses
+ * this marker at post-fs-data to decide whether the next boot's init wrapper
+ * will execute preinit actions.
+ */
+void mark_supported()
+{
+	static const char path[] = "/metadata/nksu.perinit";
+	int fd;
+
+	fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+	if (fd < 0)
+		return;
+	(void)write(fd, "1\n", 2);
+	close(fd);
+}
+
+/*
+ * /dev/kmsg writes are subject to printk rate limiting, which regularly
+ * swallows the few lines the wrapper emits while init is noisy.  Keep a tiny
+ * file on /metadata as well so it is possible to tell "did not run" from
+ * "log was dropped".
+ */
+int write_all(int fd, const char *buf, std::size_t len);
+
+void file_log(const char *fmt, ...)
+{
+	static const char path[] = "/metadata/nksu/perinit.log";
+	char buf[kLogLineMax];
+	va_list args;
+	int n, fd;
+
+	mkdir("/metadata/nksu", 0755);
+	fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
+	if (fd < 0)
+		return;
+
+	va_start(args, fmt);
+	n = vsnprintf(buf, sizeof(buf) - 1, fmt, args);
+	va_end(args);
+	if (n > 0) {
+		if (n > (int)sizeof(buf) - 2)
+			n = sizeof(buf) - 2;
+		buf[n++] = '\n';
+		(void)write_all(fd, buf, static_cast<std::size_t>(n));
+	}
+	close(fd);
+}
 
 /* ------------------------------------------------------------------ utils */
 
@@ -834,8 +884,10 @@ int worker_main()
 			break;
 		}
 	}
-	if (!ksu_dir)
+	if (!ksu_dir) {
+		klog("no preinit directory under /metadata, skip");
 		return 0;
+	}
 
 	if (lstat(preinit_dir.c_str(), &st) || !S_ISDIR(st.st_mode) || !safe_owner(st)) {
 		klog("%s is not root owned or is group/other writable, skip", preinit_dir.c_str());
@@ -843,8 +895,10 @@ int worker_main()
 	}
 
 	modules = collect_modules(preinit_dir);
-	if (modules.empty())
+	if (modules.empty()) {
+		klog("no module preinit directories, skip");
 		return 0;
+	}
 	if (!bootcount_check_and_bump(ksu_dir))
 		return 0;
 
@@ -901,6 +955,8 @@ void perinit()
 	started = true;
 
 	klog("start perinit");
+	file_log("start perinit");
+	mark_supported();
 
 	if (getpid() != 1) {
 		klog("not PID 1, skip");
@@ -915,7 +971,9 @@ void perinit()
 	if (pid > 0) {
 		setpgid(pid, pid);
 		supervise(pid);
+		file_log("perinit done");
 	} else {
 		klog("fork failed: %d", errno);
+		file_log("fork failed: %d", errno);
 	}
 }

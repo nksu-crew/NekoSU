@@ -18,6 +18,10 @@ static inline bool argv_eq(const char *buf, int n, size_t buflen, const char *ta
 
 int get_argvx(struct pt_regs *regs, unsigned int argno, unsigned int idx, char *buf, size_t len);
 
+/* Read or replace one syscall argument register (execve filename, ...). */
+unsigned long get_syscall_arg(struct pt_regs *regs, unsigned int argno);
+void set_syscall_arg(struct pt_regs *regs, unsigned int argno, unsigned long value);
+
 /* Copy a plain string argument (e.g. the exec filename) into buf; the result
  * is always NUL-terminated.  Bounded to len bytes. */
 int get_path_arg(struct pt_regs *regs, unsigned int argno, char *buf, size_t len);

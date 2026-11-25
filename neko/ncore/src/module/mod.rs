@@ -28,7 +28,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     env::var as env_var,
     fs::{File, Permissions, canonicalize, remove_dir_all, set_permissions},
-    io::Cursor,
+    io::{Cursor, Write},
     path::{Path, PathBuf},
     process::Command,
     str::FromStr,
@@ -537,7 +537,91 @@ fn next_boot_modules() -> BTreeMap<String, PathBuf> {
         .collect()
 }
 
-/// Rebuild the preinit copies the next boot's init wrapper will execute.
+fn collect_rc_files<P: AsRef<Path>>(
+    dir: P,
+    mod_id: Option<&str>,
+    out: &mut dyn Write,
+) -> Result<()> {
+    let dir = dir.as_ref();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Ok(());
+    };
+    let mut entries: Vec<_> = entries.flatten().collect();
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+    for entry in entries {
+        let path = entry.path();
+        let Ok(meta) = entry.metadata() else { continue };
+        if meta.is_file() && path.extension().and_then(|s| s.to_str()) == Some("rc") {
+            if let Some(mod_id) = mod_id {
+                writeln!(out, "# === from {mod_id}:{} ===", path.display())?;
+            } else {
+                // Although the rc file itself is not executable, we still use
+                // its executable bit as an enable switch.
+                if !is_executable(&path) {
+                    continue;
+                }
+                writeln!(out, "# === from {} ===", path.display())?;
+            }
+            let content = std::fs::read(&path)
+                .with_context(|| format!("Failed to read rc {}", path.display()))?;
+            out.write_all(&content)?;
+            writeln!(out)?;
+        }
+    }
+    Ok(())
+}
+
+/// Rebuild PREINITDIR/modules.rc by concatenating *.rc from every enabled
+/// module. The kernel-side init.rc read hook appends this file on the next boot.
+fn regenerate_preinit_rc(
+    preinit_str: &str,
+    modules: &BTreeMap<String, PathBuf>,
+    con: &str,
+) -> Result<()> {
+    let preinit_dir = Path::new(preinit_str);
+    std::fs::create_dir_all(preinit_dir)
+        .with_context(|| format!("Failed to create {}", preinit_dir.display()))?;
+    // Anything init will execute must be root owned and not group/other
+    // writable, including the directory the file is created in.
+    crate::preinit::secure(preinit_dir, 0o755, con)?;
+
+    let tmp_path_buf = preinit_dir.join(defs::MODULES_RC_TMP_FILE);
+    let out_path_buf = preinit_dir.join(defs::MODULES_RC_FILE);
+    let tmp_path = tmp_path_buf.as_path();
+    let out_path = out_path_buf.as_path();
+
+    {
+        let mut tmp = File::create(tmp_path)
+            .with_context(|| format!("Failed to create {}", tmp_path.display()))?;
+        // ncore runs with umask 0; do not leave a world-writable script even
+        // for the short window before the rename.
+        crate::preinit::secure(tmp_path, 0o644, con)?;
+
+        // Common initrc snippets first, then modules in alphabetical order.
+        collect_rc_files(Path::new(defs::ADB_DIR).join("initrc.d"), None, &mut tmp)?;
+        for (id, path) in modules {
+            collect_rc_files(path.join(defs::MODULE_INIT_RC_DIR), Some(id), &mut tmp)?;
+        }
+        tmp.sync_all()?;
+    }
+
+    std::fs::rename(tmp_path, out_path).with_context(|| {
+        format!(
+            "Failed to rename {} -> {}",
+            tmp_path.display(),
+            out_path.display()
+        )
+    })?;
+
+    // Root owned 0644 and labeled so the kernel's filp_open in init context
+    // can read it and no other app can rewrite the boot scripts.
+    crate::preinit::secure(out_path, 0o644, con)?;
+
+    Ok(())
+}
+
+/// Rebuild everything the next boot's init consumes from the preinit
+/// partition: modules.rc and the modules' preinit dirs.
 pub fn regenerate_preinit() -> Result<()> {
     let preinit_str = preinit_ksu_dir();
     let con = preinit_con(preinit_str);
@@ -553,13 +637,20 @@ pub fn regenerate_preinit() -> Result<()> {
     let stale_dirs: Vec<&Path> = stale_strs.iter().map(|d| Path::new(*d)).collect();
     let modules = next_boot_modules();
 
-    crate::preinit::sync(
+    let rc = regenerate_preinit_rc(preinit_str, &modules, con);
+    // Clear stale modules.rc at the other candidate paths.
+    for stale in &stale_strs {
+        std::fs::remove_file(Path::new(stale).join(defs::MODULES_RC_FILE)).ok();
+    }
+
+    let preinit = crate::preinit::sync(
         Path::new(preinit_str),
         &stale_dirs,
         &modules,
         con,
         crate::preinit::is_supported(),
-    )
+    );
+    rc.and(preinit)
 }
 
 pub fn handle_updated_modules() -> Result<()> {

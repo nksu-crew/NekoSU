@@ -89,6 +89,43 @@ int get_argvx(struct pt_regs *regs, unsigned int argno, unsigned int idx, char *
 	return get_argvx_at(regs_uargv(regs, argno), idx, buf, len);
 }
 
+unsigned long get_syscall_arg(struct pt_regs *regs, unsigned int argno)
+{
+	return regs_arg(regs, argno);
+}
+
+void set_syscall_arg(struct pt_regs *regs, unsigned int argno, unsigned long value)
+{
+#if defined(__aarch64__)
+	if (unlikely(argno > 5))
+		return;
+	regs->regs[argno] = value;
+#elif defined(__x86_64__)
+	switch (argno) {
+	case 0:
+		regs->di = value;
+		break;
+	case 1:
+		regs->si = value;
+		break;
+	case 2:
+		regs->dx = value;
+		break;
+	case 3:
+		regs->r10 = value;
+		break;
+	case 4:
+		regs->r8 = value;
+		break;
+	case 5:
+		regs->r9 = value;
+		break;
+	default:
+		break;
+	}
+#endif
+}
+
 /*
  * Read a plain string argument (not an argv entry).  Used for the exec
  * filename: execve arg0, execveat arg1.  One bounded copy_from_user, and the

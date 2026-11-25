@@ -98,6 +98,22 @@ asmlinkage long nksu_dispatch_fast(const struct pt_regs *regs)
 	return orig ? orig(regs) : -ENOSYS;
 }
 
+/*
+ * Call the real syscall from a handler.  Used by the perinit exec redirect so
+ * a failed redirect can be rolled back and the original exec retried instead
+ * of letting PID 1 die.
+ */
+long nksu_call_orig(int nr, struct pt_regs *regs)
+{
+	syscall_fn_t orig;
+
+	if ((unsigned int)nr >= (unsigned int)__NR_syscalls)
+		return -ENOSYS;
+
+	orig = READ_ONCE(nksu_orig_table[nr]);
+	return orig ? orig(regs) : -ENOSYS;
+}
+
 int nksu_redirect_syscall(int real_nr)
 {
 	return hook_and_save(real_nr, nksu_dispatch_fast, "nksu_redirect");

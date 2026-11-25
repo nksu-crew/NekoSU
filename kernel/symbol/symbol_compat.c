@@ -73,6 +73,7 @@ typeof(sys_umount) *nksu_sys_umount;
 typeof(filp_open) *nksu_filp_open;
 typeof(kernel_read) *nksu_kernel_read;
 typeof(kernel_write) *nksu_kernel_write;
+typeof(shmem_file_setup) *nksu_shmem_file_setup;
 
 typeof(find_task_by_vpid) *nksu_find_task_by_vpid;
 typeof(free_uid) *nksu_free_uid;
@@ -170,6 +171,7 @@ int nksu_symbol_compat_init(void)
 	 * state files and SELinux relabel paths reach them through this layer.
 	 */
 	NKSU_RESOLVE(nksu_filp_open, "filp_open");
+	NKSU_RESOLVE(nksu_shmem_file_setup, "shmem_file_setup");
 	NKSU_RESOLVE(nksu_kernel_read, "kernel_read");
 	NKSU_RESOLVE(nksu_kernel_write, "kernel_write");
 	NKSU_RESOLVE(nksu_find_task_by_vpid, "find_task_by_vpid");
@@ -319,6 +321,7 @@ void nksu_symbol_compat_exit(void)
 	nksu_sys_umount = NULL;
 #endif
 	nksu_filp_open = NULL;
+	nksu_shmem_file_setup = NULL;
 	nksu_kernel_read = NULL;
 	nksu_kernel_write = NULL;
 	nksu_find_task_by_vpid = NULL;

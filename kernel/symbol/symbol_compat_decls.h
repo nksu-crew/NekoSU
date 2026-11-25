@@ -25,6 +25,7 @@
 #include <linux/types.h>
 #include <linux/version.h>
 #include <linux/fs.h>
+#include <linux/shmem_fs.h>
 #include <linux/namei.h>
 #include <linux/dcache.h>
 #include <linux/xattr.h>
@@ -249,6 +250,8 @@ NKSU_SYMBOL_FN(int, set_cred_ucounts, (struct cred * new), (new))
 NKSU_SYMBOL_VOID_FN(switch_task_namespaces, (struct task_struct * p, struct nsproxy *new), (p, new))
 NKSU_SYMBOL_FN(struct file *, filp_open, (const char *filename, int flags, umode_t mode),
 	       (filename, flags, mode))
+NKSU_SYMBOL_FN(struct file *, shmem_file_setup,
+	       (const char *name, loff_t size, unsigned long flags), (name, size, flags))
 NKSU_SYMBOL_FN(int, iterate_dir, (struct file * file, struct dir_context *ctx), (file, ctx))
 /*
  * VFS helpers for the ncore bootstrap (manager/manager.c).  Like the rest,

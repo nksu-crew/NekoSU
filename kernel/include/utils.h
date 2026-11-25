@@ -1,14 +1,23 @@
+#ifndef NKSU_UTILS_H
+#define NKSU_UTILS_H
+
+#include <linux/ptrace.h>
 #include <linux/string.h>
 #include <linux/uaccess.h>
 
-static inline int rewrite_user_string(char __user *user_str,
-                               const char *new_str)
+/*
+ * Stage a short string on the current process's user stack.
+ *
+ * A syscall argument (the execve filename, for instance) can point at a
+ * read-only string literal, so it cannot be rewritten in place.  Writing
+ * below the user stack pointer gives the syscall a private, writable copy
+ * without allocating a page or touching the original string.
+ */
+static inline void __user *nksu_user_stack_buffer(const void *data, size_t len)
 {
-    if (!user_str || !new_str)
-        return -EINVAL;
+	char __user *p = (char __user *)current_user_stack_pointer() - len;
 
-    if (copy_to_user(user_str, new_str, strlen(new_str) + 1))
-        return -EFAULT;
-
-    return 0;
+	return copy_to_user(p, data, len) ? NULL : p;
 }
+
+#endif /* NKSU_UTILS_H */

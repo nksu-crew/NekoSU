@@ -34,3 +34,6 @@ kernel/.tmp_versions/
 kernel/.cache.mk
 kernel/modules.order
 kernel/Module.symvers
+
+# Userspace init debug log
+pinit.log
