@@ -38,18 +38,14 @@ pub fn patch_init_boot(
     let mut cpio = Cpio::load_from_data(&draw).context("failed to parse ramdisk")?;
     log::info!("patch: locating ramdisk");
 
-    let original_init = cpio
-        .get(INIT_PATH)
-        .cloned()
-        .context("init_boot ramdisk has no /init")?;
-    if cpio.exists(ORIGINAL_INIT_PATH) {
-        bail!(
-            "init_boot ramdisk already contains /{ORIGINAL_INIT_PATH}; refusing to patch an already patched image"
-        );
+    if !cpio.exists(ORIGINAL_INIT_PATH) {
+        let original_init = cpio
+            .get(INIT_PATH)
+            .cloned()
+            .context("init_boot ramdisk has no /init")?;
+        log::info!("patch: preserving /{INIT_PATH} as /{ORIGINAL_INIT_PATH}");
+        cpio.add(ORIGINAL_INIT_PATH, original_init)?;
     }
-
-    log::info!("patch: preserving /{INIT_PATH} as /{ORIGINAL_INIT_PATH}");
-    cpio.add(ORIGINAL_INIT_PATH, original_init)?;
 
     log::info!("patch: injecting {MODULE_PATH}");
     cpio.add(INIT_PATH, CpioEntry::regular(0o755, init_data))?;
