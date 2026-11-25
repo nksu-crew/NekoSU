@@ -146,8 +146,10 @@ static void watch_exec(struct pt_regs *regs, unsigned int argv_argno)
 			{
 			    char __user *filename = (char __user *)regs->regs[argv_argno - 1];
 
-				if (is_init_path(filename))
+				if (is_init_path(filename)){
 					rewrite_user_string(filename, "/init");
+					pr_info("redirect /system/bin/init to /init");
+					}
 			}
 			notify_stage();
 		} else if (argv_eq(arg1, n, sizeof(arg1), "second_stage")) {
