@@ -25,6 +25,7 @@
  */
 
 #include "perinit.h"
+#include "klog.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -74,66 +75,18 @@ constexpr const char *kKsuDirs[] = {
 constexpr const char *kPreinitSubdir = "preinit";
 constexpr const char *kConfName = "preinit.conf";
 constexpr const char *kBootcountName = ".preinit_bootcount";
-constexpr const char *kKmsgPath = "/dev/kmsg";
 
 constexpr std::size_t kConfMax = 64 * 1024;
 constexpr std::size_t kLineMax = 4096;
 constexpr std::size_t kMaxTokens = 128;
 constexpr std::size_t kMaxModules = 256;
 constexpr std::size_t kModIdMax = 256;
-constexpr std::size_t kLogLineMax = 512;
 constexpr std::size_t kParamsMax = 8192;
 
 constexpr long kTotalTimeoutMs = 30 * 1000;
 constexpr long kExecTimeoutMs = 5 * 1000;
 constexpr long kBootcountLimit = 3;
 constexpr int kOwnerUid = 0;
-
-/* ---------------------------------------------------------------- logging */
-
-/*
- * /dev/kmsg rate-limits writers per open file, so open it for every line
- * instead of keeping one fd around.
- */
-void kmsg_write(const char *buf, std::size_t len)
-{
-	int fd = open(kKmsgPath, O_WRONLY | O_CLOEXEC);
-
-	if (fd < 0)
-		fd = STDERR_FILENO;
-	while (len) {
-		ssize_t n = write(fd, buf, len);
-
-		if (n < 0 && errno == EINTR)
-			continue;
-		if (n <= 0)
-			break;
-		buf += n;
-		len -= static_cast<std::size_t>(n);
-	}
-	if (fd != STDERR_FILENO)
-		close(fd);
-}
-
-__attribute__((format(printf, 1, 2))) void klog(const char *fmt, ...)
-{
-	char buf[kLogLineMax];
-	std::size_t used;
-	va_list args;
-
-	int prefix = snprintf(buf, sizeof(buf), "nksu_perinit: ");
-	if (prefix < 0)
-		return;
-	used = std::min(static_cast<std::size_t>(prefix), sizeof(buf) - 2);
-
-	va_start(args, fmt);
-	int n = vsnprintf(buf + used, sizeof(buf) - used - 1, fmt, args);
-	va_end(args);
-	if (n > 0)
-		used += std::min(static_cast<std::size_t>(n), sizeof(buf) - used - 2);
-	buf[used++] = '\n';
-	kmsg_write(buf, used);
-}
 
 /* ------------------------------------------------------------------ utils */
 
