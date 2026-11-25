@@ -66,6 +66,13 @@ pub fn on_post_fs_data() -> Result<()> {
         warn!("prune modules failed: {e}");
     }
 
+    // Refresh /metadata/.../nksu/{preinit/} so the next boot's init wrapper
+    // sees the current module set.  Acts as a safety net when state was
+    // changed outside of ncore's normal mutation commands.
+    if let Err(e) = crate::module::regenerate_preinit() {
+        warn!("regenerate preinit failed: {e:#}");
+    }
+
     if let Err(e) = restorecon::restorecon() {
         warn!("restorecon failed: {e}");
     }
@@ -138,6 +145,8 @@ pub fn on_services() {
 
 pub fn on_boot_completed() {
     info!("on_boot_completed triggered!");
+
+    crate::preinit::on_boot_completed();
 
     run_stage("boot-completed", ScriptWait::NoWait);
     if let Err(e) = store::load() {

@@ -25,7 +25,7 @@ use regex_lite::Regex;
 
 use std::fs::{copy, rename};
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     env::var as env_var,
     fs::{File, Permissions, canonicalize, remove_dir_all, set_permissions},
     io::Cursor,
@@ -480,6 +480,88 @@ pub fn prune_modules() -> Result<()> {
     Ok(())
 }
 
+/// Where the next boot's preinit copies live.
+///
+/// The runner probes the same candidates in this order, so keep them in sync
+/// with manager/app/src/main/cpp/init/src/perinit.cpp.
+pub fn preinit_ksu_dir() -> &'static str {
+    if Path::new("/metadata/vold").is_dir() {
+        defs::PREINIT_DIR_VOLD
+    } else if Path::new("/metadata/watchdog").is_dir() {
+        defs::PREINIT_DIR_WATCHDOG
+    } else {
+        defs::PREINIT_DIR_DEFAULT
+    }
+}
+
+/// SELinux context to label the preinit files with, matching the host dir so
+/// init's restorecon does not fight us.
+pub fn preinit_con(dir: &str) -> &'static str {
+    if dir == defs::PREINIT_DIR_VOLD {
+        defs::VOLD_METADATA_FILE_CON
+    } else {
+        defs::METADATA_FILE_CON
+    }
+}
+
+/// Enabled modules for the next boot, by id. modules_update/ wins over
+/// modules/, and a disabled or removed module is skipped even if the other
+/// dir has an enabled copy.
+fn next_boot_modules() -> BTreeMap<String, PathBuf> {
+    let mut modules: BTreeMap<String, Option<PathBuf>> = BTreeMap::new();
+    for src_dir in [defs::MODULE_UPDATE_DIR, defs::MODULE_DIR] {
+        let Ok(entries) = std::fs::read_dir(src_dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let module_path = entry.path();
+            if !module_path.is_dir() {
+                continue;
+            }
+            let Some(id) = module_path.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let id = id.to_string();
+            if module_path.join(defs::DISABLE_FILE_NAME).exists()
+                || module_path.join(defs::REMOVE_FILE_NAME).exists()
+            {
+                modules.insert(id, None);
+                continue;
+            }
+            modules.entry(id).or_insert(Some(module_path));
+        }
+    }
+    modules
+        .into_iter()
+        .filter_map(|(id, path)| path.map(|path| (id, path)))
+        .collect()
+}
+
+/// Rebuild the preinit copies the next boot's init wrapper will execute.
+pub fn regenerate_preinit() -> Result<()> {
+    let preinit_str = preinit_ksu_dir();
+    let con = preinit_con(preinit_str);
+    // The candidates we are not using this boot; clean any leftover from them.
+    let stale_strs: Vec<&str> = [
+        defs::PREINIT_DIR_VOLD,
+        defs::PREINIT_DIR_WATCHDOG,
+        defs::PREINIT_DIR_DEFAULT,
+    ]
+    .into_iter()
+    .filter(|d| *d != preinit_str)
+    .collect();
+    let stale_dirs: Vec<&Path> = stale_strs.iter().map(|d| Path::new(*d)).collect();
+    let modules = next_boot_modules();
+
+    crate::preinit::sync(
+        Path::new(preinit_str),
+        &stale_dirs,
+        &modules,
+        con,
+        crate::preinit::is_supported(),
+    )
+}
+
 pub fn handle_updated_modules() -> Result<()> {
     let modules_root = Path::new(MODULE_DIR);
     foreach_module(ModuleType::Updated, |updated_module| {
@@ -673,7 +755,15 @@ fn install_module_to_system(zip: &str) -> Result<String> {
 }
 
 pub fn install_module(zip: &str) -> Result<()> {
-    install_module_to_system(zip).inspect_err(|e| println!("- Error: {e}"))?;
+    let module_id = install_module_to_system(zip).inspect_err(|e| println!("- Error: {e}"))?;
+    if let Err(e) = regenerate_preinit() {
+        warn!("regenerate preinit failed: {e:#}");
+    }
+    if let Some((state, message)) = crate::preinit::status_of(&module_id)
+        && state != "ok"
+    {
+        println!("! preinit will not take effect: {state} {message}");
+    }
     Ok(())
 }
 
@@ -691,6 +781,10 @@ pub fn undo_uninstall_module(id: &str) -> Result<()> {
         info!("Removed the remove mark for module {id}");
     }
 
+    if let Err(e) = regenerate_preinit() {
+        warn!("regenerate preinit failed: {e:#}");
+    }
+
     Ok(())
 }
 
@@ -705,6 +799,10 @@ pub fn uninstall_module(id: &str) -> Result<()> {
     File::create(remove_file).with_context(|| "Failed to create remove file")?;
 
     info!("Module {id} marked for removal");
+
+    if let Err(e) = regenerate_preinit() {
+        warn!("regenerate preinit failed: {e:#}");
+    }
 
     Ok(())
 }
@@ -730,6 +828,10 @@ pub fn enable_module(id: &str) -> Result<()> {
         info!("Module {id} enabled");
     }
 
+    if let Err(e) = regenerate_preinit() {
+        warn!("regenerate preinit failed: {e:#}");
+    }
+
     Ok(())
 }
 
@@ -741,6 +843,10 @@ pub fn disable_module(id: &str) -> Result<()> {
     ensure_file_exists(disable_path)?;
 
     info!("Module {id} disabled");
+
+    if let Err(e) = regenerate_preinit() {
+        warn!("regenerate preinit failed: {e:#}");
+    }
 
     Ok(())
 }
@@ -759,6 +865,9 @@ fn mark_all_modules(flag_file: &str) -> Result<()> {
 
 pub fn disable_all_modules() -> Result<()> {
     mark_all_modules(defs::DISABLE_FILE_NAME)?;
+    if let Err(e) = regenerate_preinit() {
+        warn!("regenerate preinit failed: {e:#}");
+    }
     Ok(())
 }
 
@@ -841,6 +950,7 @@ fn list_module(path: &str) -> Vec<HashMap<String, String>> {
             HashMap::new()
         }
     };
+    let preinit_states = crate::preinit::module_states();
 
     // first check enabled modules
     let dir = std::fs::read_dir(path);
@@ -901,6 +1011,12 @@ fn list_module(path: &str) -> Vec<HashMap<String, String>> {
         module_prop_map.insert("hasSystem".to_owned(), has_system.to_string());
         module_prop_map.insert("skipMount".to_owned(), skip_mount.to_string());
         module_prop_map.insert("metamodule".to_owned(), metamodule.to_string());
+        if let Some(state) = module_prop_map
+            .get("id")
+            .and_then(|id| preinit_states.get(id.as_str()))
+        {
+            module_prop_map.insert("preinit".to_owned(), state.clone());
+        }
 
         resolve_module_icon_path(&mut module_prop_map, "actionIcon", &path);
         resolve_module_icon_path(&mut module_prop_map, "webuiIcon", &path);

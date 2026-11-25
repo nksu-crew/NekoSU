@@ -3,6 +3,8 @@
 #include <unistd.h>
 #include <string.h>
 
+#include "perinit.h"
+
 namespace
 {
 

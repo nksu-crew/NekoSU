@@ -24,12 +24,27 @@ mod android {
     // Replaced module dirs are parked here until the next boot
     pub const HOT_INSTALL_TRASH_DIR: &str = concatcp!(WORKING_DIR, "hot_install_trash/");
 
+    // Preferred first: /metadata/vold (root:root 0700) hides best and does not
+    // bump /metadata's nlink; else /metadata/watchdog (like Magisk); else /metadata.
+    pub const PREINIT_DIR_VOLD: &str = "/metadata/vold/nksu/";
+    pub const PREINIT_DIR_WATCHDOG: &str = "/metadata/watchdog/nksu/";
+    pub const PREINIT_DIR_DEFAULT: &str = "/metadata/nksu/";
+    pub const METADATA_FILE_CON: &str = "u:object_r:metadata_file:s0";
+    pub const VOLD_METADATA_FILE_CON: &str = "u:object_r:vold_metadata_file:s0";
+    // Module preinit dirs are synced to PREINIT_DIR_*/preinit/<id>/ and run by
+    // the init wrapper at selinux_setup.
+    pub const PREINIT_SUBDIR: &str = "preinit";
+    pub const PREINIT_MANIFEST_FILE: &str = ".manifest";
+    pub const PREINIT_BOOTCOUNT_FILE: &str = ".preinit_bootcount";
+    pub const PREINIT_STATUS_PATH: &str = concatcp!(WORKING_DIR, "preinit_status");
+
     pub const MODULE_WEB_DIR: &str = "webroot";
     pub const MODULE_ACTION_SH: &str = "action.sh";
     pub const DISABLE_FILE_NAME: &str = "disable";
     pub const UPDATE_FILE_NAME: &str = "update";
     pub const REMOVE_FILE_NAME: &str = "remove";
     pub const MODULE_PREINIT_DIR: &str = "preinit";
+    pub const PREINIT_CONF: &str = "preinit.conf";
 
     // Written by installer.sh when customize.sh requests a hot install
     pub const HOT_INSTALL_MARKER: &str = ".ksu_hot_install";

@@ -25,6 +25,8 @@ mod manager;
 #[cfg(target_os = "android")]
 mod module;
 #[cfg(target_os = "android")]
+mod preinit;
+#[cfg(target_os = "android")]
 mod selinux;
 #[cfg(target_os = "android")]
 mod system;
