@@ -23,8 +23,10 @@ void load_module(void)
 int main(int argc, char *argv[], char **envp)
 {
 	load_module();
-	if (argc > 1 && !strcmp(argv[1], "selinux_setup")) {
-		perinit();
+	if (argc > 1) {
+		if (!strcmp(argv[1], "selinux_setup")) {
+			perinit();
+		}
 	}
 	execve("/init.real", argv, envp);
 }

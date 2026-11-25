@@ -203,7 +203,8 @@ bool read_file(const std::string &path, std::string &out, std::size_t max)
 			continue;
 		if (n <= 0)
 			break;
-		std::size_t room = std::min<std::size_t>(static_cast<std::size_t>(n), max - out.size());
+		std::size_t room =
+			std::min<std::size_t>(static_cast<std::size_t>(n), max - out.size());
 		out.append(buf, room);
 		if (static_cast<std::size_t>(n) > room)
 			break;
@@ -399,7 +400,8 @@ int open_checked(const ModuleContext &m, const char *path)
 		return -1;
 	}
 	if (fstat(fd, &st) || !S_ISREG(st.st_mode) || !safe_owner(st)) {
-		klog("[%s] %s: not a root owned, non group/other writable regular file", m.id, path);
+		klog("[%s] %s: not a root owned, non group/other writable regular file", m.id,
+		     path);
 		close(fd);
 		return -1;
 	}
@@ -487,7 +489,8 @@ int do_insmod(const ModuleContext &m, int argc, char **argv)
 		 */
 		std::string image;
 
-		if (st.st_size <= 0 || !read_file(argv[1], image, static_cast<std::size_t>(st.st_size))) {
+		if (st.st_size <= 0 ||
+		    !read_file(argv[1], image, static_cast<std::size_t>(st.st_size))) {
 			klog("[%s] insmod %s: cannot read image", m.id, argv[1]);
 			close(fd);
 			return -1;
@@ -943,7 +946,7 @@ void perinit()
 	if (started)
 		return;
 	started = true;
-	
+
 	klog("start perinit");
 
 	if (getpid() != 1) {
