@@ -18,7 +18,7 @@ void setup_kmsg()
 	if (access(KMSG, F_OK) == 0) {
 		return;
 	} else {
-		mknodat(AT_FDCWD, "/kmsg", S_IFCHR | 0666, makedev(1, 11));
+		mknodat(AT_FDCWD, KMSG, S_IFCHR | 0666, makedev(1, 11));
 	}
 }
 
@@ -36,10 +36,10 @@ void load_module(void)
 
 int main(int argc, char *argv[], char **envp)
 {
+	setup_kmsg();
 	load_module();
 	if (argc > 1) {
 		if (!strcmp(argv[1], "selinux_setup")) {
-			setup_kmsg();
 			perinit();
 		}
 	}
