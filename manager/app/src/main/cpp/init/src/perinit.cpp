@@ -943,6 +943,8 @@ void perinit()
 	if (started)
 		return;
 	started = true;
+	
+	klog("start perinit");
 
 	if (getpid() != 1) {
 		klog("not PID 1, skip");
