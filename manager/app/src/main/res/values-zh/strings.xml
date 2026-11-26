@@ -304,8 +304,8 @@
     <!-- 安装模式选择 -->
     <string name="install_mode_gki">GKI</string>
     <string name="install_mode_non_gki">非 GKI</string>
-    <string name="install_mode_vendor_boot">GKI · vendor_boot</string>
-    <string name="install_mode_init_boot">非 GKI · init_boot</string>
+    <string name="install_mode_vendor_boot">vendor_boot</string>
+    <string name="install_mode_init_boot">init_boot</string>
     <string name="install_strategy_image_vendor_desc">选择 vendor_boot 镜像，补丁镜像导出到 Download；无需 root</string>
     <string name="install_strategy_image_init_desc">选择 boot/init_boot 镜像，由 init 包装器加载 LKM；无需 root</string>
     <string name="install_requires_root">需要 root</string>

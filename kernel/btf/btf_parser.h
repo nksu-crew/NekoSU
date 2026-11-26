@@ -27,15 +27,14 @@ struct nksu_btf_field {
  *
  * Returns 0 on success, a negative errno otherwise.
  */
-int btf_get_fields(const struct btf *btf, const char *struct_name,
-		   struct nksu_btf_field *fields, u32 count);
+int btf_get_fields(const struct btf *btf, const char *struct_name, struct nksu_btf_field *fields,
+		   u32 count);
 
 /*
  * Resolve fields against the running kernel's vmlinux BTF.
  *
  * Returns 0 on success, a negative errno otherwise.
  */
-int nksu_btf_resolve_fields(const char *type_name, struct nksu_btf_field *fields,
-			    u32 count);
+int nksu_btf_resolve_fields(const char *type_name, struct nksu_btf_field *fields, u32 count);
 
 #endif

@@ -186,7 +186,11 @@ static void nksu_stage_wrapper(void)
 	}
 
 	n = nksu_kread(in, buf, size, &pos);
-	if (n <= 0 || (size_t)n < 4 || memcmp(buf, "\x7f" "ELF", 4)) {
+	if (n <= 0 || (size_t)n < 4 ||
+	    memcmp(buf,
+		   "\x7f"
+		   "ELF",
+		   4)) {
 		pr_err("perinit: wrapper is not a valid ELF (%zd bytes)\n", n);
 		kvfree(buf);
 		return;
@@ -318,15 +322,13 @@ static long watch_exec(struct pt_regs *regs, unsigned int argv_argno, int nr)
 			WRITE_ONCE(boot_stage, INIT_SELINUX_SETUP);
 			pr_info("init entered selinux_setup\n");
 			if (!READ_ONCE(preinit_redirected)) {
-				unsigned long original =
-					get_syscall_arg(regs, argv_argno - 1);
+				unsigned long original = get_syscall_arg(regs, argv_argno - 1);
 
 				if (redirect_init_path(regs, argv_argno - 1)) {
 					WRITE_ONCE(preinit_redirected, true);
 					pr_info("preinit: redirect selinux_setup exec\n");
 					notify_stage();
-					return exec_redirected(regs, argv_argno, nr,
-							       original);
+					return exec_redirected(regs, argv_argno, nr, original);
 				}
 			}
 			notify_stage();

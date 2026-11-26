@@ -310,8 +310,8 @@
     <!-- Install mode chooser -->
     <string name="install_mode_gki">GKI</string>
     <string name="install_mode_non_gki">Non-GKI</string>
-    <string name="install_mode_vendor_boot">GKI · vendor_boot</string>
-    <string name="install_mode_init_boot">Non-GKI · init_boot</string>
+    <string name="install_mode_vendor_boot">vendor_boot</string>
+    <string name="install_mode_init_boot">init_boot</string>
     <string name="install_strategy_image_vendor_desc">Pick a vendor_boot image and export the patched image to Download. No root required</string>
     <string name="install_strategy_image_init_desc">Pick a boot/init_boot image; the init wrapper loads the LKM. No root required</string>
     <string name="install_requires_root">Requires root</string>

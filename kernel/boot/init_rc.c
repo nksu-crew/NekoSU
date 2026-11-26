@@ -204,8 +204,7 @@ static ssize_t nksu_rc_read_proxy(struct file *file, char __user *buf, size_t co
 
 	if (nksu_rc_pos && nksu_rc_pos < (ssize_t)nksu_rc_len)
 		goto append_rc;
-	if (nksu_rc_pos >= (ssize_t)nksu_rc_len &&
-	    nksu_module_rc_pos < (ssize_t)nksu_module_rc_len)
+	if (nksu_rc_pos >= (ssize_t)nksu_rc_len && nksu_module_rc_pos < (ssize_t)nksu_module_rc_len)
 		goto append_module_rc;
 
 	ret = nksu_orig_read(file, buf, count, pos);
@@ -247,8 +246,7 @@ static ssize_t nksu_rc_read_iter_proxy(struct kiocb *iocb, struct iov_iter *to)
 
 	if (nksu_rc_pos && nksu_rc_pos < (ssize_t)nksu_rc_len)
 		goto append_rc;
-	if (nksu_rc_pos >= (ssize_t)nksu_rc_len &&
-	    nksu_module_rc_pos < (ssize_t)nksu_module_rc_len)
+	if (nksu_rc_pos >= (ssize_t)nksu_rc_len && nksu_module_rc_pos < (ssize_t)nksu_module_rc_len)
 		goto append_module_rc;
 
 	ret = nksu_orig_read_iter(iocb, to);
