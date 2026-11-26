@@ -55,7 +55,10 @@ pub fn patch_init_boot(
     cpio.add(MODULE_PATH, CpioEntry::regular(0o644, module_data))?;
 
     log::info!("patch: marking the perinit runner");
-    cpio.add(PREINIT_MARKER_PATH, CpioEntry::regular(0o644, b"1\n".to_vec()))?;
+    cpio.add(
+        PREINIT_MARKER_PATH,
+        CpioEntry::regular(0o644, b"1\n".to_vec()),
+    )?;
 
     log::info!("patch: repacking ramdisk");
     let new_cpio = cpio.dump();

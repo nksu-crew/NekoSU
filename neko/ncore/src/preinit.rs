@@ -3,11 +3,7 @@
 //! next boot the init wrapper executes their `preinit.conf` before SELinux policy is loaded, see
 //! manager/app/src/main/cpp/init/src/perinit.cpp.
 
-use crate::{
-    defs,
-    selinux::restorecon::lsetfilecon,
-    system::utils::ensure_dir_exists,
-};
+use crate::{defs, selinux::restorecon::lsetfilecon, system::utils::ensure_dir_exists};
 
 use anyhow::{Context, Result, bail};
 use log::{info, warn};
@@ -33,23 +29,6 @@ const STATE_OK: &str = "ok";
 const STATE_NO_SPACE: &str = "no_space";
 const STATE_ERROR: &str = "error";
 const STATE_BOOTLOOP: &str = "bootloop";
-const STATE_UNSUPPORTED: &str = "unsupported";
-
-/// Whether the installed init wrapper contains the perinit runner.
-///
-/// The boot/init_boot patcher replaces `/init` with the wrapper, keeps the
-/// original init at `/init.real` and adds `/nksu.preinit`.  The marker is the
-/// reliable signal (system-as-root may hide `/init.real` after switching
-/// roots); `/init.real` stays as a fallback for images patched before the
-/// marker existed.  A vendor_boot/GKI install has neither.
-pub fn is_supported() -> bool {
-    // /metadata survives system-as-root; the wrapper writes this marker when
-    // perinit actually starts.  The ramdisk paths are fallbacks for images
-    // patched before the marker existed.
-    Path::new("/metadata/nksu.perinit").exists()
-        || Path::new("/nksu.preinit").exists()
-        || Path::new("/init.real").exists()
-}
 
 /// A file or directory inside a module's preinit dir.
 struct Entry {
@@ -289,26 +268,9 @@ pub fn sync(
     stale_ksu_dirs: &[&Path],
     modules: &BTreeMap<String, PathBuf>,
     con: &str,
-    supported: bool,
 ) -> Result<()> {
     for stale in stale_ksu_dirs {
         remove_all(stale);
-    }
-
-    // Nothing would run the copies: keep /metadata clean and say why.
-    if !supported {
-        remove_all(ksu_dir);
-        let status: Vec<Status> = modules
-            .iter()
-            .filter(|(_, dir)| dir.join(defs::MODULE_PREINIT_DIR).is_dir())
-            .map(|(id, _)| Status {
-                id: id.clone(),
-                state: STATE_UNSUPPORTED,
-                message: "kernel does not run preinit".to_owned(),
-            })
-            .collect();
-        write_status(&status);
-        return Ok(());
     }
 
     let mut status = Vec::new();

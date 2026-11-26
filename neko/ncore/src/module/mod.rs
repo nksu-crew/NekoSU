@@ -643,13 +643,7 @@ pub fn regenerate_preinit() -> Result<()> {
         std::fs::remove_file(Path::new(stale).join(defs::MODULES_RC_FILE)).ok();
     }
 
-    let preinit = crate::preinit::sync(
-        Path::new(preinit_str),
-        &stale_dirs,
-        &modules,
-        con,
-        crate::preinit::is_supported(),
-    );
+    let preinit = crate::preinit::sync(Path::new(preinit_str), &stale_dirs, &modules, con);
     rc.and(preinit)
 }
 
