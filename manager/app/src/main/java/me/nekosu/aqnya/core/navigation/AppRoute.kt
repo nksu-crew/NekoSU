@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package me.nekosu.aqnya.core.navigation
 
+import me.nekosu.aqnya.core.model.InstallStrategy
+import me.nekosu.aqnya.core.model.InstallTarget
+
 object AppRoute {
     const val Home = "home"
     const val Apps = "app"
@@ -13,9 +16,14 @@ object AppRoute {
     const val SettingsLanguage = "settings/language"
     const val About = "about"
     const val OpenSource = "open_source"
-    const val Install = "install"
+    const val InstallPattern = "install/{target}/{strategy}"
     const val ChooseInstall = "ChooseInstall"
     const val AppDetailPattern = "app_detail/{packageName}"
 
     fun appDetail(packageName: String): String = "app_detail/$packageName"
+
+    fun install(
+        target: InstallTarget,
+        strategy: InstallStrategy,
+    ): String = "install/${target.name}/${strategy.name}"
 }

@@ -57,19 +57,14 @@ object RootShell {
     ): Boolean = exec("dd if=${quote(src)} of=${quote(dst)} bs=1048576").ok
 
     /**
-     * 以 root 查找 vendor_boot 分区路径，候选顺序与 Ncore.findVendorBoot 一致：
+     * 以 root 查找分区路径，候选顺序与 Ncore.findBlock 一致：
      * 两个 `by-name` 基目录各自先试带 slot 后缀的、再试无后缀的。找不到返回 null。
      */
-    fun findVendorBoot(
+    fun findBlock(
+        partition: String,
         slotSuffix: String,
         allowSlotless: Boolean,
-    ): String? = findPartition("vendor_boot", slotSuffix, allowSlotless)
-
-    /** 以 root 查找 boot 分区路径；候选顺序与 [findVendorBoot] 一致。 */
-    fun findBoot(
-        slotSuffix: String,
-        allowSlotless: Boolean,
-    ): String? = findPartition("boot", slotSuffix, allowSlotless)
+    ): String? = findPartition(partition, slotSuffix, allowSlotless)
 
     private fun findPartition(
         partition: String,

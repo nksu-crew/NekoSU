@@ -989,28 +989,18 @@ fn find_partition(partition: &str, slot: &str, allow_slotless: bool) -> Option<S
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_me_nekosu_aqnya_core_Ncore_findVendorBoot(
+pub extern "system" fn Java_me_nekosu_aqnya_core_Ncore_findBlock(
     mut env: EnvUnowned,
     _this: JObject,
+    partition: JString,
     slot: JString,
     allow_slotless: jboolean,
 ) -> jstring {
+    let Some(partition) = get_utf(&mut env, &partition) else {
+        return ptr::null_mut();
+    };
     let slot = get_utf(&mut env, &slot).unwrap_or_default();
-    match find_partition("vendor_boot", &slot, jboolean_is_true(allow_slotless)) {
-        Some(path) => put_string(&mut env, &path),
-        None => ptr::null_mut(),
-    }
-}
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_me_nekosu_aqnya_core_Ncore_findBoot(
-    mut env: EnvUnowned,
-    _this: JObject,
-    slot: JString,
-    allow_slotless: jboolean,
-) -> jstring {
-    let slot = get_utf(&mut env, &slot).unwrap_or_default();
-    match find_partition("boot", &slot, jboolean_is_true(allow_slotless)) {
+    match find_partition(&partition, &slot, jboolean_is_true(allow_slotless)) {
         Some(path) => put_string(&mut env, &path),
         None => ptr::null_mut(),
     }

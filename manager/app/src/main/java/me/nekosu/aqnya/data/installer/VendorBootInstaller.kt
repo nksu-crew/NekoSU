@@ -10,7 +10,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.nekosu.aqnya.R
 import me.nekosu.aqnya.core.Ncore
-import me.nekosu.aqnya.data.shell.RootShell
 import java.io.File
 import kotlin.random.Random
 
@@ -218,81 +217,36 @@ object VendorBootInstaller {
         return output
     }
 
-    fun detectVendorBootPartition(): String? = findVendorBoot(currentSlotSuffix(), allowSlotless = true)
+    fun detectVendorBootPartition(): String? =
+        PartitionAccess.findPartition(
+            "vendor_boot",
+            PartitionAccess.currentSlotSuffix(),
+            allowSlotless = true,
+        )
 
     fun detectInactiveVendorBootPartition(): String? {
-        val inactive = inactiveSlotSuffix() ?: return null
-        return findVendorBoot(inactive, allowSlotless = false)
+        val inactive = PartitionAccess.inactiveSlotSuffix() ?: return null
+        return PartitionAccess.findPartition("vendor_boot", inactive, allowSlotless = false)
     }
 
     /** boot 分区（kernel + ramdisk），用于在 patch 前校验内核符号。 */
-    fun detectBootPartition(): String? = findBoot(currentSlotSuffix(), allowSlotless = true)
+    fun detectBootPartition(): String? =
+        PartitionAccess.findPartition(
+            "boot",
+            PartitionAccess.currentSlotSuffix(),
+            allowSlotless = true,
+        )
 
     fun detectInactiveBootPartition(): String? {
-        val inactive = inactiveSlotSuffix() ?: return null
-        return findBoot(inactive, allowSlotless = false)
+        val inactive = PartitionAccess.inactiveSlotSuffix() ?: return null
+        return PartitionAccess.findPartition("boot", inactive, allowSlotless = false)
     }
 
-    fun currentSlotSuffix(): String? = Ncore.getSlotSuffix()
+    /** 是否 A/B 设备（有 slot 后缀）。 */
+    fun isAbDevice(): Boolean = PartitionAccess.isAbDevice()
 
-    /** 非活动 slot 后缀；非 A/B 设备返回 null。 */
-    fun inactiveSlotSuffix(): String? =
-        when (currentSlotSuffix()) {
-            "_a" -> "_b"
-            "_b" -> "_a"
-            else -> null
-        }
-
-    /**
-     * 查找 vendor_boot 分区路径。
-     *
-     * @slotSuffix null/空按无后缀处理；@allowSlotless 允许回退到无后缀的
-     * `vendor_boot` 链接（只对当前 slot 安全，非活动 slot 不能回退，否则会
-     * 误写当前分区）。
-     *
-     * 先走 nksu 内核模块（Ncore.findVendorBoot，fork + setresuid 提权）；模块
-     * 未加载时（仅 Magisk/KernelSU 等外部 su 的设备）再走 `/system/bin/su`
-     * 查找，否则直接安装选项会因找不到分区而被隐藏。
-     */
-    private fun findVendorBoot(
-        slotSuffix: String?,
-        allowSlotless: Boolean,
-    ): String? {
-        val slot = slotSuffix.orEmpty()
-        return Ncore.findVendorBoot(slot, allowSlotless)
-            ?: if (RootShell.available()) RootShell.findVendorBoot(slot, allowSlotless) else null
-    }
-
-    /** 查找 boot 分区路径，回退顺序与 [findVendorBoot] 一致。 */
-    private fun findBoot(
-        slotSuffix: String?,
-        allowSlotless: Boolean,
-    ): String? {
-        val slot = slotSuffix.orEmpty()
-        return Ncore.findBoot(slot, allowSlotless)
-            ?: if (RootShell.available()) RootShell.findBoot(slot, allowSlotless) else null
-    }
-
-    private fun quote(s: String) = "'" + s.replace("'", "'\\''") + "'"
-
-    /** Best-effort partition capacity, used to avoid writing past the block device. */
-    private fun partitionSize(partition: String): Long? {
-        if (!RootShell.available()) return null
-        val result = RootShell.exec("blockdev --getsize64 ${quote(partition)} 2>/dev/null")
-        return if (result.code == 0) result.output.trim().toLongOrNull() else null
-    }
-
-    /**
-     * 以 root 复制文件 / 分区：优先走 nksu 内核模块的 writeBlock（已加载模块时
-     * 无需外部 su），失败再回退到 `/system/bin/su` 的 dd，让只有外部 su 的设备
-     * 也能直接安装。
-     */
-    private fun copyBlock(
-        src: String,
-        dst: String,
-    ): Boolean =
-        Ncore.writeBlock(src, dst) ||
-            (RootShell.available() && RootShell.copyFile(src, dst))
+    /** nksu 内核模块或外部 su 任一可用即视为具备 root。 */
+    fun hasRoot(): Boolean = PartitionAccess.hasRoot()
 
     /**
      * 直接安装：以 root 读取指定 vendor_boot 分区，打入 nksu.ko 后写回。
@@ -336,7 +290,7 @@ object VendorBootInstaller {
             }
             // root 可以来自 nksu 内核模块（已装），也可以来自 /system/bin/su
             // （仅 Magisk/KernelSU 等）。两者都没有时才报告无 root。
-            if (Ncore.ctl(1) != 0 && !RootShell.available()) {
+            if (!PartitionAccess.hasRoot()) {
                 onOutput(context.getString(R.string.install_log_err_no_root))
                 return@withContext -1
             }
@@ -348,7 +302,7 @@ object VendorBootInstaller {
             val source = File(dir, SOURCE_IMAGE_NAME)
             source.delete()
             source.createNewFile()
-            if (!copyBlock(part, source.absolutePath) || !source.exists()) {
+            if (!PartitionAccess.copyBlock(part, source.absolutePath) || !source.exists()) {
                 onOutput(context.getString(R.string.install_log_err_dump))
                 source.delete()
                 return@withContext -1
@@ -360,7 +314,10 @@ object VendorBootInstaller {
                 bootSource.delete()
                 bootSource.createNewFile()
                 onOutput(context.getString(R.string.install_log_boot_partition, bootPartition.orEmpty()))
-                if (!copyBlock(bootPartition.orEmpty(), bootSource.absolutePath) || !bootSource.exists()) {
+                val bootDumped =
+                    PartitionAccess.copyBlock(bootPartition.orEmpty(), bootSource.absolutePath) &&
+                        bootSource.exists()
+                if (!bootDumped) {
                     onOutput(context.getString(R.string.install_log_err_boot_dump))
                     source.delete()
                     bootSource.delete()
@@ -386,7 +343,7 @@ object VendorBootInstaller {
             }
 
             // 3) 写回分区；失败则把原镜像写回，避免留下半写状态。
-            val capacity = partitionSize(part)
+            val capacity = PartitionAccess.partitionSize(part)
             if (capacity != null && patched.length() > capacity) {
                 onOutput(context.getString(R.string.install_log_err_too_large, patched.length(), capacity))
                 source.delete()
@@ -395,9 +352,9 @@ object VendorBootInstaller {
                 return@withContext -1
             }
             onOutput(context.getString(R.string.install_log_flashing))
-            if (!copyBlock(patched.absolutePath, part)) {
+            if (!PartitionAccess.copyBlock(patched.absolutePath, part)) {
                 onOutput(context.getString(R.string.install_log_rollback))
-                copyBlock(source.absolutePath, part)
+                PartitionAccess.copyBlock(source.absolutePath, part)
                 source.delete()
                 bootSource.delete()
                 patched.delete()

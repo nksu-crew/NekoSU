@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.nekosu.aqnya.core.model.InstallStrategy
+import me.nekosu.aqnya.core.model.InstallTarget
 import me.nekosu.aqnya.data.installer.BootInstaller
 import me.nekosu.aqnya.data.installer.VendorBootInstaller
 import me.nekosu.aqnya.data.kernel.KernelInfo
@@ -25,15 +27,6 @@ import me.nekosu.aqnya.util.LocaleHelper
 
 /** 日志刷新间隔，避免每来一行都做一次 O(n) 拼接并触发整页重组。 */
 private const val LOG_EMIT_INTERVAL_MS = 50L
-
-/**
- * 安装方式，与 KernelSU 的安装页对应：
- *  - [FILE]     选择 vendor_boot 镜像（GKI；不需要 root，仅生成补丁镜像）
- *  - [BOOT]     选择 boot/init_boot 镜像（通过 init 包装器加载 LKM；不需要 root）
- *  - [DIRECT]   直接安装到当前 slot（需要 root + GKI）
- *  - [INACTIVE] 安装到非活动 slot（需要 root + GKI + A/B）
- */
-enum class InstallMethod { FILE, BOOT, DIRECT, INACTIVE }
 
 /**
  * 内核模块（LKM）的选择，对齐 KernelSU 的 `LkmSelection`：
@@ -58,8 +51,12 @@ sealed interface LkmSelection {
 
 /**
  * 安装页面的可观察状态。
+ *
+ * [target] 与 [strategy] 由 ChooseInstallScreen 选择后通过导航参数传入，安装页
+ * 不再自行切换模式；某个模式不可用时只禁用安装并说明原因，不会静默回退。
  */
 data class InstallUiState(
+    val kernelLoaded: Boolean = false,
     val kernelVersion: String? = null,
     val isGki: Boolean = false,
     val currentKmi: String? = null,
@@ -68,7 +65,8 @@ data class InstallUiState(
     /** 按设备 KMI 自动匹配到的打包模块名；无候选时为 null。 */
     val autoKo: String? = null,
     val lkmSelection: LkmSelection = LkmSelection.Auto,
-    val method: InstallMethod = InstallMethod.FILE,
+    val target: InstallTarget = InstallTarget.VENDOR_BOOT,
+    val strategy: InstallStrategy = InstallStrategy.IMAGE,
     val vendorBootUri: Uri? = null,
     val vendorBootName: String? = null,
     /** boot/init_boot image patched through the first-stage init wrapper. */
@@ -77,11 +75,16 @@ data class InstallUiState(
     val bootUri: Uri? = null,
     val bootName: String? = null,
     val verifyKernelSymbols: Boolean = true,
+    /** root 是否已检测完成；为 false 时 direct/inactive 只显示「检测中」。 */
+    val rootKnown: Boolean = false,
     val rootAvailable: Boolean = false,
+    val isAbDevice: Boolean = false,
     val directTarget: String? = null,
     val directBootTarget: String? = null,
     val inactiveTarget: String? = null,
     val inactiveBootTarget: String? = null,
+    val initBootDirectTarget: String? = null,
+    val initBootInactiveTarget: String? = null,
     val running: Boolean = false,
     val done: Boolean = false,
     val success: Boolean? = null,
@@ -99,20 +102,90 @@ data class InstallUiState(
                 inactiveTarget != null &&
                 (!verifyKernelSymbols || inactiveBootTarget != null)
 
+    val initBootDirectReady: Boolean
+        get() = rootAvailable && initBootDirectTarget != null
+
+    val initBootInactiveReady: Boolean
+        get() = rootAvailable && initBootInactiveTarget != null
+
     /** 有可用的内核模块（自动匹配或本地文件）。 */
     val hasKernelModule: Boolean
         get() = lkmSelection is LkmSelection.Local || autoKo != null
 
-    val canInstall: Boolean
-        get() =
-            !running &&
-                hasKernelModule &&
-                when (method) {
-                    InstallMethod.FILE -> vendorBootUri != null && (!verifyKernelSymbols || bootUri != null)
-                    InstallMethod.BOOT -> targetBootUri != null
-                    InstallMethod.DIRECT -> directReady
-                    InstallMethod.INACTIVE -> inactiveReady
+    /** 指定模式要写入的分区路径；镜像模式与尚未检测到分区时为 null。 */
+    fun partitionFor(
+        target: InstallTarget,
+        strategy: InstallStrategy,
+    ): String? =
+        when (target) {
+            InstallTarget.VENDOR_BOOT ->
+                when (strategy) {
+                    InstallStrategy.IMAGE -> null
+                    InstallStrategy.DIRECT -> directTarget
+                    InstallStrategy.INACTIVE -> inactiveTarget
                 }
+            InstallTarget.INIT_BOOT ->
+                when (strategy) {
+                    InstallStrategy.IMAGE -> null
+                    InstallStrategy.DIRECT -> initBootDirectTarget
+                    InstallStrategy.INACTIVE -> initBootInactiveTarget
+                }
+        }
+
+    /** vendor_boot 直接安装时用于校验内核符号的 boot 分区。 */
+    fun bootPartitionFor(
+        target: InstallTarget,
+        strategy: InstallStrategy,
+    ): String? =
+        when (target) {
+            InstallTarget.VENDOR_BOOT ->
+                when (strategy) {
+                    InstallStrategy.DIRECT -> directBootTarget
+                    InstallStrategy.INACTIVE -> inactiveBootTarget
+                    InstallStrategy.IMAGE -> null
+                }
+            InstallTarget.INIT_BOOT -> null
+        }
+
+    /** 当前选中模式要写入的分区路径。 */
+    val selectedPartition: String?
+        get() = partitionFor(target, strategy)
+
+    /** 当前选中模式用于校验内核符号的 boot 分区。 */
+    val selectedBootPartition: String?
+        get() = bootPartitionFor(target, strategy)
+
+    /** 模式所需的分区 / root 是否具备；选择页只看这一项，不看是否已选文件。 */
+    fun isModeAvailable(
+        target: InstallTarget,
+        strategy: InstallStrategy,
+    ): Boolean =
+        when (strategy) {
+            InstallStrategy.IMAGE -> true
+            InstallStrategy.DIRECT ->
+                if (target == InstallTarget.VENDOR_BOOT) directReady else initBootDirectReady
+            InstallStrategy.INACTIVE ->
+                if (target == InstallTarget.VENDOR_BOOT) inactiveReady else initBootInactiveReady
+        }
+
+    /** 模式可用且本次安装的输入已齐备。 */
+    fun isModeReady(
+        target: InstallTarget,
+        strategy: InstallStrategy,
+    ): Boolean =
+        isModeAvailable(target, strategy) &&
+            when (strategy) {
+                InstallStrategy.IMAGE ->
+                    when (target) {
+                        InstallTarget.VENDOR_BOOT ->
+                            vendorBootUri != null && (!verifyKernelSymbols || bootUri != null)
+                        InstallTarget.INIT_BOOT -> targetBootUri != null
+                    }
+                InstallStrategy.DIRECT, InstallStrategy.INACTIVE -> true
+            }
+
+    val canInstall: Boolean
+        get() = !running && hasKernelModule && isModeReady(target, strategy)
 }
 
 /**
@@ -120,20 +193,27 @@ data class InstallUiState(
  *
  * 通过 [KernelInfo] 展示 JNI 查询到的内核版本 / KMI，并据此自动选择匹配的
  * nksu.ko；模块不再全部列出，只保留一个「使用本地 LKM」入口（对齐 KernelSU）。
- * 安装方式与 KernelSU 对齐：选择 vendor_boot 或 boot 镜像、直接安装、安装到
- * 非活动 slot；后两者只有在启动阶段检测到 root 且存在对应 vendor_boot 分区时
- * 才显示。
+ * 安装模式（镜像 / 直接安装 / 非活动 slot + vendor_boot / init_boot）在
+ * ChooseInstallScreen 中选择，这里只负责执行和展示结果。
  */
 class InstallViewModel(
     app: Application,
+    target: InstallTarget = InstallTarget.VENDOR_BOOT,
+    strategy: InstallStrategy = InstallStrategy.IMAGE,
 ) : AndroidViewModel(app) {
     private val appContext = app.applicationContext
 
     private val _uiState =
         MutableStateFlow(
-            InstallUiState(verifyKernelSymbols = AppPreferences.verifyKernelSymbols(appContext)),
+            InstallUiState(
+                target = target,
+                strategy = strategy,
+                verifyKernelSymbols = AppPreferences.verifyKernelSymbols(appContext),
+            ),
         )
     val uiState: StateFlow<InstallUiState> = _uiState.asStateFlow()
+
+    private var kernelInfoLoaded = false
 
     init {
         viewModelScope.launch {
@@ -143,16 +223,7 @@ class InstallViewModel(
         }
         viewModelScope.launch {
             AppPreferences.verifyKernelSymbolsFlow(appContext).collect { enabled ->
-                _uiState.update { state ->
-                    val next = state.copy(verifyKernelSymbols = enabled)
-                    val method =
-                        when (state.method) {
-                            InstallMethod.DIRECT -> if (next.directReady) state.method else InstallMethod.FILE
-                            InstallMethod.INACTIVE -> if (next.inactiveReady) state.method else InstallMethod.FILE
-                            InstallMethod.FILE, InstallMethod.BOOT -> state.method
-                        }
-                    next.copy(method = method)
-                }
+                _uiState.update { it.copy(verifyKernelSymbols = enabled) }
             }
         }
     }
@@ -170,7 +241,8 @@ class InstallViewModel(
 
     /** 载入内核信息与可用的内核模块，只执行一次。 */
     fun load() {
-        if (_uiState.value.koCandidates.isNotEmpty()) return
+        if (kernelInfoLoaded) return
+        kernelInfoLoaded = true
         viewModelScope.launch {
             val loaded =
                 withContext(Dispatchers.IO) {
@@ -184,51 +256,74 @@ class InstallViewModel(
                         currentKmi = currentKmi,
                         candidates = candidates,
                         recommendedKo = KernelInfo.matchKo(candidates, currentKmi),
+                        isAbDevice = VendorBootInstaller.isAbDevice(),
                     )
                 }
             _uiState.update { current ->
                 current.copy(
+                    kernelLoaded = true,
                     kernelVersion = loaded.kernelVersion,
                     isGki = loaded.isGki,
                     currentKmi = loaded.currentKmi,
                     koCandidates = loaded.candidates,
                     autoKo = loaded.recommendedKo,
+                    isAbDevice = loaded.isAbDevice,
                 )
             }
         }
     }
 
-    /** root 状态由启动阶段检测；这里只静默查找可直接安装的 vendor_boot / boot 分区。 */
+    /** 设定本次安装模式；由安装页在进入时根据导航参数调用。 */
+    fun setMode(
+        target: InstallTarget,
+        strategy: InstallStrategy,
+    ) {
+        if (_uiState.value.running) return
+        _uiState.update { state ->
+            if (state.target == target && state.strategy == strategy) {
+                state
+            } else {
+                state.copy(
+                    target = target,
+                    strategy = strategy,
+                    done = false,
+                    success = null,
+                    message = "",
+                )
+            }
+        }
+    }
+
+    /** root 状态由启动阶段检测；这里只静默查找可直接安装的分区。 */
     private suspend fun applyRootAvailability(hasRoot: Boolean) {
+        // RootShell 只覆盖 /system/bin/su；已加载 nksu 内核模块时也能直接安装。
+        val effectiveRoot = hasRoot || withContext(Dispatchers.IO) { VendorBootInstaller.hasRoot() }
         val targets =
             withContext(Dispatchers.IO) {
-                if (hasRoot) {
+                if (effectiveRoot) {
                     PartitionTargets(
                         vendorBoot = VendorBootInstaller.detectVendorBootPartition(),
                         boot = VendorBootInstaller.detectBootPartition(),
                         inactiveVendorBoot = VendorBootInstaller.detectInactiveVendorBootPartition(),
                         inactiveBoot = VendorBootInstaller.detectInactiveBootPartition(),
+                        initBoot = BootInstaller.detectInitBootPartition(),
+                        inactiveInitBoot = BootInstaller.detectInactiveInitBootPartition(),
                     )
                 } else {
                     PartitionTargets()
                 }
             }
         _uiState.update { state ->
-            val next =
-                state.copy(
-                    rootAvailable = hasRoot,
-                    directTarget = targets.vendorBoot,
-                    directBootTarget = targets.boot,
-                    inactiveTarget = targets.inactiveVendorBoot,
-                    inactiveBootTarget = targets.inactiveBoot,
-                )
-            val method =
-                when (state.method) {
-                    InstallMethod.DIRECT -> if (next.directReady) state.method else InstallMethod.FILE
-                    InstallMethod.INACTIVE -> if (next.inactiveReady) state.method else InstallMethod.FILE
-                    InstallMethod.FILE, InstallMethod.BOOT -> state.method
-                }
-            next.copy(method = method)
+            state.copy(
+                rootKnown = true,
+                rootAvailable = effectiveRoot,
+                directTarget = targets.vendorBoot,
+                directBootTarget = targets.boot,
+                inactiveTarget = targets.inactiveVendorBoot,
+                inactiveBootTarget = targets.inactiveBoot,
+                initBootDirectTarget = targets.initBoot,
+                initBootInactiveTarget = targets.inactiveInitBoot,
+            )
         }
     }
 
@@ -276,11 +371,6 @@ class InstallViewModel(
         }
     }
 
-    fun selectMethod(method: InstallMethod) {
-        if (_uiState.value.running || _uiState.value.method == method) return
-        _uiState.update { it.copy(method = method, done = false, success = null, message = "") }
-    }
-
     fun selectVendorBoot(uri: Uri) {
         if (_uiState.value.running) return
         val name =
@@ -290,7 +380,6 @@ class InstallViewModel(
                 ?: uri.toString()
         _uiState.update {
             it.copy(
-                method = InstallMethod.FILE,
                 vendorBootUri = uri,
                 vendorBootName = name,
                 done = false,
@@ -309,7 +398,6 @@ class InstallViewModel(
                 ?: uri.toString()
         _uiState.update {
             it.copy(
-                method = InstallMethod.FILE,
                 bootUri = uri,
                 bootName = name,
                 done = false,
@@ -329,7 +417,6 @@ class InstallViewModel(
                 ?: uri.toString()
         _uiState.update {
             it.copy(
-                method = InstallMethod.BOOT,
                 targetBootUri = uri,
                 targetBootName = name,
                 done = false,
@@ -353,27 +440,31 @@ class InstallViewModel(
         viewModelScope.launch {
             val log = StringBuilder()
             val exit =
-                when (current.method) {
-                    InstallMethod.FILE -> runFileInstall(current, koName, koUri, log)
-                    InstallMethod.BOOT -> runBootInstall(current, koName, koUri, log)
-                    InstallMethod.DIRECT ->
-                        runDirectInstall(
-                            current.directTarget.orEmpty(),
-                            current.directBootTarget,
-                            current.verifyKernelSymbols,
-                            koName,
-                            koUri,
-                            log,
-                        )
-                    InstallMethod.INACTIVE ->
-                        runDirectInstall(
-                            current.inactiveTarget.orEmpty(),
-                            current.inactiveBootTarget,
-                            current.verifyKernelSymbols,
-                            koName,
-                            koUri,
-                            log,
-                        )
+                when (current.strategy) {
+                    InstallStrategy.IMAGE ->
+                        when (current.target) {
+                            InstallTarget.VENDOR_BOOT -> runVendorBootImageInstall(current, koName, koUri, log)
+                            InstallTarget.INIT_BOOT -> runInitBootImageInstall(current, koName, koUri, log)
+                        }
+                    InstallStrategy.DIRECT, InstallStrategy.INACTIVE ->
+                        when (current.target) {
+                            InstallTarget.VENDOR_BOOT ->
+                                runVendorBootDirectInstall(
+                                    current,
+                                    current.selectedPartition.orEmpty(),
+                                    koName,
+                                    koUri,
+                                    log,
+                                )
+                            InstallTarget.INIT_BOOT ->
+                                runInitBootDirectInstall(
+                                    current,
+                                    current.selectedPartition.orEmpty(),
+                                    koName,
+                                    koUri,
+                                    log,
+                                )
+                        }
                 }
 
             val ok = exit == 0
@@ -388,7 +479,7 @@ class InstallViewModel(
         }
     }
 
-    private suspend fun runFileInstall(
+    private suspend fun runVendorBootImageInstall(
         current: InstallUiState,
         koName: String?,
         koUri: Uri?,
@@ -416,7 +507,7 @@ class InstallViewModel(
         }
     }
 
-    private suspend fun runBootInstall(
+    private suspend fun runInitBootImageInstall(
         current: InstallUiState,
         koName: String?,
         koUri: Uri?,
@@ -433,10 +524,9 @@ class InstallViewModel(
         }
     }
 
-    private suspend fun runDirectInstall(
+    private suspend fun runVendorBootDirectInstall(
+        current: InstallUiState,
         partition: String,
-        bootPartition: String?,
-        verifySymbols: Boolean,
         koName: String?,
         koUri: Uri?,
         log: StringBuilder,
@@ -447,8 +537,27 @@ class InstallViewModel(
                 koName,
                 koUri,
                 partition,
-                bootPartition,
-                verifySymbols,
+                current.selectedBootPartition,
+                current.verifyKernelSymbols,
+            ) { line -> appendLog(log, line) }
+        }.getOrElse { e ->
+            appendError(log, e)
+            -1
+        }
+
+    private suspend fun runInitBootDirectInstall(
+        current: InstallUiState,
+        partition: String,
+        koName: String?,
+        koUri: Uri?,
+        log: StringBuilder,
+    ): Int =
+        runCatching {
+            BootInstaller.directInstall(
+                i18nContext(),
+                koName,
+                koUri,
+                partition,
             ) { line -> appendLog(log, line) }
         }.getOrElse { e ->
             appendError(log, e)
@@ -490,6 +599,7 @@ class InstallViewModel(
         val currentKmi: String?,
         val candidates: List<String>,
         val recommendedKo: String?,
+        val isAbDevice: Boolean,
     )
 
     private data class PartitionTargets(
@@ -497,12 +607,16 @@ class InstallViewModel(
         val boot: String? = null,
         val inactiveVendorBoot: String? = null,
         val inactiveBoot: String? = null,
+        val initBoot: String? = null,
+        val inactiveInitBoot: String? = null,
     )
 }
 
 class InstallViewModelFactory(
     private val app: Application,
+    private val target: InstallTarget = InstallTarget.VENDOR_BOOT,
+    private val strategy: InstallStrategy = InstallStrategy.IMAGE,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
-    override fun <T : ViewModel> create(modelClass: Class<T>): T = InstallViewModel(app) as T
+    override fun <T : ViewModel> create(modelClass: Class<T>): T = InstallViewModel(app, target, strategy) as T
 }

@@ -34,15 +34,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.delay
+import me.nekosu.aqnya.core.model.InstallStrategy
+import me.nekosu.aqnya.core.model.InstallTarget
 import me.nekosu.aqnya.core.navigation.AppRoute
 import me.nekosu.aqnya.data.prefs.AppPreferences
 import me.nekosu.aqnya.feature.home.presentation.HomeViewModel
@@ -290,9 +294,26 @@ fun MainScreen() {
                         }
 
                         composable(
-                            route = AppRoute.Install,
-                        ) {
-                            InstallScreen(navController)
+                            route = AppRoute.InstallPattern,
+                            arguments =
+                                listOf(
+                                    navArgument("target") { type = NavType.StringType },
+                                    navArgument("strategy") { type = NavType.StringType },
+                                ),
+                        ) { backStackEntry ->
+                            val target =
+                                backStackEntry.arguments?.getString("target")?.let { name ->
+                                    InstallTarget.entries.firstOrNull { it.name == name }
+                                }
+                            val strategy =
+                                backStackEntry.arguments?.getString("strategy")?.let { name ->
+                                    InstallStrategy.entries.firstOrNull { it.name == name }
+                                }
+                            if (target == null || strategy == null) {
+                                LaunchedEffect(Unit) { navController.popBackStack() }
+                            } else {
+                                InstallScreen(navController, target, strategy)
+                            }
                         }
 
                         composable(

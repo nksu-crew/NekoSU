@@ -162,14 +162,9 @@ object Ncore {
     @JvmName("getSlotSuffix")
     private external fun nativeGetSlotSuffix(): String?
 
-    @JvmName("findVendorBoot")
-    private external fun nativeFindVendorBoot(
-        slotSuffix: String,
-        allowSlotless: Boolean,
-    ): String?
-
-    @JvmName("findBoot")
-    private external fun nativeFindBoot(
+    @JvmName("findBlock")
+    private external fun nativeFindBlock(
+        partition: String,
         slotSuffix: String,
         allowSlotless: Boolean,
     ): String?
@@ -287,17 +282,13 @@ object Ncore {
     @JvmName("getSlotSuffixApi")
     fun getSlotSuffix(): String? = runJni { nativeGetSlotSuffix() }
 
-    @JvmName("findVendorBootApi")
-    fun findVendorBoot(
+    /** 查找 [partition] 的分区设备路径；不存在时返回 null。 */
+    @JvmName("findBlockApi")
+    fun findBlock(
+        partition: String,
         slotSuffix: String,
         allowSlotless: Boolean,
-    ): String? = runJni { nativeFindVendorBoot(slotSuffix, allowSlotless) }
-
-    @JvmName("findBootApi")
-    fun findBoot(
-        slotSuffix: String,
-        allowSlotless: Boolean,
-    ): String? = runJni { nativeFindBoot(slotSuffix, allowSlotless) }
+    ): String? = runJni { nativeFindBlock(partition, slotSuffix, allowSlotless) }
 
     object Suspend {
         suspend fun helloLog() = runJniAsync { nativeHelloLog() }
