@@ -298,8 +298,7 @@ fun SettingsThemeSwatch(
                     selected = selected,
                     role = Role.RadioButton,
                     onClick = onClick,
-                )
-                .semantics { contentDescription = label }
+                ).semantics { contentDescription = label }
                 .border(width = 3.dp, color = borderColor, shape = shape)
                 .padding(4.dp),
     ) {

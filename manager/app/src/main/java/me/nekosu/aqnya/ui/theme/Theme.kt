@@ -51,8 +51,7 @@ private data class ThemeSeed(
         )
     }
 
-    fun neutral(lightness: Float): Color =
-        Color.hsl(hue, 0.06f, lightness.coerceIn(0f, 1f))
+    fun neutral(lightness: Float): Color = Color.hsl(hue, 0.06f, lightness.coerceIn(0f, 1f))
 }
 
 /** Values match [me.nekosu.aqnya.ui.screens.settings.enums.ThemeColor]. */
@@ -165,7 +164,10 @@ private fun darkScheme(seed: ThemeSeed): ColorScheme {
     ).withFixedColors(seed)
 }
 
-private fun schemeFor(value: Int, dark: Boolean): ColorScheme {
+private fun schemeFor(
+    value: Int,
+    dark: Boolean,
+): ColorScheme {
     val seed = seedFor(value)
     return if (dark) darkScheme(seed) else lightScheme(seed)
 }

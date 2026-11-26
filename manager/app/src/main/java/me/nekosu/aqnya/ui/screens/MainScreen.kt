@@ -60,6 +60,7 @@ import me.nekosu.aqnya.ui.navigation.StandardBottomBarContentPadding
 import me.nekosu.aqnya.ui.permission.AppPermission
 import me.nekosu.aqnya.ui.permission.MiuiPermissionUtils
 import me.nekosu.aqnya.ui.permission.rememberPermissionState
+import me.nekosu.aqnya.ui.screens.install.ChooseInstallScreen
 import me.nekosu.aqnya.ui.screens.install.InstallScreen
 import me.nekosu.aqnya.ui.screens.modules.ModuleScreen
 import me.nekosu.aqnya.ui.screens.settings.AppearanceSettingsScreen
@@ -214,7 +215,7 @@ fun MainScreen() {
                         ) {
                             HomeScreen(
                                 viewModel = homeViewModel,
-                                onInstallClick = { navController.navigate(AppRoute.Install) },
+                                onInstallClick = { navController.navigate(AppRoute.ChooseInstall) },
                                 onAboutClick = { navController.navigate(AppRoute.About) },
                             )
                         }
@@ -292,6 +293,12 @@ fun MainScreen() {
                             route = AppRoute.Install,
                         ) {
                             InstallScreen(navController)
+                        }
+
+                        composable(
+                            route = AppRoute.ChooseInstall,
+                        ) {
+                            ChooseInstallScreen(navController)
                         }
 
                         composable(AppRoute.AppDetailPattern) { backStackEntry ->

@@ -14,6 +14,7 @@ object AppRoute {
     const val About = "about"
     const val OpenSource = "open_source"
     const val Install = "install"
+    const val ChooseInstall = "ChooseInstall"
     const val AppDetailPattern = "app_detail/{packageName}"
 
     fun appDetail(packageName: String): String = "app_detail/$packageName"

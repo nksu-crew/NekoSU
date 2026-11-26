@@ -203,8 +203,7 @@ void ShowAllProperties()
 // bionic handed out.
 // ---------------------------------------------------------------------------
 
-struct Mapping
-{
+struct Mapping {
 	uintptr_t start = 0;
 	uintptr_t end = 0;
 	uint64_t offset = 0;
@@ -292,9 +291,8 @@ const Mapping *FindNewPropertyArea(const std::vector<Mapping> &before,
 // Read-write mapping of a property area file.
 // ---------------------------------------------------------------------------
 
-class WritableMapping
-{
-public:
+class WritableMapping {
+    public:
 	WritableMapping() = default;
 	WritableMapping(const WritableMapping &) = delete;
 	WritableMapping &operator=(const WritableMapping &) = delete;
@@ -313,7 +311,7 @@ public:
 			return false;
 		}
 
-		struct stat status {};
+		struct stat status{};
 		if (fstat(fd, &status) < 0) {
 			int saved = errno;
 			close(fd);
@@ -321,7 +319,8 @@ public:
 			return false;
 		}
 		if (!S_ISREG(status.st_mode) ||
-		    status.st_size < static_cast<off_t>(kPropertyAreaHeaderSize + kTrieNodeHeaderSize)) {
+		    status.st_size <
+			    static_cast<off_t>(kPropertyAreaHeaderSize + kTrieNodeHeaderSize)) {
 			close(fd);
 			*error = path + " is not a property area";
 			return false;
@@ -351,7 +350,7 @@ public:
 		return size_;
 	}
 
-private:
+    private:
 	void Reset()
 	{
 		if (address_ != nullptr) {
@@ -397,7 +396,8 @@ bool HasDirtyBackupArea(const uint8_t *area, size_t dataSize)
 	}
 	if (children == 0) {
 		// Empty area: a modern one reserves the backup area right away.
-		return LoadU32(area + kPropertyAreaBytesUsedOffset) == kTrieNodeHeaderSize + PROP_VALUE_MAX;
+		return LoadU32(area + kPropertyAreaBytesUsedOffset) ==
+		       kTrieNodeHeaderSize + PROP_VALUE_MAX;
 	}
 	return true;
 }
@@ -471,9 +471,8 @@ bool FindTrieNode(uint8_t *area, size_t dataSize, uint32_t rootOffset, const cha
 			*error = "corrupted property trie (node name out of range)";
 			return false;
 		}
-		const char *nodeName =
-			reinterpret_cast<const char *>(area + kPropertyAreaHeaderSize + current +
-						       kTrieNodeHeaderSize);
+		const char *nodeName = reinterpret_cast<const char *>(
+			area + kPropertyAreaHeaderSize + current + kTrieNodeHeaderSize);
 
 		int comparison = CompareNamePart(name, nameLength, nodeName, nodeNameLength);
 		if (comparison == 0) {
@@ -494,7 +493,8 @@ bool FindTrieNode(uint8_t *area, size_t dataSize, uint32_t rootOffset, const cha
 		}
 
 		uint32_t created = 0;
-		if (!AllocateData(area, dataSize, kTrieNodeHeaderSize + nameLength + 1, &created, error)) {
+		if (!AllocateData(area, dataSize, kTrieNodeHeaderSize + nameLength + 1, &created,
+				  error)) {
 			return false;
 		}
 		InitTrieNode(area, created, name, nameLength);
@@ -556,7 +556,8 @@ bool UpdatePropInfo(uint8_t *area, size_t areaSize, uint32_t dataOffset, const s
 			const char *previousValue = reinterpret_cast<const char *>(
 				area + kPropertyAreaHeaderSize + previousOffset);
 			size_t previousLength = strnlen(previousValue, dataSize - previousOffset);
-			if (previousLength < dataSize - previousOffset && valueLength <= previousLength) {
+			if (previousLength < dataSize - previousOffset &&
+			    valueLength <= previousLength) {
 				reuseLongStorage = true;
 				longValueOffset = static_cast<uint32_t>(previousOffset);
 			}
@@ -591,15 +592,16 @@ bool UpdatePropInfo(uint8_t *area, size_t areaSize, uint32_t dataOffset, const s
 
 	std::memset(prop + kPropInfoValueOffset, 0, PROP_VALUE_MAX);
 	if (longValue) {
-		std::memcpy(prop + kPropInfoValueOffset, kLongLegacyError, sizeof(kLongLegacyError));
+		std::memcpy(prop + kPropInfoValueOffset, kLongLegacyError,
+			    sizeof(kLongLegacyError));
 		StoreU32(prop + kPropInfoLongOffsetOffset, longValueOffset - dataOffset);
 	} else {
 		std::memcpy(prop + kPropInfoValueOffset, value.data(), valueLength);
 	}
 	__atomic_thread_fence(__ATOMIC_RELEASE);
 
-	uint32_t serialLength =
-		longValue ? static_cast<uint32_t>(kLongLegacyErrorLength) : static_cast<uint32_t>(valueLength);
+	uint32_t serialLength = longValue ? static_cast<uint32_t>(kLongLegacyErrorLength) :
+					    static_cast<uint32_t>(valueLength);
 	uint32_t lengthFlags = (serialLength << 24) | (longValue ? kLongFlag : 0u);
 	StoreU32(serial, lengthFlags | ((dirtySerial + 1) & kSerialCounterMaskWithoutLongFlag));
 	WakeFutex(serial);
@@ -640,8 +642,8 @@ bool InsertPropInfo(uint8_t *area, size_t areaSize, const std::string &name,
 
 		uint32_t children = LoadTriePointer(area, current, kTrieNodeChildrenOffset);
 		if (children == 0) {
-			if (!AllocateData(area, dataSize, kTrieNodeHeaderSize + partLength + 1, &children,
-					  error)) {
+			if (!AllocateData(area, dataSize, kTrieNodeHeaderSize + partLength + 1,
+					  &children, error)) {
 				return false;
 			}
 			InitTrieNode(area, children, remaining, partLength);
@@ -649,7 +651,8 @@ bool InsertPropInfo(uint8_t *area, size_t areaSize, const std::string &name,
 		}
 
 		uint32_t node = 0;
-		if (!FindTrieNode(area, dataSize, children, remaining, partLength, true, &node, error)) {
+		if (!FindTrieNode(area, dataSize, children, remaining, partLength, true, &node,
+				  error)) {
 			return false;
 		}
 		current = node;
@@ -667,7 +670,8 @@ bool InsertPropInfo(uint8_t *area, size_t areaSize, const std::string &name,
 	}
 
 	uint32_t propOffset = 0;
-	if (!AllocateData(area, dataSize, kPropInfoHeaderSize + name.size() + 1, &propOffset, error)) {
+	if (!AllocateData(area, dataSize, kPropInfoHeaderSize + name.size() + 1, &propOffset,
+			  error)) {
 		return false;
 	}
 
@@ -693,7 +697,8 @@ bool InsertPropInfo(uint8_t *area, size_t areaSize, const std::string &name,
 	if (longValue) {
 		uint8_t *storage = area + kPropertyAreaHeaderSize + longValueOffset;
 		std::memcpy(storage, value.data(), value.size());
-		std::memcpy(prop + kPropInfoValueOffset, kLongLegacyError, sizeof(kLongLegacyError));
+		std::memcpy(prop + kPropInfoValueOffset, kLongLegacyError,
+			    sizeof(kLongLegacyError));
 		StoreU32(prop + kPropInfoLongOffsetOffset, longValueOffset - propOffset);
 		serial = (static_cast<uint32_t>(kLongLegacyErrorLength) << 24) | kLongFlag;
 	} else {
@@ -840,12 +845,13 @@ bool SetProperty(const std::string &name, const std::string &value, std::string 
 	    !ValidatePropertyArea(serialArea.Data(), serialArea.Size(), error)) {
 		return false;
 	}
-	uint32_t *areaSerial = reinterpret_cast<uint32_t *>(serialArea.Data() + kPropertyAreaSerialOffset);
+	uint32_t *areaSerial =
+		reinterpret_cast<uint32_t *>(serialArea.Data() + kPropertyAreaSerialOffset);
 
 	bool updated;
 	if (info != nullptr) {
-		updated = UpdatePropInfo(area.Data(), area.Size(), dataOffset, name, value, areaSerial,
-					 error);
+		updated = UpdatePropInfo(area.Data(), area.Size(), dataOffset, name, value,
+					 areaSerial, error);
 	} else {
 		updated = InsertPropInfo(area.Data(), area.Size(), name, value, areaSerial, error);
 	}
@@ -860,8 +866,8 @@ bool SetProperty(const std::string &name, const std::string &value, std::string 
 		return false;
 	}
 	if (actual != value) {
-		*error = "verification failed for \"" + name + "\": expected \"" + value + "\", got \"" +
-			 actual + "\"";
+		*error = "verification failed for \"" + name + "\": expected \"" + value +
+			 "\", got \"" + actual + "\"";
 		return false;
 	}
 	return true;

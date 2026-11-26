@@ -38,9 +38,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import me.nekosu.aqnya.R
+import me.nekosu.aqnya.ui.component.CardGroup
 import me.nekosu.aqnya.ui.screens.settings.enums.NavBarStyle
 import me.nekosu.aqnya.ui.screens.settings.enums.ThemeColor
-import me.nekosu.aqnya.ui.component.CardGroup
 import me.nekosu.aqnya.ui.screens.settings.enums.ThemeMode
 import me.nekosu.aqnya.ui.theme.ContinuousCornerShape
 import me.nekosu.aqnya.ui.theme.ThemeSwatchColors

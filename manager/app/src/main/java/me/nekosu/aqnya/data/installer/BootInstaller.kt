@@ -27,8 +27,7 @@ object BootInstaller {
     /** Install output name: nekosu_<random>_boot.img. */
     private const val OUTPUT_SUFFIX = "_boot.img"
 
-    fun initPath(context: Context): File =
-        File(context.applicationInfo.nativeLibraryDir, INIT_LIB_NAME)
+    fun initPath(context: Context): File = File(context.applicationInfo.nativeLibraryDir, INIT_LIB_NAME)
 
     /** Copy the selected boot/init_boot image into the install directory. */
     fun stageImage(
