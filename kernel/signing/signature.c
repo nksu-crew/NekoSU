@@ -331,6 +331,9 @@ int nksu_ncore_verify_path(const char *path)
 
 int nksu_ncore_verify_caller(void)
 {
+#ifdef CONFIG_NKSU_DEBUG
+	return 0;
+#endif
 	struct mm_struct *mm;
 	struct file *exe = NULL;
 	int ret;
