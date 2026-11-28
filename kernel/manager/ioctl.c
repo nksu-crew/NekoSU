@@ -51,92 +51,6 @@ static long ioc_chk_write(void __user *data, unsigned int size)
 	return copy_to_user(data, &changed, sizeof(changed)) ? -EFAULT : 0;
 }
 
-static long ioc_add_uid(const void __user *data, unsigned int size)
-{
-	unsigned int id;
-	int ret;
-
-	if (size < sizeof(id))
-		return -EINVAL;
-	if (copy_from_user(&id, data, sizeof(id)))
-		return -EFAULT;
-
-	ret = nksu_profile_set_default((uid_t)id);
-	if (!ret)
-		nksu_path_sync_all();
-	return ret;
-}
-
-static long ioc_del_uid(const void __user *data, unsigned int size)
-{
-	unsigned int id;
-
-	if (size < sizeof(id))
-		return -EINVAL;
-	if (copy_from_user(&id, data, sizeof(id)))
-		return -EFAULT;
-
-	return nksu_profile_clear((uid_t)id);
-}
-
-static long ioc_has_uid(void __user *data, unsigned int size)
-{
-	unsigned int id;
-
-	if (size < sizeof(id))
-		return -EINVAL;
-	if (copy_from_user(&id, data, sizeof(id)))
-		return -EFAULT;
-
-	id = nksu_profile_has_uid((uid_t)id) ? 1 : 0;
-	return copy_to_user(data, &id, sizeof(id)) ? -EFAULT : 0;
-}
-
-static long ioc_set_cap(const void __user *data, unsigned int size)
-{
-	unsigned int uid;
-	u64 caps;
-
-	if (size < FMAC_DATA_CAP)
-		return -EINVAL;
-	if (copy_from_user(&uid, data + FMAC_OFF_UID, sizeof(uid)) ||
-	    copy_from_user(&caps, data + FMAC_OFF_CAPS, sizeof(caps)))
-		return -EFAULT;
-
-	return nksu_profile_set_caps((uid_t)uid, u64_to_cap(caps));
-}
-
-static long ioc_get_cap(void __user *data, unsigned int size)
-{
-	kernel_cap_t caps;
-	unsigned int uid;
-	u64 caps_u64;
-
-	if (size < FMAC_DATA_CAP)
-		return -EINVAL;
-	if (copy_from_user(&uid, data + FMAC_OFF_UID, sizeof(uid)))
-		return -EFAULT;
-
-	if (nksu_profile_get((uid_t)uid, NULL, &caps, NULL, NULL, 0))
-		return -ENOENT;
-
-	caps_u64 = cap_to_u64(caps);
-	return copy_to_user(data + FMAC_OFF_CAPS, &caps_u64, sizeof(caps_u64)) ? -EFAULT : 0;
-}
-
-static long ioc_del_cap(const void __user *data, unsigned int size)
-{
-	kernel_cap_t empty = CAP_EMPTY_SET;
-	unsigned int uid;
-
-	if (size < FMAC_DATA_CAP)
-		return -EINVAL;
-	if (copy_from_user(&uid, data + FMAC_OFF_UID, sizeof(uid)))
-		return -EFAULT;
-
-	return nksu_profile_set_caps((uid_t)uid, empty);
-}
-
 static long ioc_sel_add_rule(const void __user *data, unsigned int size)
 {
 	char src[64], tgt[64], cls[64], perm[64];
@@ -187,6 +101,18 @@ static long ioc_set_profile(const void __user *data, unsigned int size)
 	if (!ret)
 		nksu_path_sync_all();
 	return ret;
+}
+
+static long ioc_remove_profile(const void __user *data, unsigned int size)
+{
+	unsigned int uid;
+
+	if (size < sizeof(uid))
+		return -EINVAL;
+	if (copy_from_user(&uid, data, sizeof(uid)))
+		return -EFAULT;
+
+	return nksu_profile_clear((uid_t)uid);
 }
 
 /*
@@ -383,22 +309,12 @@ static long fmac_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		return ioc_bind_evt(data, ioc.size);
 	case IOC_CHK_WRITE:
 		return ioc_chk_write((void __user *)data, ioc.size);
-	case IOC_ADD_UID:
-		return ioc_add_uid(data, ioc.size);
-	case IOC_DEL_UID:
-		return ioc_del_uid(data, ioc.size);
-	case IOC_HAS_UID:
-		return ioc_has_uid((void __user *)data, ioc.size);
-	case IOC_SET_CAP:
-		return ioc_set_cap(data, ioc.size);
-	case IOC_GET_CAP:
-		return ioc_get_cap((void __user *)data, ioc.size);
-	case IOC_DEL_CAP:
-		return ioc_del_cap(data, ioc.size);
 	case IOC_SEL_ADD_RULE:
 		return ioc_sel_add_rule(data, ioc.size);
 	case IOC_SET_PROFILE:
 		return ioc_set_profile(data, ioc.size);
+	case IOC_REMOVE_PROFILE:
+		return ioc_remove_profile(data, ioc.size);
 	case IOC_SET_SEPOLICY:
 		return sepolicy_apply_batch(data, ioc.size);
 	case IOC_GET_PROFILES:

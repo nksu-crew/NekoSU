@@ -130,94 +130,23 @@ pub extern "system" fn Java_me_nekosu_aqnya_core_Ncore_setProfileProto(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_me_nekosu_aqnya_core_Ncore_adduid(
-    _env: EnvUnowned,
-    _this: JObject,
-    uid: jint,
-) -> jint {
-    match add_uid(uid) {
-        Ok(()) => 0,
-        Err(e) => {
-            log::error!("add_uid failed: {e:#}");
-            -1
-        }
-    }
-}
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_me_nekosu_aqnya_core_Ncore_deluid(
+pub extern "system" fn Java_me_nekosu_aqnya_core_Ncore_removeProfile(
     _env: EnvUnowned,
     _this: JObject,
     uid: jint,
 ) -> jint {
     if uid < 0 {
-        log::error!("del_uid: negative uid {uid}");
+        log::error!("remove_profile: negative uid {uid}");
         return -1;
     }
-    if let Err(e) = del_uid(uid) {
-        log::error!("del_uid failed: {e:#}");
+    if let Err(e) = remove_profile(uid as u32) {
+        log::error!("remove_profile failed: {e:#}");
         return -1;
     }
     match store::profile::del(uid as u32) {
         Ok(()) => 0,
         Err(e) => {
-            log::error!("del_uid failed: {e:#}");
-            -1
-        }
-    }
-}
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_me_nekosu_aqnya_core_Ncore_hasuid(
-    _env: EnvUnowned,
-    _this: JObject,
-    uid: jint,
-) -> jint {
-    match has_uid(uid) {
-        Some(true) => 1,
-        Some(false) => 0,
-        None => -1,
-    }
-}
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_me_nekosu_aqnya_core_Ncore_setCap(
-    _env: EnvUnowned,
-    _this: JObject,
-    uid: jint,
-    caps: jlong,
-) -> jint {
-    match set_cap(uid, caps as u64) {
-        Ok(()) => 0,
-        Err(e) => {
-            log::error!("set_cap failed: {e:#}");
-            -1
-        }
-    }
-}
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_me_nekosu_aqnya_core_Ncore_getCap(
-    _env: EnvUnowned,
-    _this: JObject,
-    uid: jint,
-) -> jlong {
-    match get_cap(uid) {
-        Some(caps) => caps as jlong,
-        None => -1,
-    }
-}
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_me_nekosu_aqnya_core_Ncore_delCap(
-    _env: EnvUnowned,
-    _this: JObject,
-    uid: jint,
-) -> jint {
-    match del_cap(uid) {
-        Ok(()) => 0,
-        Err(e) => {
-            log::error!("del_cap failed: {e:#}");
+            log::error!("remove_profile: store delete failed: {e:#}");
             -1
         }
     }

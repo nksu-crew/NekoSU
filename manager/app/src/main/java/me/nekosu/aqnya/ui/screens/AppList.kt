@@ -340,7 +340,7 @@ class AppViewModel(
                         }.toByteArray(),
                     )
                 } else {
-                    Ncore.deluid(app.uid)
+                    Ncore.removeProfile(app.uid)
                 }
             } catch (e: Exception) {
                 android.util.Log.e("AppViewModel", "JNI call failed, will recover on next launch", e)

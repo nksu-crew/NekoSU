@@ -36,16 +36,16 @@
 /* 操作类型 */
 enum fmac_flag {
 	IOC_GET_SHM = 0, /* data 为空，返回 shm fd */
-	IOC_BIND_EVT, /* data[4]   = int efd */
-	IOC_CHK_WRITE, /* data[4]   = int changed (out) */
-	IOC_ADD_UID, /* data[4]   = uint32_t uid */
-	IOC_DEL_UID, /* data[4]   = uint32_t uid */
-	IOC_HAS_UID, /* data[4]   = uint32_t uid (in/out: 0 或 1) */
-	IOC_SET_CAP, /* data[12]  = uint32_t uid | uint64_t caps */
-	IOC_GET_CAP, /* data[12]  = uint32_t uid (in), uint64_t caps (out) */
-	IOC_DEL_CAP, /* data[12]  = uint32_t uid */
-	IOC_SEL_ADD_RULE, /* data[264] = src[64] tgt[64] cls[64] perm[64] effect[4] invert[4] */
-	IOC_SET_PROFILE, /* data[84]  = uid[4] caps[8] domain[64] namespace[4] root_uid[4] */
+	IOC_BIND_EVT = 1, /* data[4]   = int efd */
+	IOC_CHK_WRITE = 2, /* data[4]   = int changed (out) */
+	/*
+	 * 3..8 were IOC_ADD_UID, IOC_DEL_UID, IOC_HAS_UID, IOC_SET_CAP,
+	 * IOC_GET_CAP and IOC_DEL_CAP.  The profile table is now driven only by
+	 * IOC_SET_PROFILE (upsert the whole entry) and IOC_REMOVE_PROFILE
+	 * (delete by uid), so the per-field uid/capability ioctls are retired.
+	 */
+	IOC_SEL_ADD_RULE = 9, /* data[264] = src[64] tgt[64] cls[64] perm[64] effect[4] invert[4] */
+	IOC_SET_PROFILE = 10, /* data[84]  = uid[4] caps[8] domain[64] namespace[4] root_uid[4] */
 	/* 11 was IOC_LIST_MODULES; module enumeration now lives in ncore (userspace). */
 	IOC_SET_SEPOLICY = 12, /* data = KernelSU-format sepolicy batch, size = 长度 */
 	/*
@@ -85,6 +85,12 @@ enum fmac_flag {
 	 * UID the default profile; only a signed ncore can set it.
 	 */
 	IOC_SET_MANAGER_UID = 24,
+	/*
+	 * data[4] = uint32_t uid.  Delete the profile for uid; -ENOENT when the
+	 * uid has no profile.  The manager persists/erases its copy through the
+	 * JNI bridge.
+	 */
+	IOC_REMOVE_PROFILE = 25,
 };
 
 #define NKSU_PROFILE_TEXT_MAX (64 * 1024)
@@ -100,7 +106,6 @@ struct fmac_ioc {
 #define FMAC_DATA_UID 4
 #define FMAC_DATA_EFD 4
 #define FMAC_DATA_CHKWRITE 4
-#define FMAC_DATA_CAP 12
 #define FMAC_DATA_SELRULE 264
 #define FMAC_DATA_PROFILE 84
 #define FMAC_DATA_FEATURE 12
@@ -136,7 +141,6 @@ NKSU_STATIC_ASSERT(FMAC_DATA_UID == sizeof(__u32), "IOC uid is a u32");
 NKSU_STATIC_ASSERT(FMAC_DATA_EFD == sizeof(int), "IOC eventfd is an int");
 NKSU_STATIC_ASSERT(FMAC_DATA_CHKWRITE == sizeof(int), "IOC chkwrite is an int");
 NKSU_STATIC_ASSERT(FMAC_OFF_CAPS == FMAC_OFF_UID + FMAC_DATA_UID, "uid/caps layout");
-NKSU_STATIC_ASSERT(FMAC_DATA_CAP == FMAC_OFF_CAPS + sizeof(__u64), "cap payload size");
 NKSU_STATIC_ASSERT(FMAC_OFF_DOMAIN == FMAC_OFF_CAPS + sizeof(__u64), "caps/domain layout");
 NKSU_STATIC_ASSERT(FMAC_OFF_NS == FMAC_OFF_DOMAIN + 64, "domain/ns layout");
 NKSU_STATIC_ASSERT(FMAC_OFF_ROOT_UID == FMAC_OFF_NS + sizeof(int), "ns/root_uid layout");

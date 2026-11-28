@@ -63,14 +63,8 @@ object Ncore {
     @JvmName("ctl")
     private external fun nativeCtl(value: Int): Int
 
-    @JvmName("adduid")
-    private external fun nativeAdduid(value: Int): Int
-
-    @JvmName("deluid")
-    private external fun nativeDeluid(value: Int): Int
-
-    @JvmName("hasuid")
-    private external fun nativeHasuid(value: Int): Int
+    @JvmName("removeProfile")
+    private external fun nativeRemoveProfile(value: Int): Int
 
     @JvmName("addRule")
     private external fun nativeAddRule(
@@ -80,18 +74,6 @@ object Ncore {
 
     @JvmName("delRule")
     private external fun nativeDelRule(path: String): Int
-
-    @JvmName("setCap")
-    private external fun nativeSetCap(
-        uid: Int,
-        caps: Long,
-    ): Int
-
-    @JvmName("getCap")
-    private external fun nativeGetCap(uid: Int): Long
-
-    @JvmName("delCap")
-    private external fun nativeDelCap(uid: Int): Int
 
     @JvmName("addSelinuxRule")
     private external fun nativeAddSelinuxRule(
@@ -176,14 +158,8 @@ object Ncore {
     @JvmName("ctlApi")
     fun ctl(value: Int): Int = runJni { nativeCtl(value) }
 
-    @JvmName("adduidApi")
-    fun adduid(value: Int): Int = runJni { nativeAdduid(value) }
-
-    @JvmName("deluidApi")
-    fun deluid(value: Int): Int = runJni { nativeDeluid(value) }
-
-    @JvmName("hasuidApi")
-    fun hasuid(value: Int): Int = runJni { nativeHasuid(value) }
+    @JvmName("removeProfileApi")
+    fun removeProfile(value: Int): Int = runJni { nativeRemoveProfile(value) }
 
     @JvmName("addRuleApi")
     fun addRule(
@@ -193,18 +169,6 @@ object Ncore {
 
     @JvmName("delRuleApi")
     fun delRule(path: String): Int = runJni { nativeDelRule(path) }
-
-    @JvmName("setCapApi")
-    fun setCap(
-        uid: Int,
-        caps: Long,
-    ): Int = runJni { nativeSetCap(uid, caps) }
-
-    @JvmName("getCapApi")
-    fun getCap(uid: Int): Long = runJni { nativeGetCap(uid) }
-
-    @JvmName("delCapApi")
-    fun delCap(uid: Int): Int = runJni { nativeDelCap(uid) }
 
     @JvmName("addSelinuxRuleApi")
     fun addSelinuxRule(
@@ -294,12 +258,6 @@ object Ncore {
         suspend fun helloLog() = runJniAsync { nativeHelloLog() }
 
         suspend fun ctl(value: Int): Int = runJniAsync { nativeCtl(value) }
-
-        suspend fun adduid(value: Int): Int = runJniAsync { nativeAdduid(value) }
-
-        suspend fun deluid(value: Int): Int = runJniAsync { nativeDeluid(value) }
-
-        suspend fun hasuid(value: Int): Int = runJniAsync { nativeHasuid(value) }
 
         suspend fun kernelVersion(): String? = runJniAsync { nativeKernelVersion() }
 

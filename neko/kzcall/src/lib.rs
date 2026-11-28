@@ -4,15 +4,11 @@ pub mod defs;
 mod fd;
 pub mod ioctl;
 mod utils;
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use proto::FeatureEntry;
 use proto::ProfileEntry;
 use uapi::*;
 use utils::{cstr_lossy, get_u64, put_cstr, put_u32, put_u64};
-
-fn checked_uid(uid: i32) -> Result<u32> {
-    u32::try_from(uid).map_err(|_| anyhow!("uid should not be negative: {uid}"))
-}
 
 pub fn set_manager_uid(uid: u32) -> Result<()> {
     let mut buf = uid.to_ne_bytes();
@@ -57,6 +53,12 @@ pub fn set_profile(profile: &ProfileEntry) -> Result<()> {
     Ok(())
 }
 
+pub fn remove_profile(uid: u32) -> Result<()> {
+    let mut data = uid.to_ne_bytes();
+    ioctl::call(fmac_flag_IOC_REMOVE_PROFILE, &mut data)?;
+    Ok(())
+}
+
 pub fn add_selinux_rule(
     src: &str,
     tgt: &str,
@@ -79,49 +81,6 @@ pub fn add_selinux_rule(
     put_u32(&mut data, FMAC_OFF_EFFECT as usize, effect as u32);
     put_u32(&mut data, FMAC_OFF_INVERT as usize, invert as u32);
     ioctl::call(fmac_flag_IOC_SEL_ADD_RULE, &mut data)?;
-    Ok(())
-}
-
-pub fn add_uid(uid: i32) -> Result<()> {
-    let mut data = checked_uid(uid)?.to_ne_bytes();
-    ioctl::call(fmac_flag_IOC_ADD_UID, &mut data)?;
-    Ok(())
-}
-
-pub fn del_uid(uid: i32) -> Result<()> {
-    let mut data = checked_uid(uid)?.to_ne_bytes();
-    ioctl::call(fmac_flag_IOC_DEL_UID, &mut data)?;
-    Ok(())
-}
-
-pub fn has_uid(uid: i32) -> Option<bool> {
-    let mut data = u32::try_from(uid).ok()?.to_ne_bytes();
-    ioctl::call(fmac_flag_IOC_HAS_UID, &mut data).ok()?;
-    Some(u32::from_ne_bytes(data) != 0)
-}
-
-pub fn set_cap(uid: i32, caps: u64) -> Result<()> {
-    let uid = checked_uid(uid)?;
-    let mut data = [0u8; FMAC_DATA_CAP as usize];
-    put_u32(&mut data, FMAC_OFF_UID as usize, uid);
-    put_u64(&mut data, FMAC_OFF_CAPS as usize, caps);
-    ioctl::call(fmac_flag_IOC_SET_CAP, &mut data)?;
-    Ok(())
-}
-
-pub fn get_cap(uid: i32) -> Option<u64> {
-    let uid = u32::try_from(uid).ok()?;
-    let mut data = [0u8; FMAC_DATA_CAP as usize];
-    put_u32(&mut data, FMAC_OFF_UID as usize, uid);
-    ioctl::call(fmac_flag_IOC_GET_CAP, &mut data).ok()?;
-    Some(get_u64(&data, FMAC_OFF_CAPS as usize))
-}
-
-pub fn del_cap(uid: i32) -> Result<()> {
-    let uid = checked_uid(uid)?;
-    let mut data = [0u8; FMAC_DATA_CAP as usize];
-    put_u32(&mut data, FMAC_OFF_UID as usize, uid);
-    ioctl::call(fmac_flag_IOC_DEL_CAP, &mut data)?;
     Ok(())
 }
 

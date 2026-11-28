@@ -27,15 +27,6 @@ static inline kernel_cap_t u64_to_cap(u64 v)
 #endif
 }
 
-static inline u64 cap_to_u64(kernel_cap_t cap)
-{
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
-	return cap.val;
-#else
-	return ((u64)cap.cap[1] << 32) | cap.cap[0];
-#endif
-}
-
 int fmac_ctlfd_get(void);
 
 /*

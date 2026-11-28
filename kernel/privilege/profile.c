@@ -421,77 +421,6 @@ static int __set_all(struct nksu_profile_blob **bp, void *ctx)
 	return 0;
 }
 
-/* ── modify: set one field ── */
-
-struct set_field_ctx {
-	uid_t uid;
-	kernel_cap_t caps;
-	const char *domain;
-	int ns;
-};
-
-static int __set_caps(struct nksu_profile_blob **bp, void *ctx)
-{
-	struct set_field_ctx *s = ctx;
-	struct nksu_profile_blob *b = *bp;
-	u32 idx;
-
-	if (!blob_bsearch(b, s->uid, &idx))
-		return -ENOENT;
-
-	entry_set_caps(&b->entries[idx], s->caps);
-	return 0;
-}
-
-static int __set_domain(struct nksu_profile_blob **bp, void *ctx)
-{
-	struct set_field_ctx *s = ctx;
-	struct nksu_profile_blob *b = *bp;
-	struct nksu_profile_entry *e;
-	u32 idx, dlen, off;
-	int ret;
-
-	if (!blob_bsearch(b, s->uid, &idx))
-		return -ENOENT;
-
-	if (!s->domain || !s->domain[0]) {
-		b->entries[idx].domain_off = NKSU_DOMAIN_NONE;
-		b->entries[idx].domain_len = 0;
-		return 0;
-	}
-
-	dlen = strnlen(s->domain, NKSU_PROFILE_DOMAIN_MAX);
-	if (dlen == 0 || dlen == NKSU_PROFILE_DOMAIN_MAX)
-		return -EINVAL;
-
-	ret = arena_put(bp, s->domain, dlen, &off);
-	if (ret)
-		return ret;
-
-	/*
-	 * arena_put may have replaced the snapshot, but the clone preserves
-	 * the sorted entry order, so idx still addresses the same uid.
-	 */
-	b = *bp;
-	e = &b->entries[idx];
-	e->domain_off = off;
-	e->domain_len = dlen;
-	return 0;
-}
-
-static int __set_ns(struct nksu_profile_blob **bp, void *ctx)
-{
-	struct set_field_ctx *s = ctx;
-	struct nksu_profile_blob *b = *bp;
-	u32 idx;
-
-	if (!blob_bsearch(b, s->uid, &idx))
-		return -ENOENT;
-
-	b->entries[idx].ns = s->ns;
-	return 0;
-}
-
 /* ── modify: remove an entry ── */
 
 struct clear_ctx {
@@ -605,36 +534,6 @@ int nksu_profile_set(uid_t uid, uid_t root_uid, kernel_cap_t caps, const char *d
 	};
 
 	return blob_update(__set_all, &ctx);
-}
-
-int nksu_profile_set_caps(uid_t uid, kernel_cap_t caps)
-{
-	struct set_field_ctx ctx = {
-		.uid = uid,
-		.caps = caps,
-	};
-
-	return blob_update(__set_caps, &ctx);
-}
-
-int nksu_profile_set_domain(uid_t uid, const char *domain)
-{
-	struct set_field_ctx ctx = {
-		.uid = uid,
-		.domain = domain,
-	};
-
-	return blob_update(__set_domain, &ctx);
-}
-
-int nksu_profile_set_ns(uid_t uid, int ns)
-{
-	struct set_field_ctx ctx = {
-		.uid = uid,
-		.ns = ns,
-	};
-
-	return blob_update(__set_ns, &ctx);
 }
 
 /*

@@ -136,9 +136,6 @@ int nksu_profile_get(uid_t uid, uid_t *root_uid, kernel_cap_t *caps, int *ns, ch
 		     size_t domain_len);
 
 int nksu_profile_set(uid_t uid, uid_t root_uid, kernel_cap_t caps, const char *domain, int ns);
-int nksu_profile_set_caps(uid_t uid, kernel_cap_t caps);
-int nksu_profile_set_domain(uid_t uid, const char *domain);
-int nksu_profile_set_ns(uid_t uid, int ns);
 int nksu_profile_set_default(uid_t uid);
 
 int nksu_profile_clear(uid_t uid);
